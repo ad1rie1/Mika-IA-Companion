@@ -431,8 +431,10 @@ class Domain:
     #: son nom : celui de son dossier, et sa clé partout où le cadre range par domaine
     name: str
     #: les domaines dont il lit quelque chose (l'agenda lit l'application Microsoft du courrier) : une dépendance
-    #: dite ici, jamais cachée — son dossier ne nomme un autre domaine que s'il est dans cette liste, et un besoin
-    #: qui ne sert plus se retire (``tests/architecture/test_frame_names_no_domain.py``)
+    #: dite ici, jamais cachée — son dossier et ses paquets du dessous (son plugin ou sa faculté, son adaptateur, son
+    #: contrat, son port) ne nomment un autre domaine que s'il est dans cette liste, et un besoin qui ne sert plus se
+    #: retire (``tests/architecture/test_frame_names_no_domain.py``) ; deux domaines peuvent se lire l'un l'autre, et
+    #: le disent chacun. Rien d'autre ne la lit : ni l'ordre de ``DOMAINS``, ni le câblage, ni la sauvegarde
     needs: tuple[str, ...] = ()
     #: sa base à côté du journal, s'il en tient une
     base: Base | None = None

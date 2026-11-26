@@ -29,7 +29,7 @@ from mika.inspector.catalog import Destination, MenuLink
 
 PROJECTS = Domain(
     "projects",
-    needs=("forge", "tools"),
+    needs=("forge", "tools", "wakeup"),
     places={
         # une cage (leurs dépôts portent des liens vers le système). Jamais archivés, sous eux : les vues des ateliers
         # lus (ADR 0260, 0262) — la copie du dernier commit d'un autre atelier, que l'archive porte déjà avec son

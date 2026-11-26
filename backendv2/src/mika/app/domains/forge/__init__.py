@@ -16,6 +16,7 @@ from mika.inspector.catalog import Destination, MenuLink
 
 FORGE = Domain(
     "forge",
+    needs=("projects",),
     models=("mika.adapters.forge.bases",),
     places={"forge": Place("ses apps forgées, leurs versions et leurs bases", made=True)},
     settings="mika.app.domains.forge.settings",

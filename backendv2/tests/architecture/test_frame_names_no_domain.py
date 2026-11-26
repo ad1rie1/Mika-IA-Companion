@@ -3,17 +3,19 @@
 Ce que la couche ``app`` sait d'un domaine (le courrier, Teams, l'agenda…) vit dans son dossier, ``app/domains/<nom>/``,
 et sa fiche (``Domain``) dit ce qu'il apporte. Le **cadre** — tout le reste d'``app`` : le serveur, le schéma, la
 sauvegarde, l'API par personne, la console, et sous ``domains/`` tout module posé à côté du registre et de la forme
-d'une fiche — parcourt ``DOMAINS`` et ne nomme aucun domaine. Cette garde relit les imports de chaque source d'``app``
-(``ast`` : jamais un commentaire ; un import relatif se résout par le chemin du fichier ; seules les révisions des
-bases, ``migrations/<base>/versions/``, ne se lisent pas) :
+d'une fiche — parcourt ``DOMAINS`` et ne nomme aucun domaine. Cette garde relit les imports de chaque source d'``app``,
+et, pour le graphe des domaines, ceux de tout ``src`` (``ast`` : jamais un commentaire ; un import relatif se résout
+par le chemin du fichier ; seules les révisions des bases, ``migrations/<base>/versions/``, ne se lisent pas) :
 
 - **un fichier du cadre n'importe rien d'un domaine** : ni son plugin ou sa faculté, ni son adaptateur, son contrat
   ou son port (``PACKAGES``), ni son dossier (``mika.app.domains.<nom>`` — seulement ``mika.app.domains``) ;
 - **le cadre ne s'excuse pas** : le chantier qui a rangé ``app`` par domaine tenait la liste de ce qui restait à
   sortir, fichier par fichier ; elle est vide et n'existe plus. Seul ``FOREVER`` porte ce que le cadre nomme
   exprès, avec sa raison — une entrée qui ne sert plus (le fichier n'existe plus) fait échouer la garde ;
-- **un domaine ne nomme un autre domaine que s'il le déclare** (``Domain.needs``), et un besoin déclaré qui ne sert
-  plus se retire ;
+- **un domaine ne nomme un autre domaine que s'il le déclare** (``Domain.needs``) — dans son dossier d'``app`` comme
+  dans ses paquets du dessous (``PACKAGES`` : la Forge lit le contrat des projets, les projets celui des réveils) —,
+  et un besoin déclaré qui ne sert plus, ni dans son dossier ni dans ses paquets, se retire. Les besoins mutuels sont
+  permis : la fiche ne sert qu'à les dire ;
 - **le registre** (``app/domains/__init__.py``) liste les fiches et rien d'autre : il ne nomme aucun paquet du moteur ;
 - **une fiche n'importe rien d'``app``** (``app/domains/<nom>/__init__.py`` : seulement la forme d'une fiche,
   ``mika.app.domains.domain`` ; aux couches du dessous elle ne prend que de quoi se dire — une ``Destination``, un
@@ -173,21 +175,26 @@ FOREVER: dict[str, str] = {
 }
 
 
-def _package(where: str) -> list[str]:
-    """Le paquet d'un fichier d'``app``, par son chemin sous ``app/`` : ``server.py`` est dans ``mika.app``,
-    ``domains/mail/__init__.py`` et ``domains/mail/api.py`` dans ``mika.app.domains.mail``."""
-    return ["mika", "app", *where.split("/")[:-1]]
+#: où sont lus les chemins des sources d'``app`` : sous ``mika.app`` ; ceux du reste de ``src``, sous ``mika``
+APP_ROOT = ("app",)
 
 
-def imported(text: str, where: str) -> Iterator[str]:
+def _package(where: str, root: tuple[str, ...] = APP_ROOT) -> list[str]:
+    """Le paquet d'un fichier, par son chemin sous ``root`` (``app/`` par défaut) : ``server.py`` est dans
+    ``mika.app``, ``domains/mail/__init__.py`` et ``domains/mail/api.py`` dans ``mika.app.domains.mail`` ; sous
+    ``mika`` (``root=()``), ``plugins/forge/access.py`` est dans ``mika.plugins.forge``."""
+    return ["mika", *root, *where.split("/")[:-1]]
+
+
+def imported(text: str, where: str, root: tuple[str, ...] = APP_ROOT) -> Iterator[str]:
     """Les modules qu'un source importe, lus dans l'arbre : ``import a.b`` donne ``a.b`` ; ``from a.b import c`` donne
     ``a.b`` et ``a.b.c`` (``c`` peut être un module). Un import relatif se résout par le chemin du fichier lu sous
-    ``app/`` (``where``) : ``from .domains.mail import api``, dans ``server.py``, importe ``mika.app.domains.mail``."""
+    ``root`` (``where``) : ``from .domains.mail import api``, dans ``server.py``, importe ``mika.app.domains.mail``."""
     for node in ast.walk(ast.parse(text)):
         if isinstance(node, ast.Import):
             yield from (alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            package = _package(where)  # ``.`` : son paquet ; ``..`` : celui du dessus…
+            package = _package(where, root)  # ``.`` : son paquet ; ``..`` : celui du dessus…
             base = package[:max(0, len(package) - node.level + 1)] if node.level else []
             module = ".".join([*base, *([node.module] if node.module else [])])
             if module:
@@ -200,12 +207,12 @@ def _within(module: str, package: str) -> bool:
 
 
 def named(text: str, packages: Mapping[str, tuple[str, ...]], *, where: str, folders: bool = True,
-          shared: Mapping[str, str] = SHARED) -> set[str]:
-    """Les domaines qu'un source nomme par ses imports (``where`` : son chemin sous ``app/``) : un de leurs paquets
-    (``packages``), ou leur dossier sous ``app/domains/`` (``folders``). Un module logé dans le paquet d'un domaine sans
-    être à lui (``shared``) ne le nomme pas."""
+          shared: Mapping[str, str] = SHARED, root: tuple[str, ...] = APP_ROOT) -> set[str]:
+    """Les domaines qu'un source nomme par ses imports (``where`` : son chemin sous ``root``, ``app/`` par défaut) : un
+    de leurs paquets (``packages``), ou leur dossier sous ``app/domains/`` (``folders``). Un module logé dans le paquet
+    d'un domaine sans être à lui (``shared``) ne le nomme pas."""
     out: set[str] = set()
-    for module in imported(text, where):
+    for module in imported(text, where, root):
         if not module.startswith("mika."):
             continue
         rest = module[len("mika."):]
@@ -217,12 +224,33 @@ def named(text: str, packages: Mapping[str, tuple[str, ...]], *, where: str, fol
     return out
 
 
+def owner_of(where: str, packages: Mapping[str, tuple[str, ...]], shared: Mapping[str, str] = SHARED) -> str | None:
+    """Le domaine à qui est un source hors d'``app``, par son chemin sous ``mika/`` (``plugins/forge/access.py`` : la
+    Forge) : celui dont un paquet le contient, sauf s'il loge chez lui sans être à lui (``shared``) ; aucun sinon."""
+    parts = where.removesuffix(".py").split("/")
+    module = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+    if any(_within(module, own) for own in shared):
+        return None
+    return next((domain for domain, owned in packages.items() if any(_within(module, p) for p in owned)), None)
+
+
 def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ...]], forever: Mapping[str, str],
-             needs: Mapping[str, tuple[str, ...]]) -> list[str]:
+             needs: Mapping[str, tuple[str, ...]], below: Mapping[str, str] | None = None,
+             shared: Mapping[str, str] = SHARED) -> list[str]:
     """Ce qui enfreint la politique, en phrases. ``sources`` : le texte de chaque fichier d'``app``, par son chemin
-    sous ``app/`` ; ``needs`` : ce que la fiche de chaque domaine déclare lire des autres."""
+    sous ``app/`` ; ``below`` : celui de chaque fichier du reste de ``src``, par son chemin sous ``mika/`` (le graphe
+    des domaines s'y lit aussi) ; ``needs`` : ce que la fiche de chaque domaine déclare lire des autres."""
     out: list[str] = []
     used: dict[str, set[str]] = {}
+    # sous ``app`` : un paquet d'un domaine (``PACKAGES``) ne nomme un autre domaine que si sa fiche le déclare
+    for path, text in sorted((below or {}).items()):
+        own = owner_of(path, packages, shared)
+        if own is None:
+            continue
+        others = named(text, packages, where=path, shared=shared, root=()) - {own}
+        used.setdefault(own, set()).update(others)
+        out += [f"{path} nomme le domaine « {d} », que la fiche de « {own} » ne déclare pas (Domain.needs)"
+                for d in sorted(others - set(needs.get(own, ())))]
     for path, text in sorted(sources.items()):
         parts = path.split("/")
         # le cadre : tout ce qui n'est pas sous ``domains/``, et sous ``domains/`` un module à côté du registre et de
@@ -231,10 +259,10 @@ def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ..
             if path in forever:
                 continue
             out += [f"{path} nomme le domaine « {d} » : le cadre lit les fiches (DOMAINS), il ne nomme aucun domaine"
-                    for d in sorted(named(text, packages, where=path))]
+                    for d in sorted(named(text, packages, where=path, shared=shared))]
         elif len(parts) == 2:  # le registre et la forme d'une fiche
             out += [f"{path} nomme un paquet du domaine « {d} » : le registre liste les fiches, rien d'autre"
-                    for d in sorted(named(text, packages, where=path, folders=False))]
+                    for d in sorted(named(text, packages, where=path, folders=False, shared=shared))]
         else:  # le dossier d'un domaine
             own = parts[1]
             if parts[2:] == ["__init__.py"]:  # sa fiche : elle nomme ses parts, elle n'importe rien
@@ -244,13 +272,13 @@ def offences(sources: Mapping[str, str], *, packages: Mapping[str, tuple[str, ..
             if own not in packages:
                 out.append(f"{path} : « {own} » n'est pas un domaine que cette garde connaît (PACKAGES)")
                 continue
-            others = named(text, packages, where=path) - {own}
+            others = named(text, packages, where=path, shared=shared) - {own}
             used.setdefault(own, set()).update(others)
             out += [f"{path} nomme le domaine « {d} », que la fiche de « {own} » ne déclare pas (Domain.needs)"
                     for d in sorted(others - set(needs.get(own, ())))]
     out += [f"{path} est excusé dans FOREVER mais n'existe plus" for path in sorted(set(forever) - set(sources))]
-    out += [f"la fiche de « {own} » déclare le besoin « {d} », que son dossier ne nomme pas : le retirer"
-            for own, declared in sorted(needs.items()) for d in sorted(set(declared) - used.get(own, set()))]
+    out += [f"la fiche de « {own} » déclare le besoin « {d} », que ni son dossier ni ses paquets ne nomment : le "
+            "retirer" for own, declared in sorted(needs.items()) for d in sorted(set(declared) - used.get(own, set()))]
     return out
 
 
@@ -267,14 +295,24 @@ def _sources(root: Path = APP) -> dict[str, str]:
             if "__pycache__" not in parts and not _revision(parts)}
 
 
+def _below(root: Path = SRC) -> dict[str, str]:
+    """Le texte de chaque source de ``src/mika`` hors d'``app``, par son chemin sous ``mika/`` : le graphe des
+    domaines s'y lit, par ``PACKAGES``."""
+    return {"/".join(p.relative_to(root).parts): p.read_text(encoding="utf-8") for p in sorted(root.rglob("*.py"))
+            if "__pycache__" not in p.parts and p.relative_to(root).parts[0] != "app"}
+
+
 def _exists(module: str) -> bool:
     path = SRC.joinpath(*module.split("."))
     return path.is_dir() or path.with_suffix(".py").is_file()
 
 
 def test_the_frame_names_no_domain():
-    found = offences(_sources(), packages=PACKAGES, forever=FOREVER, needs={d.name: d.needs for d in DOMAINS})
-    assert not found, "\n".join(found)
+    below = _below()
+    assert "plugins/forge/access.py" in below and not any(p.startswith("app/") for p in below)
+    found = offences(_sources(), packages=PACKAGES, forever=FOREVER, needs={d.name: d.needs for d in DOMAINS},
+                     below=below)
+    assert not found, "\n".join([*found, "(ARCHITECTURE.md, « Écrire un domaine » ; ADR 0310)"])
 
 
 def test_every_package_of_a_domain_exists():
@@ -793,8 +831,10 @@ TOY_PACKAGES = {"mail": ("plugins.email", "adapters.mail"), "agenda": ("plugins.
 
 
 def _toy(sources: Mapping[str, str], *, forever: Mapping[str, str] | None = None,
-         needs: Mapping[str, tuple[str, ...]] | None = None) -> list[str]:
-    return offences(sources, packages=TOY_PACKAGES, forever=forever or {}, needs=needs or {})
+         needs: Mapping[str, tuple[str, ...]] | None = None, below: Mapping[str, str] | None = None,
+         shared: Mapping[str, str] = SHARED) -> list[str]:
+    return offences(sources, packages=TOY_PACKAGES, forever=forever or {}, needs=needs or {}, below=below,
+                    shared=shared)
 
 
 def test_the_guard_passes_a_frame_that_reads_the_registry():
@@ -840,7 +880,32 @@ def test_a_domain_names_another_only_if_its_card_says_so():
         "domains/agenda/api.py nomme le domaine « mail », que la fiche de « agenda » ne déclare pas (Domain.needs)"]
     assert _toy(sources, needs={"agenda": ("mail",)}) == []
     assert _toy({"domains/agenda/api.py": "from mika.plugins.agenda import AGENDA\n"}, needs={"agenda": ("mail",)}) == [
-        "la fiche de « agenda » déclare le besoin « mail », que son dossier ne nomme pas : le retirer"]
+        "la fiche de « agenda » déclare le besoin « mail », que ni son dossier ni ses paquets ne nomment : le retirer"]
+
+
+def test_a_package_of_a_domain_below_app_names_another_only_if_its_card_says_so():
+    """Sous ``app``, un paquet d'un domaine (``PACKAGES``) qui importe celui d'un autre le nomme aussi : sa fiche le
+    déclare, et ce besoin sert même si son dossier d'``app`` ne nomme pas l'autre."""
+    below = {"plugins/agenda/tools.py": "from mika.adapters.mail.oauth import Grant\n"}
+    assert _toy({}, below=below) == [
+        "plugins/agenda/tools.py nomme le domaine « mail », que la fiche de « agenda » ne déclare pas (Domain.needs)"]
+    assert _toy({}, below=below, needs={"agenda": ("mail",)}) == []  # le besoin sert, sous app seulement
+    # un import relatif se lit depuis le fichier, sous ``mika/`` ; ``__init__.py`` est son propre paquet
+    assert _toy({}, below={"plugins/agenda/__init__.py": "from ..email import EMAIL\n"}) == [
+        "plugins/agenda/__init__.py nomme le domaine « mail », que la fiche de « agenda » ne déclare pas "
+        "(Domain.needs)"]
+    assert _toy({}, below={"plugins/agenda/tools.py": "from . import rights\nfrom .rights import x\n"}) == []
+    # ce qui n'est à aucun domaine (le cœur, le noyau) lit qui il veut : la garde ne le regarde pas
+    assert _toy({}, below={"contracts/agency.py": "from mika.plugins.email import x\n",
+                           "kernel/x.py": "from mika.plugins.agenda import y\n"}) == []
+    # ce qui loge chez un domaine sans être à lui n'est pas à lui
+    lodged = {"adapters/mail/relay.py": "from mika.plugins.agenda import AGENDA\n"}
+    assert _toy({}, below=lodged) == [
+        "adapters/mail/relay.py nomme le domaine « agenda », que la fiche de « mail » ne déclare pas (Domain.needs)"]
+    assert _toy({}, below=lodged, shared={"adapters.mail.relay": "une pièce du cadre"}) == []
+    assert owner_of("adapters/mail/relay.py", TOY_PACKAGES) == "mail"
+    assert owner_of("plugins/agenda/__init__.py", TOY_PACKAGES) == "agenda"
+    assert owner_of("plugins/agendas/x.py", TOY_PACKAGES) is None  # un nom voisin n'est pas le paquet
 
 
 def test_a_card_imports_nothing_but_its_form():
