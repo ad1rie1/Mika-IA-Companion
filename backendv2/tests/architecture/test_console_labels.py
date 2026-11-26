@@ -191,6 +191,16 @@ def test_no_label_names_something_that_no_longer_exists():
     assert not any(stale.values()), f"libellés sans objet dans app/console.py : {stale}"
 
 
+def test_no_family_is_described_that_no_longer_exists():
+    """Réglages › Droits décrit chaque famille de ses outils à l'opératrice (``app/console.py::FAMILY_ABOUT`` : celles
+    du cadre, puis celles que disent les fiches, ``labels["about"]``) : une description d'une famille renommée ou
+    retirée ne se montrerait plus, et la nouvelle n'en aurait pas — sans bruit."""
+    declared = {spec.bundle for spec in _registry().tools.values()}
+    assert {"memory", "email", "agenda"} <= declared  # le garde voit les outils des plugins
+    stale = sorted(set(console.FAMILY_ABOUT) - declared)
+    assert not stale, f"descriptions sans famille (app/console.py, ou labels[\"about\"] d'une fiche) : {stale}"
+
+
 def test_every_port_a_tool_needs_is_named_with_its_settings_page():
     """La fiche d'un outil qui attend un port pas prêt disait « non — « imaging » n'est pas configuré » : la clé du
     port, sans dire où le régler (C6-04). Chaque port qu'un outil du registre composé déclare (``needs=``) a sa phrase

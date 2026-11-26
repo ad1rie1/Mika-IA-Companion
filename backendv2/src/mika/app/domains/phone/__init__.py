@@ -39,5 +39,11 @@ PHONE = Domain(
                    "phone.settled": "Une réponse proposée sur le téléphone : partie, laissée ou expirée"},
         "capabilities": {"phone.send": "Réponse téléphone"},
         "enrichers": {"phone": "Les messages du téléphone"},
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "phone":
+                "lire les messages (WhatsApp, Messenger, SMS) du téléphone de la personne, préparer une réponse "
+                "à sa place",
+        },
     },
 )

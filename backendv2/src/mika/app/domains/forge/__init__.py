@@ -63,5 +63,10 @@ FORGE = Domain(
         "enrichers": {"apps": "Ses apps forgées", "calls": "Ses demandes à ses apps",
                       "signals": "Ce qu'une app a mis dans sa file",
                       "news": "Ce que ses apps ont trouvé pour la personne"},
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "forge": "se fabriquer une app qui surveille ou relève pour elle : l'écrire, la tester, la commander",
+            "forge_signals": "lire la file de signaux d'une de ses apps, et dire ce qu'elle en fait",
+        },
     },
 )

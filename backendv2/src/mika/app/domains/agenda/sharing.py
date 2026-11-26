@@ -85,4 +85,4 @@ def sharer(frame: Any, s: Shared, name: Callable[[str], str]) -> str:
 
 
 SHARING = SharingPart("agenda", every=every, share=share, write=write, sharer=sharer, key_limit=200, names=names_of,
-                      word="agenda")
+                      word="agenda", article="l'")

@@ -62,4 +62,4 @@ async def share(call: Call, settings: Any, key: str, person: str, level: str) ->
     await port.settle(key, access)
 
 
-SHARING = SharingPart("mcp", every=every, share=share, word="service")
+SHARING = SharingPart("mcp", every=every, share=share, word="service", article="le ")

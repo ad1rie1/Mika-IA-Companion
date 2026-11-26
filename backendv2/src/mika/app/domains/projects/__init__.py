@@ -206,5 +206,15 @@ PROJECTS = Domain(
             "projects_asks": "Les demandes de son projet aux projets qu'il lit (où chacune en est)",
             "projects_answer": "La réponse à sa demande d'aide (un projet)",
         },
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "projects":
+                "ouvrir, accepter ou clore un projet ; en l'exécutant, son carnet, ses décisions, ses objectifs",
+            "project_review":
+                "relire le travail d'un projet avant qu'il sorte : lire le commit relu, y lancer une "
+                "commande (dans une copie, à part de l'atelier), rendre un verdict — rien qui écrit (une "
+                "exécution à part, ADR 0276)",
+            "workshop": "l'atelier d'un projet : lire, écrire, lancer des programmes isolés, son dépôt git",
+        },
     },
 )

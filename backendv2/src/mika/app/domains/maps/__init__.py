@@ -64,5 +64,10 @@ MAPS = Domain(
         # prêt seulement quand la composition ne le branche pas ; le serveur le branche toujours, et chaque appel dit
         # alors ce qui manque (rien de réglé, un serveur qui ne répond pas)
         "needs": {"maps": ("les lieux, les adresses et les itinéraires ne sont pas branchés", "lieux")},
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "location": "savoir où est la personne qui lui parle, d'après ce que son téléphone en a dit",
+            "trips": "la carte : chercher un lieu, calculer un trajet, préparer un voyage avec la personne",
+        },
     },
 )

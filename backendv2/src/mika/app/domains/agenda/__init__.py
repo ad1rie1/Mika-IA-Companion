@@ -90,5 +90,11 @@ AGENDA = Domain(
             # l'a pas ; sa page de réglages vient avec la console de l'agenda (lot 5), le lien ne paraît qu'une fois là
             "agenda": ("ses calendriers ne sont pas branchés sur ce serveur", "agendas"),
         },
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "agenda":
+                "lire les agendas de la personne qui lui parle, lui trouver un créneau, y ajouter, modifier ou supprimer "
+                "un rendez-vous, répondre à une invitation — selon le tableau de chaque agenda",
+        },
     },
 )

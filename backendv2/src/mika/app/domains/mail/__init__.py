@@ -66,5 +66,9 @@ MAIL = Domain(
         "capabilities": {"email.send": "Mail"},
         "enrichers": {"mail": "Son courrier"},
         "signals": {"mail": "un mail", "sent_by_operator": "un mail envoyé à sa place"},
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "email": "lister, chercher et lire le courrier des boîtes qu'elle lit, le ranger, préparer une réponse",
+        },
     },
 )

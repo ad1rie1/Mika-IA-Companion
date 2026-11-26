@@ -43,5 +43,9 @@ WAKEUP = Domain(
                    "wakeup.expired": "Un réveil par API expiré sans avoir été traité",
                    "wakeup.cancelled": "Un réveil par API annulé"},
         "enrichers": {"wakeup": "Ses réveils par API"},
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "wakeup": "conclure un réveil par API : le compte rendu de ce que l'appel lui a fait faire",
+        },
     },
 )

@@ -28,5 +28,11 @@ CONTACTS = Domain(
             "contacts.portrait": "Se faire une idée de qui échange avec un compte, à partir de ses derniers messages",
             "contacts.match": "Réunir les fiches de l'annuaire qui sont la même personne (le juge des rapprochements)",
         },
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "contacts":
+                "retrouver ce qu'elle sait d'un contact qu'elle lit pour la personne (où elle le voit, ce qu'elle a "
+                "compris de ses derniers messages), seulement ce que les comptes de cette personne en montrent",
+        },
     },
 )

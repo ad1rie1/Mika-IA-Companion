@@ -15,8 +15,9 @@ crée aucun : donner reste au propriétaire. Le même geste est sur la fiche d'u
 retire (``SharingPart.write``), où mène sa ressource et où il se retire sinon (sa part de console :
 ``ConsolePart.shared``, ``ConsolePart.unshared`` — ``share_consoles``).
 
-Une famille se décrit ici pour l'opératrice, à la troisième personne (``FAMILY_ABOUT``) : la phrase que lit le modèle
-(sa voix, ``persona/voix.yaml``) lui parle à elle (« tes rappels… »), et la console ne la recopie pas.
+Une famille se décrit pour l'opératrice, à la troisième personne, dans la carte de la console
+(``app/console.py::FAMILY_ABOUT``, et la fiche de son domaine : ``labels["about"]``) : la phrase que lit le modèle (sa
+voix, ``persona/voix.yaml``) lui parle à elle (« tes rappels… »), et la console ne la recopie pas.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
+from mika.app.console import FAMILY_ABOUT
 from mika.app.domains import DOMAINS, ConsolePart, TablePart, part
 from mika.app.handmade.access import people_with_accounts
 from mika.app.me import Denied, missing, sharing
@@ -184,42 +186,6 @@ def _tool_row(ui: UI, spec: Any, got: Mapping[str, Grant] | None) -> dict[str, A
             "closed": got is not None and (got.get(spec.name) is None or got[spec.name].closed)}
 
 
-#: ce que fait chaque famille de ses propres outils, dit à l'opératrice (sa vie interne) ; une famille absente n'a pas
-#: de description, jamais celle de sa voix, écrite pour le modèle
-FAMILY_ABOUT: Mapping[str, str] = {
-    "agenda": "lire les agendas de la personne qui lui parle, lui trouver un créneau, y ajouter, modifier ou supprimer "
-              "un rendez-vous, répondre à une invitation — selon le tableau de chaque agenda",
-    "attachments": "retrouver, rouvrir et relier ce qu'on lui a envoyé (photos, documents, messages vocaux)",
-    "attention": "ce qui lui trotte dans la tête en ce moment",
-    "camera": "regarder par la caméra, sur le moment",
-    "contacts": "retrouver ce qu'elle sait d'un contact qu'elle lit pour la personne (où elle le voit, ce qu'elle a "
-                "compris de ses derniers messages), seulement ce que les comptes de cette personne en montrent",
-    "email": "lister, chercher et lire le courrier des boîtes qu'elle lit, le ranger, préparer une réponse",
-    "forge": "se fabriquer une app qui surveille ou relève pour elle : l'écrire, la tester, la commander",
-    "forge_signals": "lire la file de signaux d'une de ses apps, et dire ce qu'elle en fait",
-    "goals": "ses rappels et ses explorations ; noter une séance et en rendre compte",
-    "identity": "douter d'une identité, défaire un lien",
-    "imaging": "dessiner pour la personne (quelques minutes par image), montrer un dessin prêt",
-    "location": "savoir où est la personne qui lui parle, d'après ce que son téléphone en a dit",
-    "memory": "fouiller ses souvenirs et ce qu'elle sait ; dire qu'une promesse est tenue",
-    "phone": "lire les messages (WhatsApp, Messenger, SMS) du téléphone de la personne, préparer une réponse "
-             "à sa place",
-    "projects": "ouvrir, accepter ou clore un projet ; en l'exécutant, son carnet, ses décisions, ses objectifs",
-    "rss": "ses flux d'actualité : les derniers titres, lire un article",
-    "self": "relire ce qu'elle a écrit dans son journal un jour passé",
-    "shares": "envoyer à la personne un texte qu'elle écrit ou un fichier d'un projet ; relire un envoi",
-    "social": "relire qui lui écrit et ce qu'elle sait de cette personne, quand son état ne le dit pas déjà",
-    "teams": "lister et relire les conversations Teams des comptes qu'elle lit, préparer une réponse",
-    "trips": "la carte : chercher un lieu, calculer un trajet, préparer un voyage avec la personne",
-    "wakeup": "conclure un réveil par API : le compte rendu de ce que l'appel lui a fait faire",
-    "project_review": "relire le travail d'un projet avant qu'il sorte : lire le commit relu, y lancer une "
-                      "commande (dans une copie, à part de l'atelier), rendre un verdict — rien qui écrit (une "
-                      "exécution à part, ADR 0276)",
-    "workshop": "l'atelier d'un projet : lire, écrire, lancer des programmes isolés, son dépôt git",
-    "world": "se déplacer et faire des choses dans sa chambre (on la voit le faire)",
-}
-
-
 def sections(ui: UI, got: Mapping[str, Any] | None, query: str) -> list[dict[str, Any]]:
     """Les ressources, par sorte : sa vie interne (ses familles, par lot), les apps de la Forge, les services MCP,
     ses projets, ses canaux, les agendas (ADR 0309) — chacune avec ses outils décrits et le lien de son détail."""
@@ -307,10 +273,12 @@ def table_of(key: str) -> TablePart | None:
 
 
 def editor(ui: UI, key: str, csrf: str) -> dict[str, Any] | None:
-    """Le tableau d'une ressource qui se règle ici, à régler (``TablePart.editor`` : celui d'un agenda) ; ``None`` :
-    aucune part ne règle le sien ici."""
+    """Le tableau d'une ressource qui se règle ici, à régler (``TablePart.editor`` : celui d'un agenda), avec la clé
+    de son détail des accès, où « ← Le détail des accès » ramène (``detail``), et le nom du lien vers sa fiche
+    (``named``, ``TablePart.named``) ; ``None`` : aucune part ne règle le sien ici."""
     ruled = table_of(key)
-    return ruled.editor(ui, key, csrf) if ruled is not None else None
+    found = ruled.editor(ui, key, csrf) if ruled is not None else None
+    return {**found, "detail": key, "named": ruled.named} if ruled is not None and found is not None else None
 
 
 def detail(ui: UI, key: str) -> dict[str, Any] | None:
@@ -367,8 +335,9 @@ def share_consoles() -> dict[str, ConsolePart]:
 
 
 def _resource(s: sharing.Shared) -> str:
-    article = "la " if s.kind == "mail" else "l'" if s.kind == "agenda" else "le "
-    return f"{article}{sharing.parts()[s.kind].word} « {s.title} »"
+    """La ressource d'un partage dans une phrase : son article et son mot, que sa part dit (« la boîte « Perso » »)."""
+    found = sharing.parts()[s.kind]
+    return f"{found.article}{found.word} « {s.title} »"
 
 
 def _owner(ui: UI, owner: str) -> str:

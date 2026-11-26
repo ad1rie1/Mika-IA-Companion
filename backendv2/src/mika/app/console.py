@@ -341,6 +341,22 @@ BUNDLE_LABELS: dict[str, str] = _named("bundles", {
     "attention": "Ses pensées", "self": "Son journal", "social": "Qui lui parle",
 })
 
+#: Ce que fait chaque famille de ses propres outils (un lot), dit à l'opératrice dans Réglages › Droits, à la
+#: troisième personne : jamais la phrase de sa voix, écrite pour le modèle (« tes rappels… »). Celles d'un domaine
+#: sont dans sa fiche (``labels["about"]``) ; une famille sans description n'en a pas.
+FAMILY_ABOUT: dict[str, str] = _named("about", {
+    "attachments": "retrouver, rouvrir et relier ce qu'on lui a envoyé (photos, documents, messages vocaux)",
+    "attention": "ce qui lui trotte dans la tête en ce moment",
+    "goals": "ses rappels et ses explorations ; noter une séance et en rendre compte",
+    "identity": "douter d'une identité, défaire un lien",
+    "imaging": "dessiner pour la personne (quelques minutes par image), montrer un dessin prêt",
+    "memory": "fouiller ses souvenirs et ce qu'elle sait ; dire qu'une promesse est tenue",
+    "self": "relire ce qu'elle a écrit dans son journal un jour passé",
+    "shares": "envoyer à la personne un texte qu'elle écrit ou un fichier d'un projet ; relire un envoi",
+    "social": "relire qui lui écrit et ce qu'elle sait de cette personne, quand son état ne le dit pas déjà",
+    "world": "se déplacer et faire des choses dans sa chambre (on la voit le faire)",
+})
+
 #: À qui est une demande qui attend un accord, en un mot court, quand le nom de sa faculté ne le dit pas bien (« Forge »
 #: plutôt que « Moteur de la Forge ») : ce que dit la fiche de son domaine (``labels["owners"]``).
 OWNER_LABELS: dict[str, str] = _named("owners", {})

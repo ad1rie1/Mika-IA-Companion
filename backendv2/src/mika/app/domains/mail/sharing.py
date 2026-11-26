@@ -70,4 +70,4 @@ def sharer(frame: Any, s: Shared, name: Callable[[str], str]) -> str:
     return email_p.approver_name(frame, s.key)
 
 
-SHARING = SharingPart("mail", every=every, share=share, write=write, sharer=sharer, word="boîte")
+SHARING = SharingPart("mail", every=every, share=share, write=write, sharer=sharer, word="boîte", article="la ")

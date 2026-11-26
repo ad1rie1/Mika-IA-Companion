@@ -326,6 +326,8 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
         assert shared is None or isinstance(shared, SharingPart), d.name
         if shared is not None:  # sa part des partages : une sorte de KINDS, ses mots, ce qu'elle appelle
             assert shared.kind in SHARED_KINDS and shared.word and shared.key_limit > 0, d.name
+            # l'article de son mot, qui le précède dans une phrase (« la boîte », « l'agenda »)
+            assert shared.article.strip() and shared.article.endswith((" ", "'")), d.name
             assert callable(shared.every) and callable(shared.share), d.name
             assert all(f is None or callable(f) for f in (shared.write, shared.sharer, shared.names)), d.name
         held = part(d.accounts, "ACCOUNTS")
@@ -350,6 +352,7 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert console.table is None or isinstance(console.table, TablePart), d.name
             if console.table is not None:
                 assert console.table.prefix.endswith(":") and len(console.table.prefix) > 1, d.name
+                assert console.table.named.strip(), d.name  # le lien vers la fiche de sa ressource, en mots
                 assert all(callable(f) for f in (console.table.edit, console.table.editor, console.table.routes)), d.name
         sheet = _person_part(d)
         assert sheet is None or isinstance(sheet, PersonPart), d.name

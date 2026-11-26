@@ -73,5 +73,9 @@ TEAMS = Domain(
         "capabilities": {"teams.send": "Réponse Teams"},
         "enrichers": {"teams": "Ses conversations Teams"},
         "signals": {"teams_message": "un message Teams", "teams_sent": "un message Teams envoyé à sa place"},
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "teams": "lister et relire les conversations Teams des comptes qu'elle lit, préparer une réponse",
+        },
     },
 )

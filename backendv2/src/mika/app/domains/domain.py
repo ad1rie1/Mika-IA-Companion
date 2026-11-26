@@ -159,6 +159,9 @@ class SharingPart:
     #: l'écriture ; il lève ``Denied``. Ce qui vaut pour toutes les sortes (qui reçoit, le niveau, des réglages
     #: branchés) est jugé avant, par le cadre, qui lui passe les réglages (``settings``)
     share: Callable[..., Awaitable[None]]
+    #: l'article de son mot, tel qu'il le précède dans une phrase (« la », « le », suivis d'un espace ; « l' ») :
+    #: « Retirer à Léa son accès à la boîte « Perso » ? » (Réglages › Droits › Partages, la fiche d'une personne)
+    article: str
     #: ranger ou retirer un partage sans juger qui demande (l'opérateur qui le retire dans Réglages › Droits ›
     #: Partages) : ``write(settings, reconfigure, key, person, level, check)``, asynchrone (``check`` juge sa fiche
     #: relue, sous le verrou des réglages) ; ``None`` : il ne se range pas ainsi (un service se règle sur ses lignes
@@ -321,6 +324,9 @@ class TablePart:
     editor: Callable[..., Any]
     #: où son formulaire s'enregistre : ``routes(ui)`` rend des ``Route``
     routes: Callable[..., list[Any]]
+    #: au-dessus du tableau à régler, le lien vers la fiche de sa ressource, en mots (« La fiche de l'agenda ») ; son
+    #: adresse : ``fiche``, dans ce que rend ``editor``
+    named: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -414,8 +420,9 @@ class Domain:
     #: où l'on s'en sert (nom, « destination/onglet ») ; sa place : ``app/settings_sections/plugins.py::ORDER``
     plugins: Mapping[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = field(default_factory=dict)
     #: ses noms en français dans la console, par sorte de libellé (``inspector.catalog.Labels`` : ``faculties``,
-    #: ``sections``, ``processes``, ``events``…) puis par clé ; la carte de la console les réunit
-    #: (``app/console.py``), et un nom dit deux fois y est refusé
+    #: ``sections``, ``processes``, ``events``… ; et ``about`` : ce que fait chaque famille de ses outils, dit à
+    #: l'opératrice dans Réglages › Droits) puis par clé ; la carte de la console les réunit (``app/console.py``), et
+    #: un nom dit deux fois y est refusé
     labels: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 

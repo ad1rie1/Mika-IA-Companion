@@ -143,4 +143,4 @@ def routes(ui: UI) -> list[Route]:
     return [Route(AGENDA_TABLE, ui.guarded(agenda), methods=["POST"])]
 
 
-TABLE = TablePart("agenda:", edit=edit, editor=agenda_editor, routes=routes)
+TABLE = TablePart("agenda:", edit=edit, editor=agenda_editor, routes=routes, named="La fiche de l'agenda")

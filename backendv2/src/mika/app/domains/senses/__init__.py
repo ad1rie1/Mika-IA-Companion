@@ -52,5 +52,10 @@ SENSES = Domain(
                    "camera.seen": "Ce que la caméra a vu", "sensors.sensed": "Un appareil a signalé"},
         "enrichers": {"headlines": "Les titres de ses flux", "views": "Ce que voit la caméra"},
         "needs": {"feeds": ("elle ne suit aucun flux", "flux")},
+        # ce que fait chaque famille de ses outils, dit à l'opératrice (Réglages › Droits)
+        "about": {
+            "camera": "regarder par la caméra, sur le moment",
+            "rss": "ses flux d'actualité : les derniers titres, lire un article",
+        },
     },
 )

@@ -70,4 +70,5 @@ def sharer(frame: Any, s: Shared, name: Callable[[str], str]) -> str:
     return teams_p.writer_of(frame, s.key)
 
 
-SHARING = SharingPart("teams", every=every, share=share, write=write, sharer=sharer, word="compte Teams")
+SHARING = SharingPart("teams", every=every, share=share, write=write, sharer=sharer, word="compte Teams",
+                      article="le ")
