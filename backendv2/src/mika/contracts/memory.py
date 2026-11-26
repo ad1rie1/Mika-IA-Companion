@@ -518,7 +518,6 @@ class SituationEnded(Payload):
 
 #: comment un moment a tourné (ADR 0086) : il a eu lieu, il est annulé, déplacé, ou personne ne l'a jamais dit
 HAPPENED, CANCELLED, MOVED, UNKNOWN = "happened", "cancelled", "moved", "unknown"
-OUTCOMES = (HAPPENED, CANCELLED, MOVED, UNKNOWN)
 #: ce qui est arrivé, au regard d'un moment attendu : il a eu lieu (1), il n'a pas eu lieu (0) ; déplacé, il n'a pas
 #: eu lieu ce jour-là, mais il aura lieu (à moitié) — ne pas savoir n'a pas de valeur
 OUTCOME_VALUE = {HAPPENED: 1.0, CANCELLED: 0.0, MOVED: 0.5}

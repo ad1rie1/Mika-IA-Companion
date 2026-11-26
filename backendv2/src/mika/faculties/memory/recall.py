@@ -629,16 +629,6 @@ def _presumer(frame: Frame, memo: dict[str, str]) -> Callable[[str], str]:
     return lambda key: presumed_of(frame, key, memo)
 
 
-def promises_to(frame: Frame, store: Any, person: str) -> list[tuple[int, str, int | None]]:
-    """Les promesses en cours faites à cette personne, avec leur texte. Ne
-    vérifie pas la porte de sa fiche (``private_ok``) : à l'appelant de le faire."""
-    pending = frame.get(c.PROMISES_TO(person))
-    if not pending:
-        return []
-    texts = {i: it.text for i, it in items_by_id(store, [pr.id for pr in pending]).items()}
-    return [(pr.id, texts.get(pr.id, ""), pr.due) for pr in pending if texts.get(pr.id)]
-
-
 async def search(vectors: Any, query: str, context: str, k: int, **kw: Any) -> tuple[dict[int, float],
                                                                                 dict[int, float]]:
     """Les plus proches du dernier message, et de la conversation qui le

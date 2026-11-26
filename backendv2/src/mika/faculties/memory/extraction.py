@@ -402,11 +402,6 @@ def sensitivity(value: str | None, *, has_person: bool) -> int:
     return int(Sensitivity.PERSONAL if has_person else Sensitivity.ANODYNE)
 
 
-def due(value: str | None, tz: ZoneInfo) -> int | None:
-    got = when(value, tz)
-    return got[0] if got else None
-
-
 def when(value: str | None, tz: ZoneInfo) -> tuple[int, bool] | None:
     """Une date dite (AAAA-MM-JJ, avec l'heure si elle est dite) : l'instant,
     et si c'est le jour entier (alors 18 h, la fin d'une journée : « jeudi,
