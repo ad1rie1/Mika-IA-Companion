@@ -25,7 +25,7 @@ import pytest
 from mika.adapters.llm.config import BackendSpec, LLMConfig
 from mika.adapters.maps.quota import QUOTAS_FILE, QuotaStore
 from mika.adapters.store_sql import SqlStore
-from mika.adapters.workshop import VIEWS_DIRNAME
+from mika.adapters.workshop import REVIEWS_DIRNAME, VIEWS_DIRNAME
 from mika.app import backup, datadir
 from mika.app.cli import main
 from mika.app.cli.journal import replay_verify
@@ -420,6 +420,8 @@ def test_the_views_of_other_workshops_are_never_archived(tmp_path):
         "ateliers/projet-2/liens/utiles.md"}
     assert links == [] and backup._members(data) == files
     assert VIEWS_DIRNAME == ".vues" and ("ateliers", VIEWS_DIRNAME) in backup.SKIPPED_UNDER
+    # la fiche des projets les nomme sans importer leur adaptateur : les mêmes noms (la copie d'une relecture aussi)
+    assert ("ateliers", REVIEWS_DIRNAME) in backup.SKIPPED_UNDER
 
 
 def test_an_archive_whose_link_would_escape_the_folder_is_refused(tmp_path, monkeypatch):
@@ -493,6 +495,7 @@ def test_the_map_counters_are_archived_and_never_put_back_over_newer_ones(tmp_pa
     with tarfile.open(made.archive) as tar:
         names = tar.getnames()
     assert f"data/{QUOTAS_FILE}" in names and not any(n.endswith("cartes/lieux.db") for n in names)
+    assert QUOTAS_FILE in backup.KEPT_UNDER_SKIPPED  # la fiche de la carte le nomme sans importer son adaptateur
     fresh = tmp_path / "neuve"
     backup.restore(made.archive, fresh)
     assert QuotaStore(fresh / QUOTAS_FILE).month_used("google-fiches", "2026-11") == 640

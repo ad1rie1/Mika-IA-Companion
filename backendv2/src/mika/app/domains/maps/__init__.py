@@ -10,23 +10,27 @@ part du direct (``live.py``), leur commande (``cli.py`` : ``mika carte``), leur 
 la position que donne un téléphone et la case de la carte qui se précharge, les bulles de ses messages) et leur part
 de la console (``console/`` : leurs rubriques de Réglages › Carte et téléphone, l'onglet Voyages et l'onglet Sa
 position de la fiche d'une personne, le GPX d'un voyage). Leur dossier du dossier de données est ``cartes/``
-(``places``, ADR 0193). Ils lisent ses sens : Sa position reprend les morceaux de Ses sens › Localisation.
+(``places``, ADR 0193 : ce qu'il garde, que la sauvegarde ne le prend pas, sauf ses compteurs du mois). Ils lisent
+ses sens : Sa position reprend les morceaux de Ses sens › Localisation.
 
-Restent au cadre : l'aperçu de la console (``app/preview/`` : les voyages de Béa), la sauvegarde (``app/backup.py`` :
-ce qu'elle garde de ``cartes/``), et, dans le même onglet de Réglages, les notifications du téléphone
-(``app/settings_sections/map_phone.py``) ; Ses sens › Localisation est dessinée par ses sens.
+Restent au cadre : l'aperçu de la console (``app/preview/`` : les voyages de Béa), et, dans le même onglet de
+Réglages, les notifications du téléphone (``app/settings_sections/map_phone.py``) ; Ses sens › Localisation est
+dessinée par ses sens.
 """
 
 from __future__ import annotations
 
-from mika.app.domains.domain import Domain
+from mika.app.domains.domain import Domain, Place
 
 MAPS = Domain(
     "maps",
     needs=("senses",),
-    backup="mika.app.domains.maps.backup",
-    places={"cartes": "la carte de sa position, l'index des lieux et les caches de la carte ; ses compteurs du "
-                      "mois, eux, se sauvegardent"},
+    # jamais archivé : la carte de sa position (ADR 0193) — quelques Go qui se réextraient ; gardés quand même : les
+    # compteurs des services de la carte (quelques Ko, R3-08) — ce qui empêche la facture de Google ; une machine neuve
+    # ne repart pas d'un mois à zéro (``adapters/maps/quota.py::QUOTAS_FILE`` : une fiche n'importe pas d'adaptateur,
+    # ``tests/unit/test_backup.py`` vérifie que c'est le même chemin)
+    places={"cartes": Place("la carte de sa position, l'index des lieux et les caches de la carte ; ses compteurs du "
+                            "mois, eux, se sauvegardent", saved=False, left="réextrait", kept=("quotas.db",))},
     settings="mika.app.domains.maps.settings",
     wiring="mika.app.domains.maps.wiring",
     api="mika.app.domains.maps.api",

@@ -10,31 +10,38 @@ pour une propriétaire), leur part de la console (``console/`` : Activité › P
 onglets, la rubrique « Dépôts Git », l'onglet Projets de la fiche d'une personne et son compte, leurs gabarits, leurs
 feuilles et leur script) et ce que l'aperçu en montre (``demo.py`` : une chaîne de travail d'exemple ;
 ``demo_git.py`` : un dépôt face à son distant, sans réseau ; ``demo_activity.py`` : des états fictifs de l'activité),
-que l'aperçu du cadre pose. Leurs dossiers du dossier de données : ``ateliers/`` et ``documentation/`` (``places`` ;
-ce qu'une sauvegarde n'en prend pas : ``backup.py``). Ils lisent la Forge (les apps d'un projet) et les outils (le
-protocole MCP).
+que l'aperçu du cadre pose. Leurs dossiers du dossier de données : ``ateliers/`` et ``documentation/`` (``places`` :
+ce qu'ils gardent, ce qu'une sauvegarde ne prend pas sous les ateliers, leur cage, leur recréation à la
+restauration). Ils lisent la Forge (les apps d'un projet) et les outils (le protocole MCP).
 
 Elle est la dernière de ``DOMAINS`` : un accord d'un projet se reconnaît par le contexte de l'événement, et le direct
 ne le regarde qu'après tous les autres domaines (un brouillon de mail né dans un épisode de projet reste au courrier).
 
-Restent au cadre, parce qu'ils croisent les domaines ou qu'aucune forme de fiche ne les dit : ce que la sauvegarde
-laisse de leurs ateliers (``app/backup.py`` : les vues et les relectures, ``SKIPPED_UNDER`` ; ``ateliers`` parmi
-les dossiers des cages ; les dossiers recréés à la restauration), la vie fictive de l'aperçu, où leurs projets se
-mêlent au reste, le lien « Dépôts Git » du menu (Connexions extérieures : une fiche n'a qu'un lien), et leur place
+Restent au cadre, parce qu'ils croisent les domaines ou qu'aucune forme de fiche ne les dit : la vie fictive de
+l'aperçu, où leurs projets se mêlent au reste, le lien « Dépôts Git » du menu (Connexions extérieures : une fiche n'a qu'un lien), et leur place
 dans la composition (``composition.py`` : la faculté, ses lots d'outils, l'ordre de son prompt).
 """
 
 from __future__ import annotations
 
-from mika.app.domains.domain import Domain
+from mika.app.domains.domain import Domain, Place
 from mika.inspector.catalog import Destination, MenuLink
 
 PROJECTS = Domain(
     "projects",
     needs=("forge", "tools"),
-    backup="mika.app.domains.projects.backup",
-    places={"ateliers": "les ateliers de ses projets, avec leur git",
-            "documentation": "les images de la documentation de ses projets (100 Mio par projet)"},
+    places={
+        # une cage (leurs dépôts portent des liens vers le système). Jamais archivés, sous eux : les vues des ateliers
+        # lus (ADR 0260, 0262) — la copie du dernier commit d'un autre atelier, que l'archive porte déjà avec son
+        # dépôt, et qui se repose seule à l'exécution suivante ; et la copie de commit qu'une relecture indépendante lit
+        # (ADR 0277), jetable par nature (``adapters/workshop``, ``VIEWS_DIRNAME`` et ``REVIEWS_DIRNAME`` : une fiche
+        # n'importe pas d'adaptateur, ``tests/unit/test_backup.py`` vérifie que ce sont les mêmes noms)
+        "ateliers": Place("les ateliers de ses projets, avec leur git", made=True, caged=True,
+                          unsaved=(".vues", ".relectures")),
+        # les images de la documentation de ses projets (ADR 0289) : à elle seule
+        "documentation": Place("les images de la documentation de ses projets (100 Mio par projet)", made=True,
+                               private=True),
+    },
     settings="mika.app.domains.projects.settings",
     wiring="mika.app.domains.projects.wiring",
     api="mika.app.domains.projects.api",

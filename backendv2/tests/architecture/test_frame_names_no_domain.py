@@ -37,6 +37,7 @@ from pathlib import Path
 
 import pytest
 
+from mika.app.backup import FOLDERS
 from mika.app.console import NAVIGATION
 from mika.app.console_menu import MENU
 from mika.app.domains import (
@@ -47,6 +48,7 @@ from mika.app.domains import (
     LivePart,
     OutsidePart,
     PersonPart,
+    Place,
     PortPart,
     QueuePart,
     SharingPart,
@@ -313,7 +315,7 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
     l'assemblage. Chaque module nommé s'importe ici, et porte le nom que le cadre y lit."""
     for d in DOMAINS:
         for module in (d.wiring, d.settings, d.api, d.live, d.sharing, d.accounts, d.outside, d.console, d.port,
-                       d.preview, d.cli, d.backup):
+                       d.preview, d.cli):
             assert module is None or _within(module, f"mika.app.{HOME}.{d.name}"), f"{d.name} : {module} est hors de son dossier"
         assert d.wiring is None or callable(part(d.wiring, "wire")), d.name
         assert d.settings is None or issubclass(part(d.settings, "SETTINGS"), SettingsPart), d.name
@@ -374,8 +376,9 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert entry.work is None or callable(entry.work), d.name
         assert d.preview is None or callable(part(d.preview, "preview")), d.name
         assert d.cli is None or callable(part(d.cli, "add")), d.name
-        kept = (*part(d.backup, "UNSAVED", ()), *part(d.backup, "SAVED", ()))
-        assert d.backup is None or (kept and all(isinstance(path, str) and path for path in kept)), d.name
+        # ses dossiers du dossier de données : chacun une ``Place`` qui se tient
+        assert all(isinstance(folder, Place) for folder in d.places.values()), d.name
+        assert not [fault for name, folder in d.places.items() for fault in place_faults(name, folder)], d.name
         assert d.base is None or _exists(d.base.models.removeprefix("mika.")), d.name
 
 
@@ -397,6 +400,42 @@ def test_a_domain_seals_its_secrets_through_its_settings_part():
              for line in sealed_by_hand(text)]
     assert not found, found
     assert sealed_by_hand('A = "password_sealed"\nB = f"{k}_sealed"\n"""Le champ password_sealed."""\n') == [1, 2]
+
+
+def place_faults(name: str, folder: Place) -> list[str]:
+    """Ce qui ne se tient pas dans un dossier du dossier de données (``Place``), en phrases : la sauvegarde
+    (``app/backup.py``) en tirerait des listes fausses — un dossier écarté sous un dossier qu'elle ne prend pas, un
+    fichier gardé sous un dossier qu'elle prend déjà, une raison de le laisser à un dossier qu'elle garde, un dossier
+    à elle seule qu'aucune restauration ne recrée."""
+    out = []
+    if not name or "/" in name or name.startswith(".") or not folder.what:
+        out.append(f"{name!r} : un nom juste sous le dossier de données, non caché, et ce qu'il garde en mots")
+    if folder.saved and (folder.left or folder.kept):
+        out.append(f"{name} : sauvegardé — ni raison de le laisser (left) ni fichier gardé quand même (kept)")
+    if not folder.saved and (folder.unsaved or folder.caged):
+        out.append(f"{name} : jamais sauvegardé — rien à écarter sous lui (unsaved), aucun lien à garder (caged)")
+    if any(not p or p.startswith("/") or ".." in p.split("/") for p in folder.kept):
+        out.append(f"{name} : ce qu'il garde se dit par un chemin sous lui — {folder.kept}")
+    if any(not p or "/" in p for p in folder.unsaved):
+        out.append(f"{name} : ce qu'il écarte se dit par le nom d'un dossier juste sous lui — {folder.unsaved}")
+    if folder.private and not folder.made:
+        out.append(f"{name} : à elle seule, il faut qu'une restauration le recrée (made)")
+    return out
+
+
+def test_each_folder_of_the_data_holds_together():
+    """Les dossiers du dossier de données — ceux du cadre et ceux des fiches (``Domain.places``), réunis par la
+    sauvegarde (``app/backup.py::FOLDERS``) — se tiennent chacun, et le contrôle voit chaque faute."""
+    assert any(d.places for d in DOMAINS) and set(FOLDERS) >= {name for d in DOMAINS for name in d.places}
+    faults = [fault for name, folder in FOLDERS.items() for fault in place_faults(name, folder)]
+    assert not faults, faults
+    bad = {"a/b": Place("x"), ".cache": Place("x"), "vide": Place(""), "gardé": Place("x", left="réextrait"),
+           "gardé2": Place("x", kept=("q.db",)), "laissé": Place("x", saved=False, unsaved=(".vues",)),
+           "cage": Place("x", saved=False, caged=True), "loin": Place("x", saved=False, kept=("../q.db",)),
+           "profond": Place("x", unsaved=("a/b",)), "seule": Place("x", private=True)}
+    assert all(place_faults(name, folder) for name, folder in bad.items()), \
+        [name for name, folder in bad.items() if not place_faults(name, folder)]
+    assert place_faults("cartes", Place("x", saved=False, left="réextrait", kept=("quotas.db",))) == []
 
 
 def test_each_kind_of_share_has_its_part_said_once():

@@ -31,9 +31,6 @@ cadre les importe au moment d'assembler (``part``), et y lit un nom convenu :
 - ``wiring`` : ``wire(w)``, ce que le serveur construit pour lui avant le noyau (ses adaptateurs, ses portes), et,
   facultatif, ``bind(w)``, ce qui a besoin du noyau (``app/wiring.py::Wiring``) ;
 - ``cli`` : ``add(sub)``, sa commande et ses sous-commandes dans l'analyseur de ``mika`` ;
-- ``backup`` : ce qu'une sauvegarde ne prend pas de ses dossiers — ``UNSAVED``, des chemins du dossier de données
-  (un dossier, ou un sous-dossier : ils se rebâtissent ou se retéléchargent), et ``SAVED``, les fichiers gardés quand
-  même sous un dossier qu'elle ne prend pas (``app/backup.py``) ;
 - ``preview`` : ``preview(live, now, people)``, ce qu'il ajoute à la vie fictive de ``mika console apercu`` une fois
   les gens de la démonstration en place (``people`` : le moyen de communication de chacun, par son nom de compte) —
   elle rend les adresses de ses pages à exporter.
@@ -68,6 +65,33 @@ class Base:
     models: str
     #: ce qu'elle garde, en mots (Système › Stockage et sauvegardes) : un texte affiché, sans numéro de décision
     place: str
+
+
+@dataclass(frozen=True, slots=True)
+class Place:
+    """Un dossier du dossier de données : ce qu'il garde, et ce que la sauvegarde et la restauration en font. La
+    sauvegarde (``app/backup.py``) réunit ceux du cadre et ceux des fiches (``Domain.places``) ; elle n'en nomme
+    aucun."""
+
+    #: ce qu'il garde, en mots (Système › Stockage et sauvegardes) : un texte affiché, sans numéro de décision
+    what: str
+    #: une sauvegarde le prend ; ``False`` : il se refait ou se retélécharge — elle ne le prend pas, et une
+    #: restauration le laisse en place
+    saved: bool = True
+    #: … pourquoi, en un mot, sur la page (« réextrait ») ; vide : « non »
+    left: str = ""
+    #: … ce qu'elle en prend quand même (des fichiers, par leur chemin sous lui) : restaurés seulement là où il n'y en
+    #: a pas — ceux du dossier, en service, sont plus récents que l'archive
+    kept: tuple[str, ...] = ()
+    #: sous lui, ce qu'une sauvegarde ne prend pas (des dossiers juste sous lui, par leur nom) : ils se refont
+    unsaved: tuple[str, ...] = ()
+    #: une restauration le recrée s'il manque (ce qu'on y écrit ne le crée pas)
+    made: bool = False
+    #: … à elle seule (0700) : ce qu'elle a reçu, envoyé, montré
+    private: bool = False
+    #: une cage : un lien n'y est suivi que par bubblewrap (qui ne voit que ``/usr`` en lecture), jamais par le
+    #: serveur — une archive peut donc y garder un lien qui sort du dossier (``python → /usr/bin/python3``)
+    caged: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,11 +380,9 @@ class Domain:
     #: les modules de ses entités rangées dans une base du cœur (le journal d'une app, dans ``views``) : les importer
     #: remplit la ``MetaData`` de cette base
     models: tuple[str, ...] = ()
-    #: ses dossiers du dossier de données, et ce que chacun garde, en mots (Système › Stockage et sauvegardes) : des
-    #: textes affichés, sans numéro de décision
-    places: Mapping[str, str] = field(default_factory=dict)
-    #: le module de ce qu'il dit à la sauvegarde de ses dossiers (``UNSAVED``, ``SAVED``)
-    backup: str | None = None
+    #: ses dossiers du dossier de données, par leur nom : ce que chacun garde, ce que la sauvegarde et la restauration
+    #: en font (une ``Place``) ; un nom que le cadre ou une autre fiche dit déjà est refusé
+    places: Mapping[str, Place] = field(default_factory=dict)
     #: le module de son câblage (``wire``, ``bind``)
     wiring: str | None = None
     #: le module de ses réglages (``SETTINGS`` : sa ``SettingsPart``), pour qui les prend par le nom du domaine

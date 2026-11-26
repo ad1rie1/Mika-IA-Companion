@@ -607,8 +607,7 @@ Trois règles tiennent l'ensemble :
 | Ce qu'il a | Où, dans son dossier | Ce que le cadre y lit | Dans sa fiche |
 |---|---|---|---|
 | Sa base à côté du journal | ses entités restent dans son adaptateur ; ses révisions dans `app/migrations/<base>/` | — | `base=Base(nom, models=…, place=…)` |
-| Ses dossiers du dossier de données | — | — | `places={dossier: ce qu'il garde}` |
-| Ce qu'une sauvegarde n'en prend pas | `backup.py` | `UNSAVED`, `SAVED` | `backup=` |
+| Ses dossiers du dossier de données : ce que chacun garde, ce que la sauvegarde et la restauration en font | — | — (`app/backup.py` les réunit à ceux du cadre, un nom dit deux fois est refusé) | `places={dossier: Place(ce qu'il garde, …)}` : `saved=False` s'il se refait (et `left`, pourquoi, en un mot ; `kept`, les fichiers gardés quand même), `unsaved` (des dossiers juste sous lui qu'elle ne prend pas), `made` (une restauration le recrée), `private` (en 0700), `caged` (une cage : un lien y peut sortir du dossier) |
 | Ses réglages d'exploitation | `settings.py` : une `SettingsPart`, qui n'écrit que par la porte (`_get`, `_put`) ; les champs secrets d'une fiche (ceux qu'il scelle, pas forcément ceux qu'un formulaire masque) se scellent par `_sealed` et se rouvrent par `_opened`, rangés sous `<champ>_sealed` — jamais ce nom écrit à la main (la garde le vérifie) | `SETTINGS` | `settings=` |
 | Ce que le serveur construit pour lui | `wiring.py` (`app/wiring.py::Wiring`) | `wire(w)` avant le noyau ; `bind(w)` après ; `inputs(settings)` ; `start`, `stop`, `release` | `wiring=` |
 | Ses routes de `/api/moi` | `api.py` (ou un paquet `api/`) | `routes(api)`, `COUNTERS` | `api=` |

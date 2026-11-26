@@ -10,15 +10,17 @@ Leur part du direct est dans ``live.py`` : ses messages, ses réponses offertes,
 réponse proposée, décidée, partie.
 Leur part de la console (``console/``) dit le mot de leur canal dans la file « À valider » et dessine l'onglet Son
 téléphone de la fiche d'une personne (``console/person.py``) ; leurs autres pages sont celles de Ses sens.
+L'application à télécharger est dans le dossier ``telephone/`` du dossier de données (``places``).
 """
 
 from __future__ import annotations
 
-from mika.app.domains.domain import Domain
+from mika.app.domains.domain import Domain, Place
 
 PHONE = Domain(
     "phone",
     needs=("maps", "senses"),
+    places={"telephone": Place("l'application Android à installer")},
     wiring="mika.app.domains.phone.wiring",
     api="mika.app.domains.phone.api",
     live="mika.app.domains.phone.live",

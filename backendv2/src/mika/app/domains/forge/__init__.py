@@ -11,13 +11,13 @@ d'ailleurs (``outside.py`` : leur ligne et leur nom dans l'écran Outils et Rég
 
 from __future__ import annotations
 
-from mika.app.domains.domain import Domain
+from mika.app.domains.domain import Domain, Place
 from mika.inspector.catalog import Destination, MenuLink
 
 FORGE = Domain(
     "forge",
     models=("mika.adapters.forge.bases",),
-    places={"forge": "ses apps forgées, leurs versions et leurs bases"},
+    places={"forge": Place("ses apps forgées, leurs versions et leurs bases", made=True)},
     settings="mika.app.domains.forge.settings",
     wiring="mika.app.domains.forge.wiring",
     outside="mika.app.domains.forge.outside",

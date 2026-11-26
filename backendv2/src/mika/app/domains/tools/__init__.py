@@ -21,11 +21,11 @@ domaines (qui peut quoi, ce que concerne un accord, la fiche d'une personne).
 
 from __future__ import annotations
 
-from mika.app.domains.domain import Domain
+from mika.app.domains.domain import Domain, Place
 
 TOOLS = Domain(
     "tools",
-    places={"mcp": "les services MCP lancés sur cette machine, chacun dans sa cage"},
+    places={"mcp": Place("les services MCP lancés sur cette machine, chacun dans sa cage", caged=True)},
     settings="mika.app.domains.tools.settings",
     wiring="mika.app.domains.tools.wiring",
     api="mika.app.domains.tools.api",

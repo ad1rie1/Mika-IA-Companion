@@ -90,7 +90,7 @@ from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.app import backup_server, datadir, schema
 from mika.app.composition import READING, faculties
-from mika.app.domains import DOMAINS, part
+from mika.app.domains import DOMAINS, Place, gathered
 from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
@@ -106,22 +106,33 @@ BASES = "bases"
 #: jetables : se reconstruisent depuis le journal
 SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial",
                      datadir.LOCK_NAME})
-#: ce que chaque domaine dit de ses dossiers (ADR 0310, ``Domain.backup``) : les chemins qu'une sauvegarde ne prend
-#: pas (``UNSAVED`` : un dossier, ou un sous-dossier), et les fichiers gardés quand même sous l'un d'eux (``SAVED``)
-_UNSAVED = frozenset(tuple(path.split("/")) for d in DOMAINS for path in part(d.backup, "UNSAVED", ()))
-if any(len(parts) not in (1, 2) for parts in _UNSAVED):
-    raise ValueError(f"sauvegarde : un domaine écarte un dossier, ou un sous-dossier — {sorted(_UNSAVED)}")
-#: dossiers jamais archivés : ceux des appels de la CLI de Claude Code (prompts privés, jetons de session)
-#: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR ; ``cache`` (``HF_HOME`` de l'unité : le modèle
-#: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109) ; puis ceux que les domaines écartent (la carte
-#: de sa position)
-SKIPPED_DIRS = frozenset({"claude-code", "cache"} | {parts[0] for parts in _UNSAVED if len(parts) == 1})
-#: sous un dossier jamais archivé, ce qui l'est quand même, dit par son domaine (les compteurs des services de la
-#: carte). Restaurés seulement là où il n'y en a pas : ceux du dossier, en service, sont plus récents que l'archive
-KEPT_UNDER_SKIPPED = frozenset(path for d in DOMAINS for path in part(d.backup, "SAVED", ()))
-#: sous un dossier archivé, ce qui ne l'est pas, dit par son domaine (les vues des ateliers lus, la copie de commit
-#: d'une relecture)
-SKIPPED_UNDER = frozenset(parts for parts in _UNSAVED if len(parts) == 2)
+#: les dossiers du cadre, qui ne sont à aucun domaine : ceux de ses facultés (ses pièces reçues, ses fichiers envoyés),
+#: le modèle de plongements, une installation d'avant ; ceux d'un domaine sont dans sa fiche (``Domain.places``,
+#: ADR 0310)
+FRAME_PLACES: dict[str, Place] = {
+    # ce qu'on lui a envoyé (ADR 0106) : à elle seule
+    "pieces": Place("les pièces jointes qu'on lui a envoyées (2 Gio par personne)", made=True, private=True),
+    # ce qu'elle a envoyé à chacun : à elle seule
+    "partages": Place("les fichiers qu'elle a envoyés", made=True, private=True),
+    # ``HF_HOME`` de l'unité : le modèle de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109
+    "cache": Place("le modèle de plongements", saved=False, left="retéléchargé"),
+    # les appels de la CLI de Claude Code (prompts privés, jetons de session) d'une installation d'avant leur
+    # déménagement sous XDG_RUNTIME_DIR
+    "claude-code": Place("les appels de Claude Code d'une installation d'avant", saved=False),
+}
+#: les dossiers du dossier de données : ceux du cadre, puis ceux de chaque fiche (un nom dit deux fois est refusé)
+FOLDERS: dict[str, Place] = gathered("un dossier du dossier de données", [
+    ("le cadre", FRAME_PLACES), *((f"la fiche de « {d.name} »", d.places) for d in DOMAINS)])
+if any("/" in name or not name for folder in FOLDERS.values() for name in folder.unsaved):
+    raise ValueError("sauvegarde : un dossier écarte un dossier juste sous lui, par son nom — "
+                     f"{sorted((n, f.unsaved) for n, f in FOLDERS.items() if f.unsaved)}")
+#: dossiers jamais archivés : le modèle de plongements, une installation d'avant, la carte de sa position…
+SKIPPED_DIRS = frozenset(name for name, folder in FOLDERS.items() if not folder.saved)
+#: sous un dossier jamais archivé, ce qui l'est quand même (les compteurs des services de la carte). Restaurés
+#: seulement là où il n'y en a pas : ceux du dossier, en service, sont plus récents que l'archive
+KEPT_UNDER_SKIPPED = frozenset(f"{name}/{path}" for name, folder in FOLDERS.items() for path in folder.kept)
+#: sous un dossier archivé, ce qui ne l'est pas (les vues des ateliers lus, la copie de commit d'une relecture)
+SKIPPED_UNDER = frozenset((name, under) for name, folder in FOLDERS.items() for under in folder.unsaved)
 #: dans le dossier de données, ce qu'une restauration prépare et ce qu'elle met de côté (cachés : aucune archive ne
 #: les prend, une restauration suivante ne les remplace pas)
 STAGING, ASIDE, KEPT = ".restauration-", ".avant-restauration-", ".avant-bases-"
@@ -298,7 +309,7 @@ def _safe_rel(rel: str) -> bool:
 #: par le serveur (``workshop.path`` résout et vérifie ; un serveur MCP vit dans sa cage) — et un dépôt du modèle ou un
 #: ``.venv`` en porte légitimement vers le système (``python → /usr/bin/python3``) : les refuser rendrait l'archive
 #: entière irrestaurable pour un lien
-CAGED_DIRS = ("ateliers", "mcp")
+CAGED_DIRS = tuple(name for name, folder in FOLDERS.items() if folder.caged)
 
 
 def _relink(root: Path, links: object) -> None:
@@ -536,19 +547,14 @@ PLACES: dict[str, str] = {
     "mind": "sa vie : le journal, ses contenus, ses instantanés, les comptes, les réglages",
     "views": "les projections et les vecteurs tirés du journal, les traces et les appels de modèle des derniers jours",
     **{base.name: base.place for base in schema.DOMAIN_BASES},
-    # le dossier d'un domaine qui a sa fiche dit le sien de même (``Domain.places``)
-    **{name: said for domain in DOMAINS for name, said in domain.places.items()},
-    "pieces": "les pièces jointes qu'on lui a envoyées (2 Gio par personne)",
-    "partages": "les fichiers qu'elle a envoyés",
-    "telephone": "l'application Android à installer",
-    "cache": "le modèle de plongements",
-    "claude-code": "les appels de Claude Code d'une installation d'avant",
+    # chaque dossier, celui du cadre comme celui d'un domaine (``Domain.places``)
+    **{name: folder.what for name, folder in FOLDERS.items()},
     "secret.key": "la clé qui chiffre les secrets des réglages",
     PUSH_KEY_FILE: "la clé des notifications du téléphone",
     RECORD: "ce qu'ont noté les dernières sauvegardes et vérifications",
 }
 #: pourquoi la sauvegarde laisse un dossier (``SKIPPED_DIRS``)
-LEFT = {"cartes": "réextrait", "cache": "retéléchargé"}
+LEFT = {name: folder.left for name, folder in FOLDERS.items() if not folder.saved and folder.left}
 #: ce que la page ne montre pas : le verrou du serveur, une note de sauvegarde à moitié écrite
 UNSHOWN = frozenset({datadir.LOCK_NAME, "sauvegardes.partial"})
 
@@ -727,11 +733,11 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
                 aside.mkdir(exist_ok=True)
                 kept.rename(aside / BASES)
                 warnings.append(f"bases en service copiées avant d'être remplacées : {aside / BASES}")
-            for sub in ("forge", "ateliers", "partages", "pieces", "documentation"):
-                (data / sub).mkdir(exist_ok=True)
-            (data / "documentation").chmod(0o700)  # les images de la documentation de ses projets (ADR 0289)
-            (data / "partages").chmod(0o700)  # ce qu'elle a envoyé à chacun : à elle seule
-            (data / "pieces").chmod(0o700)  # ce qu'on lui a envoyé (ADR 0106) : à elle seule
+            for name, folder in FOLDERS.items():  # ceux qu'on écrit sans les créer, à elle seule s'il le faut
+                if folder.made:
+                    (data / name).mkdir(exist_ok=True)
+                    if folder.private:
+                        (data / name).chmod(0o700)
             for name in ("secret.key", PUSH_KEY_FILE):  # des clés : à leur propriétaire seul
                 key = data / name
                 if key.exists():
