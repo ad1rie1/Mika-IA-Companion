@@ -268,7 +268,7 @@ def row_id(key: str) -> str:
 
 
 def one_page(rows: int) -> Any:
-    return render._pager(Pager(size=max(1, rows), total=max(1, rows)), {})
+    return render.pager_ctx(Pager(size=max(1, rows), total=max(1, rows)), {})
 
 
 def placed(order: Sequence[str], said: Iterable[tuple[str, Mapping[str, Any]]]) -> dict[str, Any]:

@@ -432,7 +432,7 @@ def access(ui: UI, key: str, forms: Any) -> Markup | None:
     return Markup(env.get_template("handmade/projets/acces.html").render(
         rows=rows, default=default, steers=c.STEERS, policies=POLICY_CHOICES, steer_words=STEER_WORDS,
         form=_form(forms, "projects.acces"), never_set=p.access is None, has_apps=bool(tools),
-        pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
+        pager=render.pager_ctx(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
         behaviour_tab=subject_url(KIND, key, "comportement") + "#cadre-outils"))
 
 

@@ -699,7 +699,7 @@ def comptes(got: Got) -> Any:
     total = len(accounts)
     all_warned = sum(1 for a in accounts if synced(r.ports, r.frame, a, str).tone == "warn")
     return got.draw("handmade/agendas/comptes.html", rows=rows, warned=warned, csrf=getattr(got.forms, "csrf", ""),
-                    pager=render._pager(Pager(size=max(1, len(rows)), total=max(1, len(rows))), {}),
+                    pager=render.pager_ctx(Pager(size=max(1, len(rows)), total=max(1, len(rows))), {}),
                     back=f"{PREFIX}/agendas/comptes" + (link(base) if base else ""),
                     chips=chips(r, picked, base, people, her=False, counts=counts_by, single=True),
                     facts={"accounts": total, "calendars": len(r.calendars), "ok": total - all_warned,

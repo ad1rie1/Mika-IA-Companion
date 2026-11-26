@@ -59,7 +59,7 @@ def _sources() -> list[dict[str, str]]:
 def plugins(groups: list[dict[str, Any]]) -> Markup:
     """Réglages › Configuration des plugins : chaque groupe (les plugins, puis ce qui n'en est pas) en table, une ligne
     par plugin — son nom et ce qui s'y règle, ses pages de réglages, ses paramètres avancés, où s'en servir."""
-    shown = [{**g, "pager": render._pager(Pager(size=len(g["rows"]), total=len(g["rows"])), {})}
+    shown = [{**g, "pager": render.pager_ctx(Pager(size=len(g["rows"]), total=len(g["rows"])), {})}
              for g in groups if g["rows"]]  # une page, toujours : sa pagination ne se montre pas (``.hm-pager.single``)
     return Markup(env.get_template("handmade/reglages/plugins.html").render(groups=shown))
 

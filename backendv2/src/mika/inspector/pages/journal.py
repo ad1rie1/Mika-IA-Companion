@@ -82,7 +82,7 @@ FACT_TOOLS, FACT_TECHNICAL = "outils", "technique"
 RESUMED = "repris après une interruption"
 
 
-def _events(ui: Any, corr: str, query=None, *, speeches: bool = False) -> tuple[list[Any], Pager]:
+def episode_page(ui: Any, corr: str, query=None, *, speeches: bool = False) -> tuple[list[Any], Pager]:
     request = ui.inspection.context(query).pager(size=EPISODE_PAGE)
     e = JournalEvent
     where = (e.correlation == corr, e.type == rt.UTTERANCE.name) if speeches else (e.correlation == corr,)
@@ -136,7 +136,7 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
     if tab == "resume":
         return overview(ui, corr, info)
     if tab == "dit":
-        said, pager = _events(ui, corr, query, speeches=True)
+        said, pager = episode_page(ui, corr, query, speeches=True)
         if not said:
             return [Note("Elle n'a rien dit dans cet épisode.", "muted")]
         rows = []
@@ -179,7 +179,7 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
         trace = trace_of(ui, corr)
         if (trace or {}).get("tool_calls"):
             return tools_blocks(ui, trace, None)
-        said, pager = _events(ui, corr, query, speeches=True)
+        said, pager = episode_page(ui, corr, query, speeches=True)
         if not said:
             return [Note("Aucun outil retrouvé pour cet épisode.", "muted")]
         return [Table(("Parole", "Outils utilisés"), tuple(Row((Ref.why(e.seq, f"parole n° {e.seq}"),
@@ -207,7 +207,7 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
              names_outcome_call(t.outcome)) for t in traces), pager=pager)]
     if tab == "decision":
         return decision_blocks(ui, started, ended, info)
-    events, pager = _events(ui, corr, query)
+    events, pager = episode_page(ui, corr, query)
     rows = tuple(Row((When(e.at), Text(ui.names.event(e.type.name), hint=e.type.name),
                       Ref.why(e.seq, "pourquoi ?") if e.type.name == rt.UTTERANCE.name else "",
                       Ref("event", str(e.seq), f"n° {e.seq}"), Text(e.type.name, "mono")),
@@ -588,7 +588,7 @@ async def replay_blocks(ui: Any, corr: str, backend: str, *, by: str) -> tuple[l
 
 def _said_blocks(ui: Any, corr: str, trace: dict[str, Any]) -> list[Any]:
     """Ce qu'elle a vraiment dit dans l'épisode (le journal), et ce que ses appels de modèle ont coûté."""
-    said, _pager = _events(ui, corr, speeches=True)
+    said, _pager = episode_page(ui, corr, speeches=True)
     out: list[Any] = []
     if said:
         out.append(Prose("\n\n".join(u.data.text.text or "(oublié)" for u in said), reading=True))

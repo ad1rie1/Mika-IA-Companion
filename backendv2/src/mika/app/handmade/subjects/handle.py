@@ -171,7 +171,7 @@ class HandleOverview(Overview):
             if view.first_seen else "—", others=others, jetable=not is_identifiable(key),
             opens=[{"label": label, "hint": hint} for label, _, hint in OPENS], audiences=audiences,
             # « Ce que ça ouvre » est un tableau : la garde de la console y veut sa pagination (d'une page, tue)
-            opens_pager=render._pager(Pager(size=len(OPENS) + 1, total=len(OPENS) + 1), {})))
+            opens_pager=render.pager_ctx(Pager(size=len(OPENS) + 1, total=len(OPENS) + 1), {})))
 
     def render_tab(self, ui: UI, key: str, tab: str, blocks: Sequence[Any], query: Mapping[str, str],
                    forms: Mapping[str, Any] | None = None) -> Any:

@@ -297,7 +297,7 @@ async def _queue(ui: Any, request: Request, tab: QueueTab | None) -> Any:
                 "kinds": kinds if len(counts) > 1 and kinds else [], "kind": sort, "all_href": "?",
                 "explicit": bool(wanted) and opened is not None and current["id"] == wanted,
                 "empty": tab.empty if tab is not None else "",
-                "pending_pager": render._pager(pager, query)},
+                "pending_pager": render.pager_ctx(pager, query)},
                 # et les feuilles de ce que la composition dessine dans la liseuse (``QueueItem.body``)
                 styles=("handmade/approbations.css", *(getattr(_provider(ui), "styles", ()) or ()))),
             "blocks": [], "messages": MESSAGES.get(query.get("fait", ""), [])}

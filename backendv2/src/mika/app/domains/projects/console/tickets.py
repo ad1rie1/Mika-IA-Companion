@@ -386,7 +386,7 @@ def lists_page(sc: Scene) -> Markup | None:
               for x in lists],
         table=table, columns=columns, rows=[x for _, x in cards], more=max(0, total - len(found)),
         # son tableau tient sur une page : sa pagination reste dans la page (la console l'exige), masquée
-        pager=render._pager(Pager(size=max(1, len(cards)), total=max(1, len(cards))), {}),
+        pager=render.pager_ctx(Pager(size=max(1, len(cards)), total=max(1, len(cards))), {}),
         element=_element(sc, lst, chosen, back) if chosen is not None and not mode else None,
         missing=wanted if wanted and chosen is None else "",
         adding=shown(add, "title", "key", "text", "status", "actor", "link", list_name=lst.name)

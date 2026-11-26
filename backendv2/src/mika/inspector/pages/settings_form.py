@@ -269,7 +269,7 @@ def _mapping_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
     # une seule page, toujours : une ligne par clé, sans pagination à montrer (``.hm-pager.single``)
     return {"title": first.get("title", ""), "key": first.get("key_head", ""), "choice": first.get("choice_head", ""),
             "before": [h for h, before in heads if before], "after": [h for h, before in heads if not before],
-            "pager": render._pager(Pager(size=len(rows), total=len(rows)), {})}
+            "pager": render.pager_ctx(Pager(size=len(rows), total=len(rows)), {})}
 
 
 def _fact(label: str, value: Any) -> tuple[str, str, str]:
@@ -573,7 +573,7 @@ class SettingsForms:
         return {"path": f.path, "label": f.label, "help": f.help, "keyed": keyed,
                 "columns": [i.label for i in shown] + [i.label for i in secrets_], "rows": rows,
                 "total": len(items),
-                "pager": render._pager(Pager(number=number, size=RECORDS_PAGE, total=len(items)), query),
+                "pager": render.pager_ctx(Pager(number=number, size=RECORDS_PAGE, total=len(items)), query),
                 "add": self.url(page, enregistrement=f.path, cle="", nouveau="1")}
 
     def _record_view(self, s: SettingsSection, current: Any, editing: tuple[str, str], state: State,

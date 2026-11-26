@@ -115,20 +115,20 @@ def test_a_view_pager_wins_and_a_long_timeline_is_cut_too():
 
 
 def test_a_cursor_goes_back_to_newer_pages_and_to_the_start():
-    first = render._pager(Pager(older=(("avant", "90"),)), {"q": "x"})
+    first = render.pager_ctx(Pager(older=(("avant", "90"),)), {"q": "x"})
     assert first["older"] == "?q=x&avant=90&pile=0" and not first["newer"]
-    second = render._pager(Pager(older=(("avant", "40"),)), {"q": "x", "avant": "90", "pile": "0"})
+    second = render.pager_ctx(Pager(older=(("avant", "40"),)), {"q": "x", "avant": "90", "pile": "0"})
     assert second["newer"] == "?q=x" and second["page"] == 2
-    third = render._pager(Pager(older=(("avant", "10"),)), {"q": "x", "avant": "40", "pile": "0,90"})
+    third = render.pager_ctx(Pager(older=(("avant", "10"),)), {"q": "x", "avant": "40", "pile": "0,90"})
     assert third["newer"] == "?q=x&avant=90&pile=0" and third["first"] == "?q=x" and third["page"] == 3
     # une seconde table à curseur a son propre chemin : elle ne dérange pas la première
-    other = render._pager(Pager(older=(("avant_nuits", "7"),)), {"avant": "40", "pile": "0,90"})
+    other = render.pager_ctx(Pager(older=(("avant_nuits", "7"),)), {"avant": "40", "pile": "0,90"})
     assert "avant=40" in other["older"] and "pile=0%2C90" in other["older"] and "pile_avant_nuits=0" in other["older"]
-    last = render._pager(Pager(), {"avant": "10", "pile": "0,90,40"})
+    last = render.pager_ctx(Pager(), {"avant": "10", "pile": "0,90,40"})
     assert last is not None and not last["older"] and last["newer"] == "?avant=40&pile=0%2C90"
 
     # la dernière page d'une seconde table à curseur sait encore revenir (la vue nomme sa clé)
-    tail = render._pager(Pager(param="avant_nuits"), {"avant_nuits": "5", "pile_avant_nuits": "0,9"})
+    tail = render.pager_ctx(Pager(param="avant_nuits"), {"avant_nuits": "5", "pile_avant_nuits": "0,9"})
     assert tail is not None and tail["newer"] == "?avant_nuits=9&pile_avant_nuits=0" and tail["page"] == 3
 
 
@@ -190,7 +190,7 @@ def test_a_first_cursor_page_with_nothing_after_says_its_total():
 
 
 def test_a_very_large_remote_total_has_only_a_bounded_number_of_page_links():
-    pager = render._pager(Pager(total=2**63-1, size=25), {})
+    pager = render.pager_ctx(Pager(total=2**63-1, size=25), {})
     assert len(pager["links"]) <= 7
 
 

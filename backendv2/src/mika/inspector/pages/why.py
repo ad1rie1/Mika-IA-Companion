@@ -87,7 +87,7 @@ SILENCE_LOOKUP = 500
 CALLS_MAX = 20
 
 
-def _decoded(ui: Any, seq: int) -> Any | None:
+def decoded_event(ui: Any, seq: int) -> Any | None:
     found = ui.kernel.mind.store.get_events([seq]) if seq > 0 else []
     return ui.decode(found[0]) if found else None
 
@@ -113,7 +113,7 @@ def selection_of(ui: Any, started: Any) -> tuple[Any | None, Any | None, bool]:
     kind, target = (None, ANY_TARGET) if prelude else (data.kind, data.target)
     exact = getattr(data, "selected", None)
     if isinstance(exact, int) and exact > 0:
-        e = _decoded(ui, exact)
+        e = decoded_event(ui, exact)
         if e is not None and e.type.name == SELECTED.name:
             return e, _fired_row(e.data, kind, target), True
     if prelude:
@@ -172,7 +172,7 @@ def cause_blocks(ui: Any, started: Any | None) -> list[Any]:
     out: list[Any] = []
     trigger = str(data.trigger or "")
     if data.reply_to:
-        asked = _decoded(ui, int(data.reply_to))
+        asked = decoded_event(ui, int(data.reply_to))
         text = getattr(getattr(asked.data, "text", None), "text", None) if asked is not None else None
         who = ui.names.who(getattr(asked.data, "handle", None) or data.target) if asked is not None else \
             ui.names.who(data.target)
@@ -538,7 +538,7 @@ def verdict_blocks(ui: Any, seq: int) -> list[Any]:
 
 def why_page(ui: Any, seq: int) -> dict[str, Any] | None:
     """La page d'une parole, ou ``None`` si ce numéro n'en est pas une."""
-    utterance = _decoded(ui, seq)
+    utterance = decoded_event(ui, seq)
     if utterance is None or utterance.type.name != rt.UTTERANCE.name:
         return None
     d = utterance.data
@@ -664,7 +664,7 @@ def _cause_view(ui: Any, started: Any | None) -> dict[str, Any] | None:
     if started is None or not started.data.reply_to:
         return None
     data = started.data
-    asked = _decoded(ui, int(data.reply_to))
+    asked = decoded_event(ui, int(data.reply_to))
     text = getattr(getattr(asked.data, "text", None), "text", None) if asked is not None else None
     who = ui.names.who((getattr(asked.data, "handle", None) if asked is not None else None) or data.target)
     resumed = str(data.trigger or "").startswith("reprise:")
@@ -814,7 +814,7 @@ def silence_page(ui: Any, seq: int) -> dict[str, Any] | None:
     """« Pourquoi n'a-t-elle pas répondu ? » : la page d'un message reçu resté sans réponse (ou qui l'attend
     encore), ou ``None`` si ce numéro n'en est pas un (une de ses paroles, un message auquel elle a répondu). Ses blocs,
     et sa vue dessinée (``silence.html``)."""
-    asked = _decoded(ui, seq)
+    asked = decoded_event(ui, seq)
     if asked is None or asked.type.name != rt.PERCEPTION_RECEIVED.name:
         return None
     d = asked.data

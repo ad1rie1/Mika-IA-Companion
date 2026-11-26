@@ -34,17 +34,17 @@ from mika.inspector.pages.episode_overview import Summary, summary
 from mika.inspector.pages.journal import (
     EPISODE_TABS,
     FACT_TECHNICAL,
-    _events,
+    episode_page,
     episode_tab,
     prompt_facts,
     reply_trigger_cell,
     trigger_cell,
 )
 from mika.inspector.pages.why import (
-    _decoded,
     answer_steps,
     cause_blocks,
     context_parts,
+    decoded_event,
     prompt_view,
     tools_view,
     trace_of,
@@ -144,7 +144,7 @@ def _trigger(ui: Any, started: Any | None) -> dict[str, Any]:
                 "tone": "warn"}
     d = started.data
     if d.reply_to:
-        asked = _decoded(ui, int(d.reply_to))
+        asked = decoded_event(ui, int(d.reply_to))
         return {"who": ui.names.who((getattr(asked.data, "handle", None) if asked is not None else None) or d.target),
                 "text": (_text(asked) if asked is not None else "") or "Le texte de ce message n'est plus disponible.",
                 "when": ui.when_long(asked.at) if asked is not None else "",
@@ -233,7 +233,7 @@ def _tone(e: Any) -> str:
 
 def _flow(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
           counted: Tally | None) -> dict[str, Any]:
-    events, pager = _events(ui, corr, query)
+    events, pager = episode_page(ui, corr, query)
     return {"events": [{"time": _hms(ui, e.at), "label": ui.names.event(e.type.name), "type": e.type.name,
                         "href": render.href(Ref("event", str(e.seq), "")), "number": e.seq, "tone": _tone(e),
                         "excerpt": (_text(e) or _ending(e))[:280],
@@ -251,7 +251,7 @@ def _ending(e: Any) -> str:
 
 def _said(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str], env: Any,
           counted: Tally | None) -> dict[str, Any]:
-    said, pager = _events(ui, corr, query, speeches=True)
+    said, pager = episode_page(ui, corr, query, speeches=True)
     return {"speeches": [_speech(ui, e) for e in said], "pager": render.pager_ctx(pager, query)}
 
 
@@ -289,7 +289,7 @@ def _tools(ui: Any, corr: str, info: Mapping[str, Any], query: Mapping[str, str]
             {"name": str(t.get("name", "?")), "ok": bool(t.get("ok")), "executed": t.get("executed", True),
              "ms": num_fr(int(t.get("duration_us") or 0) / 1000, 0), "args": _pretty(t.get("args", "")),
              "result": str(t.get("result", ""))} for t in calls]}
-    said, _pager = _events(ui, corr, query, speeches=True)
+    said, _pager = episode_page(ui, corr, query, speeches=True)
     return {"kept": bool(trace), "calls": [], "named": [
         {"why": render.href(Ref.why(e.seq)), "number": e.seq, "tools": [{"name": t.name, "ok": t.ok}
                                                                           for t in e.data.tools]}

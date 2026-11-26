@@ -1,6 +1,6 @@
 """Ce que la fiche d'une personne et les parts des domaines lisent ensemble (ADR 0310) : la personne de la page
-(``Who``), la tranche d'une faculté ou d'un plugin (``_slice``), et une personne d'un partage avec son niveau
-(``_with``, ``LEVEL_FR``). La part d'un domaine (``PersonPart`` : ses onglets,
+(``Who``), la tranche d'une faculté ou d'un plugin (``state_slice``), et une personne d'un partage avec son niveau
+(``share_person``, ``LEVEL_FR``). La part d'un domaine (``PersonPart`` : ses onglets,
 ce qu'il y compte) les prend ici, dans un module feuille, et jamais dans ``person/__init__.py`` : la fiche lit les
 parts, une part ne lit pas la fiche."""
 
@@ -27,7 +27,7 @@ class Who:
     keys: tuple[str, ...]
 
 
-def _slice(look: Look, name: str) -> Any:
+def state_slice(look: Look, name: str) -> Any:
     """La tranche d'une faculté ou d'un plugin ; ``None`` quand il n'est pas composé ici."""
     try:
         return look.frame.state(name)
@@ -35,7 +35,7 @@ def _slice(look: Look, name: str) -> Any:
         return None
 
 
-def _with(look: Look, who: str, level: str) -> dict[str, str]:
+def share_person(look: Look, who: str, level: str) -> dict[str, str]:
     """Une personne d'un partage (``personne:<clé>``, ou sa clé) et son niveau, pour la fiche."""
     person = who.removeprefix(PERSON)
     return {"name": look.name(person), "person_href": look.href(person), "level": LEVEL_FR.get(level, level)}

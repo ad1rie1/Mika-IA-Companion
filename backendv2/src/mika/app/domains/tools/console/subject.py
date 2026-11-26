@@ -283,12 +283,12 @@ class ServerOverview(Overview):
             state=STATES.get(st.state, st.state), state_tone=STATE_TONES.get(st.state, ""),
             joined=ago(st.last_ok_at), served=served, live=len(st.live), review=review,
             calls=st.calls, failures=st.failures, alerts=alerts, access=_summary(st, frame),
-            access_pager=render._pager(Pager(size=len(st.access) + 1, total=len(st.access) + 1), {}),
+            access_pager=render.pager_ctx(Pager(size=len(st.access) + 1, total=len(st.access) + 1), {}),
             access_said=access_said(st), access_tab=access_tab,
             purpose=_capital(st.purpose.strip()), when_to_use=_capital(st.when_to_use.strip()),
             states=[plural(n, word, STATE_PLURALS.get(word, word)) for word, n in sorted(states.items())],
             known=bool(st.live),
-            situations=situations, who_pager=render._pager(Pager(size=rows, total=rows), {}),
+            situations=situations, who_pager=render.pager_ctx(Pager(size=rows, total=rows), {}),
             technical=technical, log=list(st.log), instructions=st.instructions,
             local=st.kind == "local", address=st.address, settings=settings, system=bool(st.plugin),
             tools_tab=tools_tab, calls_tab=subject_url(KIND, key, "appels")))
@@ -384,6 +384,6 @@ class ServerOverview(Overview):
                 "first": n == 1, "last": n == len(st.access)})
         return Markup(env.get_template("handmade/outils/fait.html").render(
             rows=rows, default=st.default, policies=POLICY_CHOICES, keeps=KEEP_CHOICES,
-            pager=render._pager(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
+            pager=render.pager_ctx(Pager(size=len(rows) + 1, total=len(rows) + 1), {}),
             form=_form(forms, "mcp.acces"), system=bool(st.plugin), known=bool(known),
             alerts=_alerts(st, ""), tools_tab=subject_url(KIND, st.name, "outils")))

@@ -171,7 +171,7 @@ def _account_page(ui: Any, request: Request, found: Account, accounts: list[Acco
                              "days": SESSION_TTL_S // (DAY // US), "mine": operator is not None and
                              operator.id == found.id},
                 "apps": [_app_row(ui, t) for t in apps], "apps_total": len(tokens),
-                "apps_pager": render._pager(apps_pager, query), "clients": list(CLIENTS.items()),
+                "apps_pager": render.pager_ctx(apps_pager, query), "clients": list(CLIENTS.items()),
                 "label_max": TOKEN_LABEL_MAX,
                 # un jeton neuf, à l'opératrice qui vient de le créer, une seule fois (jamais dans l'adresse)
                 "shown": ui.pop_reveal(str(query.get("montrer", "")), operator.handle if operator else "")})}

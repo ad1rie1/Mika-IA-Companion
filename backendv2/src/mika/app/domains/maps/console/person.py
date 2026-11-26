@@ -31,7 +31,7 @@ from mika.app.domains.domain import PersonPart
 from mika.app.domains.maps.api import gpx_document, gpx_response
 from mika.app.domains.senses.console.tabs import fix_of, said_of, slice_of
 from mika.app.handmade import Look
-from mika.app.handmade.person.common import Who, _slice
+from mika.app.handmade.person.common import Who, state_slice
 from mika.app.me import ROUTES_BUSY, spend
 from mika.inspector import render
 from mika.inspector.pages.subjects import subject_url
@@ -150,7 +150,7 @@ def position_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, st
 
 def count(look: Look, who: Who) -> int:
     """Le compte de l'onglet Voyages (``PersonOverview.counts``) : ses voyages."""
-    return len(trips_of(_slice(look, TRIPS.name), look.frame.get, who.person))
+    return len(trips_of(state_slice(look, TRIPS.name), look.frame.get, who.person))
 
 
 def routes(ui: UI, outbound: SlidingWindow) -> list[Route]:

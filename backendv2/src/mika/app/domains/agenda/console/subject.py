@@ -92,7 +92,7 @@ def _pages(query: Mapping[str, str], total: int, size: int) -> tuple[int, Any]:
     except ValueError:
         number = 1
     pager = Pager(number=min(number, max(1, -(-total // size))), size=size, total=total)
-    return pager.offset, render._pager(pager, dict(query))
+    return pager.offset, render.pager_ctx(pager, dict(query))
 
 
 class AgendaFiche(Overview):
@@ -282,7 +282,7 @@ def _day_year(d: date) -> str:
 
 def _one(rows: int) -> Any:
     """La pagination d'un tableau qui tient en une page, dite comme partout."""
-    return render._pager(Pager(size=max(1, rows), total=max(1, rows)), {})
+    return render.pager_ctx(Pager(size=max(1, rows), total=max(1, rows)), {})
 
 
 def _when(r: Read, o: Any) -> str:

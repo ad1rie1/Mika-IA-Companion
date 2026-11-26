@@ -627,7 +627,7 @@ def branches_view(sc: Scene, raw: Raw, head: Mapping[str, Any]) -> dict[str, Any
             "on": name == chosen, "href": sc.url("git", vue=code.BRANCHES, branche=name),
             "commit_href": sc.url("git", vue=code.COMMITS, sha=sha) if sha else ""})
     out: dict[str, Any] = {"items": items, "base": head.get("branche de base") or "main", "panel": None,
-                           "pager": render._pager(Pager(size=max(1, len(items)), total=max(1, len(items))), {}),
+                           "pager": render.pager_ctx(Pager(size=max(1, len(items)), total=max(1, len(items))), {}),
                            "by_pulls": bool(code.pulled(p)) or p.flow == c.FLOW_PR, "lire": bool(wanted)}
     picked = next((b for b in items if b["on"]), None)
     if picked is None:

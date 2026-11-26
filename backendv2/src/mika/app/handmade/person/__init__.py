@@ -60,7 +60,7 @@ from mika.app.handmade import (
 from mika.app.handmade.blocks import tab as blocks_tab
 from mika.app.handmade.exchanges import exchanges
 from mika.app.handmade.lists import Roles, drawn, listing
-from mika.app.handmade.person.common import LEVEL_FR, Who, _slice, _with
+from mika.app.handmade.person.common import LEVEL_FR, Who, share_person, state_slice
 from mika.app.handmade.person.files import files
 from mika.app.handmade.person.memory import memory
 from mika.app.handmade.rights import UNSHARE, retiring, share_consoles
@@ -523,7 +523,7 @@ def shares(look: Look, who: Who) -> dict[str, list[dict[str, Any]]]:
         return {"given": [], "received": []}
     owner = bool(look.frame.get(identity_c.IS_OWNER(who.person)))
     given, received = given_and_received(every_share(settings), who.person, owner=owner)
-    return {"given": [{**_resource(s), **_with(look, s.person, s.level), "off": retiring(look.ui, s)} for s in given],
+    return {"given": [{**_resource(s), **share_person(look, s.person, s.level), "off": retiring(look.ui, s)} for s in given],
             "received": [{**_resource(s), "owner": sharer(look.frame, s, look.name), "level": LEVEL_FR.get(s.level, s.level),
                           "off": retiring(look.ui, s)} for s in received]}
 
@@ -648,7 +648,7 @@ def tab_counts(look: Look, who: Who) -> dict[str, int]:
     known = call(memory_total, _store(look), frame, person, label="lecture")
     held = _accounts(look, who)
     shared = shares(look, who)
-    goals = _slice(look, "goals")
+    goals = state_slice(look, "goals")
     counts = {
         "adresses": len(who.handles),
         "echanges": _count(look, select(func.count()).select_from(t).where(t.c.person.in_(handles))),

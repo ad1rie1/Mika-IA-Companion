@@ -125,4 +125,4 @@ def rows_of(ui: UI, lines: Sequence[Any], cells: Callable[[Any], dict[str, Any]]
 
 def one_page(rows: int) -> Any:
     """La pagination d'un tableau qui tient en une page, dite comme partout."""
-    return render._pager(Pager(size=max(1, rows), total=max(1, rows)), {})
+    return render.pager_ctx(Pager(size=max(1, rows), total=max(1, rows)), {})

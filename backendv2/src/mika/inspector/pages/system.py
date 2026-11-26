@@ -795,7 +795,7 @@ async def sorties(ui: Any, request: Request) -> Any:
                                if _without(request.query_params, "flash") else "")
     problems = [outbox_card(key, seq, told[(seq, effect)], st, err) for key, seq, effect, st, err in stuck]
     panel = Panel("handmade/systeme/a-traiter.html", {"problems": problems, "back": back,
-                                  "problem_total": problem_total, "problem_pager": render._pager(problem_page, request.query_params),
+                                  "problem_total": problem_total, "problem_pager": render.pager_ctx(problem_page, request.query_params),
                                   "panel_after_blocks": 3 if invalid else 2})
     by_kind = sorted(kinds.items(), key=lambda e: (-sum(e[1]["by"].values()), e[0]))
     return {"panel": panel, "blocks": [

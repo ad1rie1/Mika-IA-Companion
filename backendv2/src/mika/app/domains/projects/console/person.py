@@ -7,13 +7,13 @@ from __future__ import annotations
 from mika.app.domains.domain import PersonPart
 from mika.app.handmade import Look
 from mika.app.handmade.lists import Roles, drawn
-from mika.app.handmade.person.common import Who, _slice
+from mika.app.handmade.person.common import Who, state_slice
 from mika.faculties.projects.inspect import of_person as projects_of
 
 
 def count(look: Look, who: Who) -> int:
     """Le compte de l'onglet Projets (``PersonOverview.counts``) : les projets qui la regardent."""
-    projects = _slice(look, "projects")
+    projects = state_slice(look, "projects")
     handles = sorted({who.person, *who.handles})
     return len(projects_of(projects, handles)) if projects is not None else 0
 
