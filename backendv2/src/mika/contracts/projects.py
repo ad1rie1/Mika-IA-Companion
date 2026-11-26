@@ -161,6 +161,11 @@ def asking_project(author: str) -> int:
     return int(number) if sort == BY_PROJECT and number.isdecimal() else 0
 
 
+def from_outside(author: str) -> bool:
+    """Écrit par un autre que ceux du projet : l'hôte du dépôt, ou un projet qui lui adresse une demande."""
+    return author == BY_HOST or bool(asking_project(author))
+
+
 # raisons de preuve (arbitrage)
 #: une exécution (épisode WORK ou JOB, cible ``project:<id>``)
 RUN = "run"

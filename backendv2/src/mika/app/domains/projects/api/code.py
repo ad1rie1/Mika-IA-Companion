@@ -64,6 +64,7 @@ from mika.faculties.projects.faculty import (
     Project,
     by_pulls,
     handed_over,
+    ticket_held,
 )
 from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_code import (  # ses mots et ses règles : ceux de la console (ADR 0297)
@@ -88,7 +89,6 @@ from mika.faculties.projects.inspect_code import objective_for as _objective_for
 from mika.faculties.projects.inspect_code import objective_on as _objective_on
 from mika.faculties.projects.inspect_code import pull_stage as _pull_state
 from mika.faculties.projects.inspect_code import pulled as _pulled
-from mika.faculties.projects.inspect_code import ticket_of as _ticket_of
 from mika.faculties.projects.inspect_merge import ACTION as MERGE_ACTION
 from mika.faculties.projects.inspect_merge import REFUSED_WORDS
 from mika.ports.workshop import (
@@ -262,7 +262,7 @@ def _pull_json(sc: Scene, r: Reach, o: Objective, texts: Mapping[str, str]) -> d
     return {**(_pull_brief(sc, r, o) or {}), "base": p.branch, "at": millis(o.pull_at),
             "conflicts": o.pull_conflicts, "changes_asked": o.pull_changes, "awaits_accord": o.pull_proposal,
             "unsent": o.unsent, "objective": _objective_brief(o, texts),
-            "ticket": _ticket_brief(r, _ticket_of(p, o), texts), "merge": _merge_json(sc, r, o)}
+            "ticket": _ticket_brief(r, ticket_held(p, o), texts), "merge": _merge_json(sc, r, o)}
 
 
 # ── Un commit, un diff ────────────────────────────────────────────────────
@@ -286,7 +286,7 @@ def _commit_json(sc: Scene, r: Reach, k: Commit, texts: Mapping[str, str]) -> di
 
 def _commit_refs(p: Project, commits: Iterable[Commit]) -> list[str]:
     found = [_objective_for(p, k) for k in commits]
-    return [o.text_ref for o in found if o is not None] + _ticket_refs(_ticket_of(p, o) for o in found)
+    return [o.text_ref for o in found if o is not None] + _ticket_refs(ticket_held(p, o) for o in found)
 
 
 def _diff_json(files: Sequence[FileDiff]) -> dict[str, Any]:
@@ -440,13 +440,13 @@ async def commits(call: Call) -> dict[str, Any]:
 def _linked(sc: Scene, r: Reach, o: Objective | None, texts: Mapping[str, str]) -> dict[str, Any]:
     """Ce qui est lié à un commit ou à une branche : l'objectif, son ticket, sa pull request, ses vérifications."""
     p = r.p
-    return {"objective": _objective_brief(o, texts), "ticket": _ticket_brief(r, _ticket_of(p, o), texts),
+    return {"objective": _objective_brief(o, texts), "ticket": _ticket_brief(r, ticket_held(p, o), texts),
             "pull": _pull_brief(sc, r, o), "checks": _checks_brief(o) if o is not None else None}
 
 
 def _linked_refs(p: Project, found: Iterable[Objective | None]) -> list[str]:
     kept = [o for o in found if o is not None]
-    return [o.text_ref for o in kept] + _ticket_refs(_ticket_of(p, o) for o in kept)
+    return [o.text_ref for o in kept] + _ticket_refs(ticket_held(p, o) for o in kept)
 
 
 async def commit(call: Call) -> dict[str, Any]:

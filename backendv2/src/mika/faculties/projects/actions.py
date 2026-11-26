@@ -479,6 +479,7 @@ class ModifyArgs(BaseModel):
 
 
 def can_edit(s: ProjectsState, frame: Frame, key: str) -> bool:
+    """Un projet vivant (actif ou en pause) : ce qu'il faut pour le modifier, le régler — et pour l'archiver."""
     p = project_at(s, key)
     return p is not None and p.status in LIVE
 
@@ -1070,18 +1071,13 @@ def _amend(s: ProjectsState, frame: Frame, args: InstructionArgs, ctx: ActionCon
                 message="Consigne ajoutée : elle la lira à sa prochaine exécution.", guard=unchanged(p.id, LIVE))
 
 
-def _archivable(s: ProjectsState, frame: Frame, key: str) -> bool:
-    p = project_at(s, key)
-    return p is not None and p.status in LIVE
-
-
 def _restorable(s: ProjectsState, frame: Frame, key: str) -> bool:
     p = project_at(s, key)
     return p is not None and p.status == c.ARCHIVED
 
 
 @PROJECTS.action("archiver", title="Archiver", args=NoArgs, emits=[ARCHIVED], subject="project", order=90,
-                 available=_archivable, danger=True,
+                 available=can_edit, danger=True,
                  confirm="Archiver ce projet ? Il ne fera plus aucune exécution ; son dossier, son dépôt et son "
                          "histoire restent, et on peut le restaurer.",
                  description="Il ne travaille plus. Rien n'est effacé : on peut le restaurer.")

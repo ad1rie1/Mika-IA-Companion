@@ -12,8 +12,9 @@ leurs échanges) se lit chez lui **par une lecture gardée et bornée** (``hoste
 contenu d'un fichier et un diff sont des données : la console les montre en texte brut.
 
 **Ce qui est pur** et que l'API lit aussi : l'objectif d'une branche ou d'un commit (``objective_on``,
-``objective_for``), le ticket d'un objectif ou d'une issue (``ticket_of``, ``issue_ticket``), où en est une pull request
-(``pull_stage``), celles d'un projet (``pulled``), et le diff mis en texte puis relu (``diff_text``, ``diff_rows``).
+``objective_for``), le ticket d'une issue (``issue_ticket`` ; celui d'un objectif est ``faculty.ticket_held``), où en
+est une pull request (``pull_stage``), celles d'un projet (``pulled``), et le diff mis en texte puis relu
+(``diff_text``, ``diff_rows``).
 """
 
 from __future__ import annotations
@@ -161,13 +162,6 @@ def objective_for(p: Project, k: Commit) -> Objective | None:
     if k.branch and k.branch != BASE_BRANCH:
         return objective_on(p, k.branch)
     return next((o for o in p.objectives if o.commit and o.commit == k.sha), None)
-
-
-def ticket_of(p: Project, o: Objective | None) -> Item | None:
-    """Le ticket que tient cet objectif."""
-    if o is None or not o.ticket:
-        return None
-    return next((x for x in p.board.items if x.list_name == c.TICKETS and x.number == o.ticket), None)
 
 
 def issue_ticket(p: Project, number: int) -> Item | None:

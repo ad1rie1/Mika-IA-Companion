@@ -506,7 +506,7 @@ def _awaited_json(sc: Scene, a: Awaited, texts: Mapping[str, str]) -> dict[str, 
     else:
         about = inspect_todo.about(w, texts)
     item = _item_of(p, w)
-    outside = item is not None and _from_outside(item.author)
+    outside = item is not None and c.from_outside(item.author)
     return {"project": p.id, "project_title": texts.get(p.title_ref, ""), "kind": w.kind,
             "kind_label": inspect_todo.KIND_WORDS.get(w.kind, w.kind), "what": w.what,
             "about": snippet(about, 400), "since": millis(w.since), "mine": a.mine, "can": a.can, "why": a.why,
@@ -630,11 +630,6 @@ def _outside(text: str, limit: int = TEXT_SHOWN) -> dict[str, Any] | None:
     """Un texte venu d'ailleurs (un commentaire de l'hôte, la fin d'un journal, la sortie d'une commande) : le
     client le présente comme tel, jamais comme un mot d'elle ni du propriétaire."""
     return {"text": text[:limit], "outside": True} if text else None
-
-
-def _from_outside(author: str) -> bool:
-    """Écrit par un autre que ceux du projet : l'hôte du dépôt, ou un projet qui lui adresse une demande."""
-    return author == c.BY_HOST or bool(c.asking_project(author))
 
 
 def _nameable(sc: Scene, person: str, level: int) -> bool:
@@ -1111,7 +1106,7 @@ def _entry_json(sc: Scene, r: Reach, e: tracker.Entry, titles: Mapping[int, str]
         "priority": item.priority, "priority_label": PRIORITY_WORDS.get(item.priority, ""), "actor": item.actor,
         "actor_label": _name(sc, item.person) if item.actor == c.ACTOR_PERSON else ACTOR_WORDS.get(item.actor, ""),
         **_author(sc, titles, item.author, item.by, written_on(r.p, item), veiled=bool(veil)),
-        "outside": _from_outside(item.author), "objective": item.objective, "notes": item.notes, "at": millis(item.at), "updated_at": millis(item.updated_at),
+        "outside": c.from_outside(item.author), "objective": item.objective, "notes": item.notes, "at": millis(item.at), "updated_at": millis(item.updated_at),
         "plan": item.plan_seq, "issue": item.issue, "pull": item.pull_number,
         # ADR 0293 : son étape du parcours en six (vide : écarté, ou pas un ticket), ce que l'hôte dit de son issue
         "step": (step := tickets.step_of(item.status, tickets.through_pull(item, by_pulls(r.p))) if ticket else ""),
@@ -1168,7 +1163,7 @@ async def element(call: Call) -> dict[str, Any]:
     level = written_on(r.p, item)
     out["thread"] = [{"seq": n.seq, "at": millis(n.at), **_author(sc, titles, n.author, n.by, level),
                       "kind": n.kind, "kind_label": NOTE_WORDS.get(n.kind, n.kind), "text": n.text[:TEXT_SHOWN],
-                      "outside": _from_outside(n.author)} for n in notes]
+                      "outside": c.from_outside(n.author)} for n in notes]
     ticket = lst.name == c.TICKETS
     plan = tracker.note_text(_store(call), item.plan_seq) if ticket and item.plan_seq and not veil else ""
     out["plan_text"] = plan[:TEXT_SHOWN]
@@ -1228,7 +1223,7 @@ async def history(call: Call) -> dict[str, Any]:
                        "was_label": tracker.status_words(c.TICKETS, x.was) if x.was else "",
                        "step": (step := tickets.step_of(x.stage, flow)), "step_label": JOURNEY_WORDS.get(step, ""),
                        **_author(sc, titles, x.author, x.by, level, veiled=veil),
-                       "outside": _from_outside(x.author)} for x in found]}
+                       "outside": c.from_outside(x.author)} for x in found]}
 
 
 # ── Ses gestes ────────────────────────────────────────────────────────────

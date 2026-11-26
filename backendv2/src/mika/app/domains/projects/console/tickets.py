@@ -76,11 +76,6 @@ def _store(sc: Scene) -> Any:
     return sc.ui.kernel.ports["store"]
 
 
-def _outside(author: str) -> bool:
-    """Écrit ailleurs que dans ce projet : chez l'hôte du dépôt, ou par un autre projet."""
-    return author == c.BY_HOST or bool(c.asking_project(author))
-
-
 def ticket_tone(item: Any) -> str:
     """La couleur d'un ticket : traité, écarté, la main au propriétaire, pas encore lu, sinon elle y travaille."""
     if item.status == c.STAGE_TREATED:
@@ -138,7 +133,7 @@ def _history(sc: Scene, item: Any) -> list[dict[str, Any]]:
                                                                                          c.STAGE_UNREAD) else
                     YOU if x.stage in tickets.OWNERS else WORK,
                     "icon": "x" if x.stage == c.STAGE_DISMISSED else
-                    STEP_ICONS.get(tickets.step_of(x.stage, flow), "check"), "outside": _outside(x.author)})
+                    STEP_ICONS.get(tickets.step_of(x.stage, flow), "check"), "outside": c.from_outside(x.author)})
     return out
 
 
@@ -153,7 +148,7 @@ def _thread(sc: Scene, item: Any) -> list[dict[str, Any]]:
         kind = NOTE_WORDS.get(n.kind, "") if n.kind != tracker.NOTE else ""
         out.append({"seq": n.seq, "side": side, "who": shown_author(sc.frame, n.author, n.by), "kind": kind,
                     "plan": n.seq == item.plan_seq, "ago": sc.ago(n.at), "when": sc.when(n.at),
-                    "text": n.text or FORGOTTEN, "outside": _outside(n.author)})
+                    "text": n.text or FORGOTTEN, "outside": c.from_outside(n.author)})
     return out
 
 
@@ -246,15 +241,15 @@ def _ticket(sc: Scene, e: tracker.Entry, back: str) -> dict[str, Any]:
     return {
         "name": name, "number": item.number, "title": e.title or FORGOTTEN, "tone": ticket_tone(item),
         "state": tracker.status_words(c.TICKETS, item.status), "kind": KIND_WORDS.get(item.kind, item.kind),
-        "by": by, "ago": sc.ago(item.at), "outside": _outside(item.author), "first": first,
+        "by": by, "ago": sc.ago(item.at), "outside": c.from_outside(item.author), "first": first,
         "high": item.priority in PRIORITIES_HIGH, "stuck": item.stuck,
-        "body": e.body, "body_html": markdown(e.body) if e.body and not _outside(item.author) else "",
+        "body": e.body, "body_html": markdown(e.body) if e.body and not c.from_outside(item.author) else "",
         "link": e.link, "plan": {"seq": item.plan_seq, "html": markdown(plan), "waits": waits_plan,
                                  "state": tracker.status_words(c.TICKETS, item.status)} if plan else None,
         "no_plan": "Elle attend la réponse à sa question avant de l'écrire." if asks else
         "Elle n'y touche pas tant que le ticket n'est pas accepté." if proposed else
         tracker.status_words(c.TICKETS, item.status) if item.closed else "Elle l'écrira en analysant le ticket.",
-        "thread": thread, "asks": asks, "proposed_outside": proposed and _outside(item.author),
+        "thread": thread, "asks": asks, "proposed_outside": proposed and c.from_outside(item.author),
         "note": shown(sc.form("element_noter", back + "#t-fil", list_name=c.TICKETS, item=name), "text"),
         "history": _history(sc, item), "journey": _journey(sc, item), "facts": facts, "linked": _linked(sc, item),
         "gestures": _gestures(sc, item, name, back), "publishing": _publishing(sc, item, name, back),
@@ -285,7 +280,7 @@ def tickets_page(sc: Scene) -> Markup | None:
     rows = [{"n": e.item.number, "title": e.title or FORGOTTEN, "tone": ticket_tone(e.item),
              "state": tracker.status_words(c.TICKETS, e.item.status), "yours": tickets.hand(e.item) == c.ACTOR_OWNER
              and not e.item.closed, "high": e.item.priority in PRIORITIES_HIGH,
-             "priority": PRIORITY_WORDS.get(e.item.priority, ""), "outside": _outside(e.item.author),
+             "priority": PRIORITY_WORDS.get(e.item.priority, ""), "outside": c.from_outside(e.item.author),
              "ago": sc.ago(e.item.updated_at or e.item.at),
              "on": chosen is not None and chosen.item.number == e.item.number,
              "href": sc.url("tickets", element=f"#{e.item.number}", **keep)} for e in found]

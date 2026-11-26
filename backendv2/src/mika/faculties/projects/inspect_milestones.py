@@ -30,7 +30,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_common import (
     LIVE,
-    operator_person,
+    acting_person,
     target_objective,
     target_project,
     unchanged,
@@ -130,10 +130,6 @@ def detail(o: Objective, texts: Mapping[str, str], editable: bool) -> list[Any]:
     return out
 
 
-def _writer(frame: Frame, ctx: ActionContext) -> str:
-    return operator_person(frame, ctx) or ctx.by
-
-
 class AddArgs(BaseModel):
     objective: Annotated[str, Knob(label="Objectif", widget="hidden")] = Field(min_length=1, max_length=12)
     text: Annotated[str, Knob(label="Jalon", widget="textarea", advanced=False, order=1,
@@ -177,7 +173,7 @@ def _add(s: ProjectsState, frame: Frame, args: AddArgs, ctx: ActionContext) -> D
         field = {"no_command": "command", "no_item": "item", "bad_check": "check"}.get(why, "text")
         raise Refused(REFUSALS[why], {field: "valeur requise"})
     draft = milestones.adding(p, o.id, o.milestone_seq + 1, spec, level=written_for(p, o),
-                              inherited=inherited_for(p, o), author="operator", by=_writer(frame, ctx))
+                              inherited=inherited_for(p, o), author="operator", by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message=f"Jalon ajouté à l'objectif n° {o.id}.", guard=unchanged(p.id, LIVE))
 
 
@@ -205,7 +201,7 @@ def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext
         raise Refused("Verdict inconnu.", {"verdict": "valider ou refuser"})
     if args.verdict == reaching.REFUSE and not args.reason.strip():
         raise Refused("Un point d'arrêt ne se refuse pas sans dire pourquoi.", {"reason": "valeur requise"})
-    draft = reaching.settling(p, o, m, args.verdict, author="operator", by=_writer(frame, ctx), text=args.reason)
+    draft = reaching.settling(p, o, m, args.verdict, author="operator", by=acting_person(frame, ctx), text=args.reason)
     said = "validé : elle reprend" if args.verdict == reaching.VALIDATE else "refusé : il lui revient"
     return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} {said}.",
                 guard=unchanged(p.id, LIVE))

@@ -44,7 +44,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_common import (
     LIVE,
-    operator_person,
+    acting_person,
     subject_project,
     target_project,
     unchanged,
@@ -345,10 +345,6 @@ def _follow_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
 # ── Ce que l'opérateur y fait ─────────────────────────────────────────────
 
 
-def _writer(frame: Frame, ctx: ActionContext) -> str:
-    return operator_person(frame, ctx) or ctx.by
-
-
 def _listing(p: Project, raw: str) -> Listing:
     name = tracker.named_list(raw)
     lst = tracker.listing(p.board, name) if name is not None else None
@@ -415,7 +411,7 @@ def _list_set(s: ProjectsState, frame: Frame, args: ListSetArgs, ctx: ActionCont
     if args.actor not in (c.ACTOR_SELF, c.ACTOR_OWNER):
         raise Refused("Qui agit : elle, ou le propriétaire du projet.", {"actor": "valeur inconnue"})
     draft = tracker.list_setting(p, name, title=args.title, opened=opened, closed=closed, actor=args.actor,
-                                 author=c.BY_OPERATOR, by=_writer(frame, ctx))
+                                 author=c.BY_OPERATOR, by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message=f"Liste « {name} » enregistrée.", guard=unchanged(p.id, LIVE))
 
 
@@ -455,7 +451,7 @@ def _item_add(s: ProjectsState, frame: Frame, args: ItemAddArgs, ctx: ActionCont
         raise Refused("Cet élément est déjà dans la liste.", {"key": "déjà là"})
     actor, person = (args.actor, "") if args.actor in (c.ACTOR_SELF, c.ACTOR_OWNER) else (lst.actor, lst.person)
     draft = tracker.adding(p, lst.name, key, args.title, text=args.text, status=status, actor=actor, person=person,
-                           link=args.link, author=c.BY_OPERATOR, by=_writer(frame, ctx))
+                           link=args.link, author=c.BY_OPERATOR, by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message=f"Élément ajouté à « {lst.name} ».", guard=unchanged(p.id, LIVE))
 
 
@@ -495,7 +491,7 @@ def _ticket_open(s: ProjectsState, frame: Frame, args: TicketArgs, ctx: ActionCo
         raise Refused("Un ticket naît ouvert ou proposé.", {"born": "valeur inconnue"})
     proposed = args.born == BORN_PROPOSED
     draft = tracker.adding(p, c.TICKETS, key, args.title, text=args.text, kind=args.kind, priority=args.priority,
-                           proposed=proposed, author=c.BY_OPERATOR, by=_writer(frame, ctx))
+                           proposed=proposed, author=c.BY_OPERATOR, by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message="Ticket proposé : le propriétaire du projet l'accepte ou l'écarte."
                 if proposed else "Ticket ouvert.", guard=unchanged(p.id, LIVE))
 
@@ -521,7 +517,7 @@ def _item_status(s: ProjectsState, frame: Frame, args: ItemStatusArgs, ctx: Acti
     status = tracker.read_status(lst, args.status)
     if status is None:
         raise Refused("Ce n'est pas un statut de cette liste.", {"status": tracker.statuses_said(lst)})
-    draft = tracker.changing(p, e.item, author=c.BY_OPERATOR, by=_writer(frame, ctx), status=status, note=args.note)
+    draft = tracker.changing(p, e.item, author=c.BY_OPERATOR, by=acting_person(frame, ctx), status=status, note=args.note)
     if tracker.changes_nothing(draft, e.item):
         raise Refused("L'élément a déjà ce statut.")
     return Done(drafts=(draft,), message=f"{e.item.key} : {tracker.status_words(lst.name, status)}.",
@@ -547,7 +543,7 @@ def _item_actor(s: ProjectsState, frame: Frame, args: ItemActorArgs, ctx: Action
     e = target_entry(p, ctx, lst, args.item)
     if (e.item.actor, e.item.person) == (args.actor, ""):
         raise Refused("Cet élément est déjà à " + ("elle." if args.actor == c.ACTOR_SELF else "son propriétaire."))
-    draft = tracker.changing(p, e.item, author=c.BY_OPERATOR, by=_writer(frame, ctx), actor=args.actor)
+    draft = tracker.changing(p, e.item, author=c.BY_OPERATOR, by=acting_person(frame, ctx), actor=args.actor)
     return Done(drafts=(draft,), message=f"{e.item.key} : à " + dict(ACTOR_CHOICES)[args.actor] + ".",
                 guard=unchanged(p.id, LIVE))
 
@@ -567,7 +563,7 @@ def _item_note(s: ProjectsState, frame: Frame, args: ItemNoteArgs, ctx: ActionCo
     e = target_entry(p, ctx, _listing(p, args.list_name), args.item)
     if not args.text.strip():
         raise Refused("La note est vide.", {"text": "valeur requise"})
-    draft = tracker.noting(p, e.item, args.text, author=c.BY_OPERATOR, by=_writer(frame, ctx))
+    draft = tracker.noting(p, e.item, args.text, author=c.BY_OPERATOR, by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message="Note ajoutée à son fil.", guard=unchanged(p.id, LIVE))
 
 
@@ -595,7 +591,7 @@ def _ticket_publish(s: ProjectsState, frame: Frame, args: PublishArgs, ctx: Acti
     why = issues.refusal(p, e.item, None, 0) or ("" if e.title.strip() else "forgotten")
     if why:
         raise Refused(f"Le ticket #{e.item.number} ne se publie pas : {CANNOT[why]}.")
-    draft = issues.asking(p, e.item, author=c.BY_OPERATOR, by=_writer(frame, ctx))
+    draft = issues.asking(p, e.item, author=c.BY_OPERATOR, by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message=f"Publication du ticket #{e.item.number} demandée : son aperçu est dans "
                                          "« À valider ».", guard=unchanged(p.id, LIVE))
 
@@ -619,7 +615,7 @@ def _note_publish(s: ProjectsState, frame: Frame, args: NotePublishArgs, ctx: Ac
     if why := issues.refusal(p, e.item, note, args.note):
         raise Refused(f"Cette note du ticket #{e.item.number} ne se publie pas : {CANNOT[why]}.",
                       {"note": "une note de son fil"})
-    draft = issues.asking(p, e.item, note=args.note, author=c.BY_OPERATOR, by=_writer(frame, ctx))
+    draft = issues.asking(p, e.item, note=args.note, author=c.BY_OPERATOR, by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message=f"Publication de la note n° {args.note} demandée : son aperçu est dans "
                                          "« À valider ».", guard=unchanged(p.id, LIVE))
 
@@ -646,7 +642,7 @@ def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext
     e = target_entry(p, ctx, tracker.TICKET_LIST, args.item)
     item = e.item
     fields: dict[str, Any]
-    by = _writer(frame, ctx)
+    by = acting_person(frame, ctx)
     if args.verdict == "validate":  # son plan devient un objectif, ta consigne avec lui (ADR 0270)
         plan = tracker.note_text(ctx.store, item.plan_seq)
         why = tracker.validation_refusal(p, item, plan)

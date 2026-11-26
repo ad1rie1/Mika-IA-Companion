@@ -61,6 +61,7 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     by_pulls,
+    concluded,
     handed_over,
     inherited_for,
     objective_at,
@@ -122,14 +123,6 @@ def _here(ctx: Any) -> tuple[Project, Objective, str] | None:
     run = s.running.get(ctx.episode_id)
     sha = run.reviewing if run is not None and run.purpose == "review" else got[1].review_due
     return (*got, sha) if sha else None
-
-
-def concluded(o: Objective) -> bool:
-    """Le travail de cet objectif est-il conclu — un ponctuel abouti, ou un constant dont le dernier passage s'est
-    achevé (aucune exécution n'est repartie depuis) ?"""
-    if o.kind == c.ONCE:
-        return o.status == c.DONE
-    return o.status == c.OPEN and bool(o.passed_at) and o.passed_at >= o.last_run_at
 
 
 def to_ask(s: ProjectsState) -> list[tuple[Project, Objective]]:

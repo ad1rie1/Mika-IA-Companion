@@ -14,6 +14,7 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import actions as project_actions
 from mika.faculties.projects import work as projects_work
+from mika.faculties.projects.faculty import NETWORKED_CAPABILITY
 from mika.kernel.clock import local
 from mika.ports.workshop import argv_lines
 from mika.vocab.episodes import project_of
@@ -29,7 +30,7 @@ def _proposal_text(summary: str, capability: str, effect: Any) -> str:
     """Ce qu'on montre d'une demande qui attend un accord. Une commande réseau se montre **entière et exacte**, un
     argument par ligne (lue dans ce qui partira, pas dans un résumé qu'on aurait pu couper) ; ses raisons restent ses
     mots à elle."""
-    if capability != f"{projects_c.OWNER}.networked" or effect is None:
+    if capability != NETWORKED_CAPABILITY or effect is None:
         return summary
     try:
         argv = json.loads(effect.args_json).get("argv") or []

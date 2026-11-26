@@ -3,9 +3,10 @@
 Les gardes et les cibles d'un geste : la garde « projet inchangé » (``unchanged`` — les gestes de conversation,
 ``steer.py``, ``tracker.py`` et ``reaching.py``, la posent aussi), les états où un projet se pilote (``LIVE``), le
 projet et l'objectif qu'un geste vise (``target_project``, ``target_objective``), la personne qui agit
-(``operator_person``). Les petits outils des vues : le projet dont une vue est la fiche (``subject_project``), les
-textes gardés (``stored_texts``, ``stored_text``, ``FORGOTTEN``), un texte coupé (``cut_noted``), un dépôt distant
-(``host_of``, ``remote_ref``), où en est un effet (``effect_state``).
+(``operator_person``), sinon son compte (``acting_person`` : qui un geste dit l'avoir fait). Les petits outils des
+vues : le projet dont une vue est la fiche (``subject_project``), les textes gardés (``stored_texts``,
+``stored_text``, ``FORGOTTEN``), un texte coupé (``cut_noted``), un dépôt distant (``host_of``, ``remote_ref``), où
+en est un effet (``effect_state``).
 
 Ce qui dit si une action peut être offerte (``can_edit``, ``can_run``…) reste à côté de son geste, dans
 ``actions.py``."""
@@ -61,6 +62,11 @@ def target_objective(p: Project, raw: str) -> Objective:
 def operator_person(frame: Frame, ctx: ActionContext) -> str:
     """La personne de l'opérateur qui agit (vide : inconnue)."""
     return (frame.get(identity_c.PERSON(ctx.by)) or "") if ctx.by else ""
+
+
+def acting_person(frame: Frame, ctx: ActionContext) -> str:
+    """Qui agit, tel qu'un geste de la console l'écrit (``by``) : la personne de son compte, sinon son compte."""
+    return operator_person(frame, ctx) or ctx.by
 
 
 def subject_project(s: ProjectsState, ctx: InspectContext) -> Project | Note:

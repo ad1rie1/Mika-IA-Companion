@@ -567,7 +567,7 @@ READS: dict[str, dict[str, str]] = {
         "writable": "si l'on peut écrire sur une pull request (la modifier, y répondre)",
         "objective_on": "l'objectif d'une branche de travail",
         "objective_at": "l'objectif lié à un commit ou à un ticket",
-        "ticket_of": "le ticket que tient un objectif",
+        "ticket_held": "le ticket que tient un objectif",
         "issue_ticket": "le ticket que reflète une issue",
         "status_words": "l'étape d'un ticket lié, en mots",
     },

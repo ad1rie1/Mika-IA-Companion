@@ -1762,6 +1762,14 @@ def living(p: Project) -> int:
     return sum(1 for o in p.objectives if o.status in (c.OPEN, c.BLOCKED))
 
 
+def concluded(o: Objective) -> bool:
+    """Le travail de cet objectif est-il conclu — un ponctuel abouti, ou un constant dont le dernier passage s'est
+    achevé (aucune exécution n'est repartie depuis) ?"""
+    if o.kind == c.ONCE:
+        return o.status == c.DONE
+    return o.status == c.OPEN and bool(o.passed_at) and o.passed_at >= o.last_run_at
+
+
 def in_force(p: Project) -> int:
     return sum(1 for d in p.decisions if d.status == c.IN_FORCE)
 

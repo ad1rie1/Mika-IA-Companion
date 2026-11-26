@@ -55,7 +55,7 @@ from mika.app.handmade.tabs.decisions import by_day
 from mika.contracts import projects as c
 from mika.faculties.projects import inspect_code as code
 from mika.faculties.projects import merge
-from mika.faculties.projects.faculty import objective_at
+from mika.faculties.projects.faculty import objective_at, ticket_held
 from mika.faculties.projects.inspect import OBJ_FR
 from mika.faculties.projects.inspect_code import (
     diff_rows,
@@ -64,7 +64,6 @@ from mika.faculties.projects.inspect_code import (
     pull_named,
     pull_order,
     pull_stage,
-    ticket_of,
 )
 from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, MOVED_THERE, REFUSED_WORDS
@@ -304,7 +303,7 @@ def card(sc: Scene, o: Any) -> dict[str, Any] | None:
 
 def linked(sc: Scene, o: Any) -> dict[str, Any]:
     """Ce qui est lié à un commit, une branche, des vérifications : l'objectif, son ticket, sa pull request."""
-    item = ticket_of(sc.p, o)
+    item = ticket_held(sc.p, o)
     words = sc.texts([o.text_ref] + ([item.title_ref] if item is not None else [])) if o is not None else {}
     return {"objective": linked_objective(sc, o, words), "ticket": linked_ticket(sc, item, words),
             "pull": card(sc, o)}
@@ -559,7 +558,7 @@ def pulls_view(sc: Scene, raw: Raw, head: Mapping[str, Any]) -> dict[str, Any]:
     log = raw.code(code.LOG_TITLE, prefix=True)
     said_ = sc.texts(goal_refs(sc, o))
     back = _pull_href(sc, o)
-    item = ticket_of(p, o)
+    item = ticket_held(p, o)
     ticket_words = sc.texts([item.title_ref]) if item is not None else {}
     title = said_.get(o.text_ref, FORGOTTEN)
     side_by_side = sc.query.get("diff") == "cote"
@@ -613,7 +612,7 @@ def branches_view(sc: Scene, raw: Raw, head: Mapping[str, Any]) -> dict[str, Any
         name = said(cells.get("branche"))
         base = said(cells.get("base")) == "oui"
         o = None if base else objective_on(p, name)
-        item = ticket_of(p, o)
+        item = ticket_held(p, o)
         ahead, behind = number(cells.get("avance")), number(cells.get("retard"))
         sha = said(cells.get("dernier commit"))
         items.append({

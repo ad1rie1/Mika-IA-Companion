@@ -68,6 +68,7 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     by_pulls,
+    concluded,
     handed_over,
     inherited_for,
     milestones_of,
@@ -125,14 +126,6 @@ FILES_SHOWN = 30
 CHECKS_SAID_MAX, LOG_SHOWN = 1500, 3000
 
 # ── Ce qui est dû ─────────────────────────────────────────────────────────
-
-
-def concluded(o: Objective) -> bool:
-    """Le travail de cet objectif est-il conclu — un ponctuel abouti, ou un constant dont le dernier passage s'est
-    achevé (aucune exécution n'est repartie depuis) ?"""
-    if o.kind == c.ONCE:
-        return o.status == c.DONE
-    return o.status == c.OPEN and bool(o.passed_at) and o.passed_at >= o.last_run_at
 
 
 def due(s: ProjectsState) -> list[tuple[Project, Objective]]:

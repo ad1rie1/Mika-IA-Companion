@@ -13,9 +13,9 @@ from pydantic import Field
 from mika.contracts import projects as c
 from mika.faculties.projects.access import STEER_WORDS, allowance, of_frame, who_named
 from mika.faculties.projects.faculty import ACCESS_SET, PROJECTS, ProjectsState, access_of, project_at
+from mika.faculties.projects.inspect_common import unchanged
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard
 from mika.kernel.inspect import ActionSlot, Block, Column, InspectContext, Note, Ref, Row, Table
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.kernel.rights import Grant, RuleTable
@@ -125,11 +125,6 @@ def access_rows(args: AccessArgs) -> list[c.ProjectAccess]:
     return rows
 
 
-def _exists(project: int) -> Guard:
-    """Le tableau ne vaut que pour un projet qui existe toujours."""
-    return Guard("projet inchangé", predicate=lambda view, p=project: view.get(c.STATUS(p)) in c.STATUSES)
-
-
 @PROJECTS.action("acces", title="Accès au projet", args=AccessArgs, emits=[ACCESS_SET], subject="project", order=15,
                  inline=True, description="Ses lignes d'accès, lues de haut en bas, et la ligne par défaut : qui, "
                                           "par où, quand, le voir, le piloter, ses fichiers, ce qu'elle fait d'un "
@@ -145,8 +140,9 @@ def _access(s: ProjectsState, frame: Frame, args: AccessArgs, ctx: ActionContext
     default = c.ProjectAccess(see=args.defaut_voir, steer=args.defaut_piloter, files=args.defaut_fichiers,
                               docs=args.defaut_documentation,
                               read=args.defaut_lecture, act=args.defaut_action)
+    # le tableau ne vaut que pour un projet qui existe toujours, quel que soit son état
     return Done(drafts=(ACCESS_SET.draft(project=p.id, rows=tuple(rows), default=default, by=ctx.by),),
-                message=said, guard=_exists(p.id))
+                message=said, guard=unchanged(p.id, c.STATUSES))
 
 
 # ── Qui peut quoi, sur la page « Droits » ─────────────────────────────────

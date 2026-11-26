@@ -188,7 +188,7 @@ def ticket_entries(look: Look, e: Any, name: str) -> list[dict[str, Any]]:
     item = found.item
     veiled = bool(look.veiled(item))
     who = look.who(d.author, d.by)
-    outside = d.author == c.BY_HOST or bool(c.asking_project(d.author))
+    outside = c.from_outside(d.author)
     kind = GESTURE if d.author in PEOPLE and d.by else TICKET
     handle = f"#{item.number}"
     named = handle if veiled else f"{handle} {found.title}"

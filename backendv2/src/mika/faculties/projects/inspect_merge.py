@@ -19,7 +19,7 @@ from mika.faculties.projects.actions import can_edit
 from mika.faculties.projects.faculty import MERGE_ASKED, MERGE_CUT, MERGE_STALE, PROJECTS, ProjectsState
 from mika.faculties.projects.inspect_common import (
     LIVE,
-    operator_person,
+    acting_person,
     target_objective,
     target_project,
     unchanged,
@@ -91,11 +91,6 @@ class MergeArgs(BaseModel):
     head: Annotated[str, Knob(label="Le commit lu", widget="hidden")] = Field(default="", max_length=40)
 
 
-def writer(frame: Frame, ctx: ActionContext) -> str:
-    """La personne qui agit : celle de son compte, comme pour trancher un ticket."""
-    return operator_person(frame, ctx) or ctx.by
-
-
 @PROJECTS.action("fusionner", title="Fusionner la pull request", args=MergeArgs, emits=[MERGE_ASKED],
                  subject="project", order=66, available=can_edit, inline=True, danger=True, confirm=CONFIRM,
                  description="Fusionner chez l'hôte la pull request d'un objectif, au commit que tu as lu. Ton geste, "
@@ -103,7 +98,7 @@ def writer(frame: Frame, ctx: ActionContext) -> str:
 async def _fuse(s: ProjectsState, frame: Frame, args: MergeArgs, ctx: ActionContext) -> Done:
     p = target_project(s, ctx)
     o = target_objective(p, args.objective)
-    person = writer(frame, ctx)
+    person = acting_person(frame, ctx)
     if not tracker.settles(frame, p, person):
         raise Refused(NOT_YOURS)
     if why := merge.blocked(p, o, ctx.now):

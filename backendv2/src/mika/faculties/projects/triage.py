@@ -201,12 +201,6 @@ async def ticket_step(args: StepArgs, ctx: Any) -> Any:
 RETRY_US = MINUTE
 
 
-def ticket_of(p: Project, o: Objective | None) -> Item | None:
-    """Le ticket dont cet objectif est né, s'il est encore sous la main de l'état (un ticket ouvert y est
-    toujours)."""
-    return ticket_held(p, o)
-
-
 def births(s: ProjectsState) -> list[tuple[Project, Item]]:
     """Les projets actifs et planifiés à qui il faut l'objectif « Traiter les tickets » : un ticket ouvert attend
     qu'elle le traite — non lu, ou en analyse : qui que ce soit qui l'ait ouvert, elle comprise (ADR 0280 : les
@@ -292,7 +286,7 @@ def orphans(s: ProjectsState) -> list[tuple[Project, Objective, Item]]:
         if p.status == c.ARCHIVED:
             continue
         for o in p.objectives:
-            item = ticket_of(p, o) if o.status in (c.OPEN, c.BLOCKED) else None
+            item = ticket_held(p, o) if o.status in (c.OPEN, c.BLOCKED) else None
             if item is not None and (item.closed or item.objective != o.id):
                 out.append((p, o, item))
     return out
@@ -366,7 +360,7 @@ async def small_gate(ctx: Any, p: Project, o: Objective, verdict: str, pending: 
     """Mesurer ce que cette exécution a enregistré pour un ticket pris comme petit, et retenir son « fait » s'il
     dépasse la borne : le ticket repasse en attente de validation, avec son plan et ce qu'elle a déjà fait. Un projet
     sans atelier, ou une exécution qui n'a rien enregistré, n'a rien à mesurer."""
-    item = ticket_of(p, o)
+    item = ticket_held(p, o)
     if item is not None and not item.closed and tickets.waits(item) and verdict == c.DONE:
         # son ticket attend le propriétaire (sa question, sa validation — un petit ticket qui a dépassé sa borne) :
         # son objectif ne se conclut pas « fait » d'ici là, qu'elle ait enregistré quelque chose ou non (ADR 0272)

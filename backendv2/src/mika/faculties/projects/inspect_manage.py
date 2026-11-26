@@ -43,7 +43,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_common import (
     LIVE,
-    operator_person,
+    acting_person,
     target_objective,
     target_project,
     unchanged,
@@ -82,11 +82,6 @@ EDIT_ASKED = "Modification demandée chez l'hôte, à ton nom : la pull request 
 COMMENT_ASKED = "Commentaire demandé chez l'hôte : il part du compte du jeton, et dit qu'il est de toi."
 
 
-def writer(frame: Frame, ctx: ActionContext) -> str:
-    """La personne qui agit : celle de son compte."""
-    return operator_person(frame, ctx) or ctx.by
-
-
 # ── Confier un projet ─────────────────────────────────────────────────────
 
 
@@ -107,7 +102,7 @@ class EntrustArgs(BaseModel):
                  description="Un projet demandé en quelques mots : il naît à cadrer — elle relit la demande, pose ses "
                              "questions et propose un plan avant de s'y mettre.")
 def _entrust(s: ProjectsState, frame: Frame, args: EntrustArgs, ctx: ActionContext) -> Done:
-    person = writer(frame, ctx)
+    person = acting_person(frame, ctx)
     if not person or not frame.get(identity_c.IS_OWNER(person)):
         raise Refused(NOT_KEEPER)
     errors: dict[str, str] = {}
@@ -163,7 +158,7 @@ def _milestone(s: ProjectsState, frame: Frame, ctx: ActionContext, objective: st
     m = milestone_at(o, milestone)
     if m is None:
         raise Refused(f"Aucun jalon n° {milestone[:12]} sur cet objectif.")
-    person = writer(frame, ctx)
+    person = acting_person(frame, ctx)
     if why := managing.undoing(m, managing.frames(frame, p, person)):
         raise Refused(HELD_WORDS.get(why, HELD_WORDS["other"]))
     return p, o, m, person
@@ -244,7 +239,7 @@ def _ticket_edit(s: ProjectsState, frame: Frame, args: TicketEditArgs, ctx: Acti
         changes["priority"] = args.priority
     if not changes:
         raise Refused("Rien n'a changé.")
-    draft = tracker.changing(p, item, author=c.BY_OPERATOR, by=writer(frame, ctx), **changes)
+    draft = tracker.changing(p, item, author=c.BY_OPERATOR, by=acting_person(frame, ctx), **changes)
     return Done(drafts=(draft,), message=f"Ticket #{item.number} modifié.", guard=unchanged(p.id, LIVE))
 
 
@@ -294,7 +289,7 @@ def _decision_edit(s: ProjectsState, frame: Frame, args: DecisionEditArgs, ctx: 
     if not changes and not cleared:
         raise Refused("Rien n'a changé.")
     draft = managing.DECISION_REVISED.draft(project=p.id, decision=d.id, cleared=tuple(cleared),
-                                            by=writer(frame, ctx), owner=p.owner, about=p.about,
+                                            by=acting_person(frame, ctx), owner=p.owner, about=p.about,
                                             read_about=p.read_about, **changes)
     return Done(drafts=(draft,), message=f"Décision n° {d.id} modifiée.", guard=unchanged(p.id, LIVE))
 
@@ -307,7 +302,7 @@ def _pull(s: ProjectsState, frame: Frame, ctx: ActionContext, objective: str) ->
     s'occupe d'elle."""
     p = target_project(s, ctx)
     o = target_objective(p, objective)
-    person = writer(frame, ctx)
+    person = acting_person(frame, ctx)
     if not managing.frames(frame, p, person):
         raise Refused(NOT_WRITER)
     if not managing.writable(p, o):

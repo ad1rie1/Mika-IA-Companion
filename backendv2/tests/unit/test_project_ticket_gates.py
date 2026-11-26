@@ -167,7 +167,7 @@ def test_a_reopened_ticket_the_state_no_longer_kept_comes_back_with_its_number_a
     s = _step(s, c.STAGE_VALIDATION, 220, validated=True, plan=210, objective=1, **ADRIEN)
     s = _objective(s, 1, 220, ticket=1)
     p, o = s.projects[1], objective_at(s.projects[1], 1)
-    assert _ticket(s).status == c.STAGE_WORKING and triage.ticket_of(p, o) is _ticket(s)
+    assert _ticket(s).status == c.STAGE_WORKING and faculty.ticket_held(p, o) is _ticket(s)
     assert triage.follow_ups(s) == [] and triage.orphans(s) == []
     assert faculty.written_for(p, o) == CONFIDENCE
     asking = _note(s, 230, kind=c.NOTE_QUESTION)  # sa question retient son objectif : il se compare au bon numéro
