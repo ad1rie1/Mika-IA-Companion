@@ -8,7 +8,8 @@ ce qu'un partage y ajoute, et où il se range.
 - **Un partage ajoute la ligne de la personne**, et il est un plafond : « lire » n'écrit pas ; « lire et préparer »
   écrit sur l'accord du propriétaire, sans répondre ; « s'en servir » comme le propriétaire. Retiré, la ligne part.
 - **Rangé dans les réglages**, lu à chaque épisode (``Rights.agendas``) ; partager un agenda au tableau réglé y pose ou
-  y retire la ligne de la personne, d'une seule écriture.
+  y retire la ligne de la personne, d'une seule écriture. Il vaut dès l'ouverture, sans que rien ait pris les réglages
+  de l'agenda, et un enregistrement vaut à l'épisode suivant.
 - **La page « Droits »** de la console connaît cette sorte de tableau.
 """
 
@@ -16,13 +17,13 @@ from __future__ import annotations
 
 import asyncio
 
-from mika.adapters.agenda import AgendaConfig
+from mika.adapters.agenda import AgendaConfig, AgendaStore, Providers
 from mika.adapters.store_sql import SqlStore
 from mika.app.composition import arbitration, faculties
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.settings import SecretBox, Settings
 from mika.kernel.frame import Audience
-from mika.kernel.registry import Registry
+from mika.kernel.registry import ArbitrationPolicy, Registry
 from mika.plugins.agenda import AgendaParams
 from mika.plugins.agenda.rights import (
     OWNED,
@@ -34,6 +35,7 @@ from mika.plugins.agenda.rights import (
     table_of,
 )
 from mika.runtime.state import RUNTIME
+from mika.sim.clock import SimClock, run_virtual
 from mika.vocab.access import (
     AGREE,
     ALONE,
@@ -49,8 +51,10 @@ from mika.vocab.access import (
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import ChannelTrust
 from mika.vocab.rights import Rights
+from tests.fixtures import backend
+from tests.fixtures.mika import AFTERNOON, boot, build, connect, reply, said
 
-ADRIEN = Audience(persons=("user_1",), channel="web", public=False, trust=ChannelTrust.AUTHENTICATED.value,
+ADRIEN =Audience(persons=("user_1",), channel="web", public=False, trust=ChannelTrust.AUTHENTICATED.value,
                   owner=True, person="user_1")
 BEA = Audience(persons=("user_2",), channel="web", public=False, trust=ChannelTrust.AUTHENTICATED.value,
                person="user_2")
@@ -164,3 +168,68 @@ def test_a_table_is_kept_in_the_settings_and_a_share_rewrites_its_line(tmp_path)
 def test_the_rights_page_knows_the_agenda_tables():
     registry = Registry([RUNTIME, *faculties()], arbitration=arbitration())
     assert "agenda.agendas" in {s.key for s in registry.rights}
+
+
+AGENDA_TOOLS = {"agenda_list", "agenda_events", "agenda_free", "agenda_create", "agenda_edit", "agenda_delete",
+                "agenda_respond"}
+
+
+def test_a_set_table_holds_from_the_first_episode_and_a_save_from_the_next(tmp_path):
+    """Un tableau réglé vaut dès l'ouverture : rangé par des réglages d'avant, il ferme « Mon agenda » de Béa ; des
+    réglages neufs s'ouvrent sur la même base sans que rien ait pris ni ouvert ceux de l'agenda, un noyau neuf les lit
+    (``access_tables``), et **au premier épisode** ses outils ne lui sont pas offerts — sinon le tableau que son
+    propriétaire donne les lui ouvrirait. Un enregistrement vaut à l'épisode suivant, sans redémarrage : retiré, son
+    tableau de départ les lui rouvre ; fermé de nouveau, ils se referment. (Béa n'est pas une propriétaire : la famille
+    de l'agenda ne les lui offre que par un agenda qu'elle peut lire, ``owned``.)"""
+    shut = Table[AgendaRule](lines=(), default=CLOSED_AGENDA)
+    kept = tmp_path / "reglages"
+    kept.mkdir()
+
+    async def stored() -> None:
+        store = SqlStore(kept / "mind.db", kept / "views.db", threaded=False)
+        await store.open()
+        try:
+            before = Settings(store, SecretBox.for_data(kept))
+            await before.open()
+            await before.of(AgendaSettings).save_agenda_table(BEA_CAL, shut)
+        finally:
+            await store.close()
+
+    asyncio.run(stored())
+    clock = SimClock(AFTERNOON)
+    agenda = AgendaStore(backend.target(tmp_path, "agenda"), now=clock.now)
+    door: dict[str, Settings] = {}
+    kernel, clock, llm, _ = build(tmp_path, reply("D'accord. [EMOTION:happy:0.3]"), clock=clock,
+                                  arbitration=ArbitrationPolicy(),
+                                  ports={"agenda": agenda, "agenda_providers": Providers(agenda)},
+                                  access_tables=lambda: door["settings"].access_tables())
+
+    async def offered_to_bea() -> set[str]:
+        perceived = await kernel.perceive(said("user_2", "salut !"))
+        await perceived.reply
+        return {t.name for t in [r for r in llm.calls if r.role == "reply"][-1].tools}
+
+    async def main():
+        store = SqlStore(kept / "mind.db", kept / "views.db", threaded=False)
+        await store.open()
+        settings = door["settings"] = Settings(store, SecretBox.for_data(kept))
+        assert AgendaSettings not in settings._parts  # rien n'a pris les réglages de l'agenda : la porte seule les lit
+        await settings.open()
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await connect(kernel, "user_2", "Béa")
+            first = await offered_to_bea()
+            await settings.of(AgendaSettings).save_agenda_table(BEA_CAL, None)
+            reopened = await offered_to_bea()
+            await settings.of(AgendaSettings).save_agenda_table(BEA_CAL, shut)
+            closed = await offered_to_bea()
+            return first, reopened, closed
+        finally:
+            await kernel.stop()
+            await store.close()
+
+    first, reopened, closed = run_virtual(clock, main)
+    assert not AGENDA_TOOLS & first  # fermé dès l'ouverture
+    assert AGENDA_TOOLS <= reopened  # retiré : son tableau de départ vaut à l'épisode suivant
+    assert not AGENDA_TOOLS & closed  # fermé de nouveau : à l'épisode suivant aussi

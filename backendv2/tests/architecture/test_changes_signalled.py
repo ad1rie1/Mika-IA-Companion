@@ -217,12 +217,13 @@ def test_the_settings_of_a_domain_write_only_through_the_door():
         direct = sorted({x.attr for x in ast.walk(tree) if isinstance(x, ast.Attribute) and x.attr in ("store", "run_mind")})
         assert not direct, f"{path.parent.name}/settings.py touche au magasin ({', '.join(direct)}) : il écrit par ``_put``"
     door = _methods(ast.parse((SRC / "app/settings.py").read_text(encoding="utf-8")), "SettingsPart")
-    assert set(door) == {"__init__", "_get", "_put", "_sealed", "_opened", "open"}, \
+    assert set(door) == {"__init__", "_get", "_put", "_sealed", "_opened", "open", "access_tables"}, \
         "la porte d'un domaine : lire, écrire en le disant, sceller et rouvrir une fiche, lire en mémoire à " \
-        "l'ouverture — rien d'autre"
-    # sceller et rouvrir ne font que transformer une fiche : ni lecture, ni écriture
-    assert not any(_self_call(x, name) for f in ("_sealed", "_opened") for x in ast.walk(door[f])
-                   for name in ("_get", "_put", "_saved")), "sceller une fiche n'écrit rien"
+        "l'ouverture, rendre ses tableaux de droits réglés (ADR 0316) — rien d'autre"
+    # sceller et rouvrir ne font que transformer une fiche : ni lecture, ni écriture ; et sans tableaux à rendre, une
+    # part ne lit ni n'écrit rien
+    assert not any(_self_call(x, name) for f in ("_sealed", "_opened", "access_tables") for x in ast.walk(door[f])
+                   for name in ("_get", "_put", "_saved")), "sceller une fiche, ou ne rendre aucun tableau, n'écrit rien"
 
 
 ACCOUNTS_TOY = '''

@@ -31,7 +31,7 @@ from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
-from mika.app.domains import DOMAINS, part
+from mika.app.domains import DOMAINS, gathered, part
 from mika.inspector import mcp as console_mcp
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
@@ -190,6 +190,16 @@ class SettingsPart:
         """Appelé à l'ouverture des réglages, une fois leur table là : un domaine qui tient ses réglages en mémoire
         (lus depuis d'autres fils, ou à chaque épisode) les lit ici. Sa classe doit alors être prise avant
         l'ouverture — dans le câblage de son domaine (``wire``)."""
+
+    def access_tables(self) -> Mapping[str, Mapping[str, Table[Any]]]:
+        """Les tableaux de droits réglés des ressources du domaine (ADR 0316), par sorte de ressource (« agendas »)
+        puis par ressource : ceux qu'il range sous sa clé, avec son type de ligne, lus par ``_get`` — jamais dans un
+        état que ``open`` charge, car la porte les tire avant d'ouvrir les parts. La porte les réunit dans
+        ``Rights.tables`` à son ouverture, que quelqu'un ait pris cette part ou non, puis quand la part le lui demande
+        après avoir écrit les siens (``Settings.reread_rights``) : un tableau réglé vaut dès l'ouverture, et à
+        l'épisode qui suit un enregistrement. Une sorte qu'il range, il la rend toujours, même vide : deux domaines
+        qui disent la même sont refusés à l'ouverture. Rien par défaut."""
+        return {}
 
 
 P = TypeVar("P", bound=SettingsPart)
@@ -375,7 +385,29 @@ class Settings:
                 agendas[str(calendar)] = Table[AgendaRule].model_validate(raw)
             except ValueError:
                 log.warning("droits : le tableau d'un agenda est illisible, celui de son propriétaire vaut")
-        return Rights(canals=canals, families=families, in_hand=in_hand, agendas=agendas)
+        return Rights(canals=canals, families=families, in_hand=in_hand, agendas=agendas,
+                      tables=self._domain_tables())
+
+    def _domain_tables(self) -> dict[str, Mapping[str, Table[Any]]]:
+        """Les tableaux réglés que les domaines rangent dans leurs réglages (ADR 0316), réunis par sorte : la porte
+        les **tire** de chaque domaine qui a des réglages, dans l'ordre de ``DOMAINS`` — par sa fiche, comme
+        ``named``, sans en nommer aucun —, que quelqu'un ait pris sa part ou non. Une part qui n'en range pas (qui
+        laisse ``SettingsPart.access_tables`` tel quel) n'est pas prise ; une qui en range est construite ici, avant
+        l'ouverture des parts. Deux domaines qui disent la même sorte : refusé (``ValueError``), en les nommant."""
+        said: list[tuple[str, Mapping[str, Mapping[str, Table[Any]]]]] = []
+        for domain in DOMAINS:
+            if domain.settings is None:
+                continue
+            kind = part(domain.settings, "SETTINGS")
+            if kind.access_tables is SettingsPart.access_tables:
+                continue
+            said.append((f"le domaine « {domain.name} »", self.of(kind).access_tables()))
+        return gathered("une sorte de tableaux de droits réglés, SettingsPart.access_tables", said)
+
+    def reread_rights(self) -> None:
+        """Les tableaux réglés des domaines, relus (``_domain_tables``) : la part d'un domaine l'appelle après avoir
+        écrit les siens par ``_put``, et ils valent dès l'épisode suivant. Les autres droits ne bougent pas."""
+        self._rights = replace(self._rights, tables=self._domain_tables())
 
     def access_tables(self) -> Rights:
         """Ses droits tels que le registre les lit à chaque épisode (``Registry.access_tables``)."""

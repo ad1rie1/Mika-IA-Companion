@@ -49,7 +49,8 @@ class Rights:
     """Les tableaux de droits qu'un opérateur a réglés (ADR 0134), tels que l'application les donne au registre
     (``Registry.access_tables``) : ``canals`` (les tableaux des canaux, ``vocab.canals.Canals``), ``families``
     (famille d'outils → tableau, ``vocab.access.Table[ToolRule]``), ``in_hand`` (outil → « hand » ou « ask »,
-    l'offre réglée), ``agendas`` (agenda → tableau, ``vocab.access.Table[AgendaRule]``, ADR 0309)."""
+    l'offre réglée), ``agendas`` (agenda → tableau, ``vocab.access.Table[AgendaRule]``, ADR 0309), ``tables`` (les
+    tableaux réglés des ressources d'un domaine, par sorte puis par ressource, ADR 0316 : ``sort``)."""
 
     canals: Canals | None = None
     families: Mapping[str, Table[ToolRule]] = field(default_factory=dict)
@@ -57,6 +58,15 @@ class Rights:
     #: le tableau réglé de chaque agenda (ADR 0309), par sa clé ; absent, celui que son propriétaire et ses partages
     #: donnent (``plugins/agenda/rights.py``)
     agendas: Mapping[str, Table[AgendaRule]] = field(default_factory=dict)
+    #: les tableaux réglés des ressources d'un domaine (ADR 0316) : par sorte de ressource (« agendas »), puis par
+    #: ressource (sa clé). Chaque domaine range les siens dans ses réglages, sous sa clé, avec son type de ligne ; la
+    #: porte des réglages les réunit ici sans en nommer aucun (``SettingsPart.access_tables``). Une ressource absente
+    #: a le tableau que son propriétaire calcule
+    tables: Mapping[str, Mapping[str, Table[Any]]] = field(default_factory=dict)
+
+    def sort(self, name: str) -> Mapping[str, Table[Any]]:
+        """Les tableaux réglés d'une sorte de ressource, par ressource ; vide si rien n'y est réglé."""
+        return self.tables.get(name, {})
 
 
 def rights_of(env: Any) -> Rights:
