@@ -159,7 +159,11 @@ Ce qui fait échouer un changement :
   - ses phrases sont dans `persona/voix.yaml`, jamais en dur, et son nom vient de sa persona ;
   - ce qui sort de la machine est une capacité, après le commit ;
   - le cadre d'`app` ne nomme aucun domaine : ce qu'`app` sait du courrier, de Teams, de l'agenda… vit dans
-    `app/domains/<nom>/`, et sa fiche (`Domain`) dit ce qu'il apporte (ADR 0310).
+    `app/domains/<nom>/`, et sa fiche (`Domain`) dit ce qu'il apporte (ADR 0310) ;
+  - un nom privé (`_nom`) ne se lit pas d'un autre module : ce qu'un autre module lit porte un nom public, une
+    aide partagée a un module à elle (ADR 0314) ;
+  - dans les projets, un sous-sujet garde ses événements, leurs réducteurs et sa projection dans son module,
+    pas dans `faculty.py` (ADR 0313).
 
 La composition (facultés, plugins, politiques d'épisode, arbitrage, modes) est dans `app/composition.py`. Pour écrire
 ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté » ; pour ajouter un domaine (son dossier, sa fiche, ses

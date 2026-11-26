@@ -34,7 +34,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296, 0308, 0312 |
 | La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295, 0297, 0310 |
-| Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266 |
+| Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266, 0314 |
 
 ## Le noyau : journal, arbitrage, pipeline
 
@@ -4140,3 +4140,13 @@ Un audit complet en lecture seule (`docs/audit-2026-10-26.md`) ; tout ce qui sui
 *Pourquoi :* le prompt réel du 19 novembre 2026 portait une phrase cassée par l'assemblage, une note à moitié convertie, deux fois la même rêverie, une humeur opposée à elle-même et un lot de flux vide — son premier appel y est allé pour rien ; et le mail partait brut au tri, seul endroit où ce qui vient d'un mail n'était ni inerte ni cité.
 
 *Révise 0198 (en partie : le tri cite aussi).*
+
+### 0314 — Un nom privé ne se lit pas d'un autre module
+
+- **Un nom qui commence par un soulignement est à son module.** Dans `src/mika`, aucun module n'importe le `_nom` d'un autre (`from x import _nom`) ni ne le lit par son module (`x._nom`). Ce qu'un autre module lit porte un nom public, là où il est défini.
+- **Une aide que plusieurs modules partagent a un module à elle**, nommé d'après ce qu'elle sert, plutôt qu'un nom public de plus dans un gros module : `inspect_common.py`, `tool_common.py` et `capability_common.py` pour les projets, `app/domains/projects/api/reach.py` pour leur API, `adapters/maps/geo.py` pour la carte.
+- **Un nom rendu public se choisit pour ses lecteurs** : il dit ce que la chose rend (`opened_project`, `texts_of`, `acting_person`) et ne heurte aucune de leurs variables locales.
+- **Les tests lisent ce qu'ils veulent** : la règle vaut pour `src/mika`. Un nom à double soulignement et un sous-module ne sont pas des noms privés.
+- **La garde** (`tests/architecture/test_private_names_stay_in_their_module.py`) le lit par l'AST, et n'excuse rien.
+
+*Pourquoi :* l'audit d'organisation du 26 novembre a compté 114 noms privés lus d'un module à l'autre, dont 38 dans les seuls projets — une couche commune qui n'existait pas comme telle. Une retouche de `_author` ou de `_opened` changeait en silence quatre modules de l'API des projets et un point MCP, et un module neuf devait importer les privés d'un fichier de 1 500 lignes.
