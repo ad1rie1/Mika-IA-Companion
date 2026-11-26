@@ -1,9 +1,9 @@
 """Un sous-sujet des projets garde ses événements dans son module (ADR 0313).
 
 ``faculties/projects/faculty.py`` déclare les événements du projet lui-même et de ses objectifs, et ceux des
-sous-sujets nés avant la règle (``BORN_BEFORE``). Un sous-sujet neuf déclare les siens dans son module, comme le
-registre (``tracker.py``) et la documentation (``docs.py``) : la liste d'ici ne s'allonge pas, et raccourcit quand un
-sous-sujet d'avant sort de ``faculty.py``.
+sous-sujets nés avant la règle (``BORN_BEFORE`` : tous en sont sortis). Un sous-sujet neuf déclare les siens dans son
+module, comme le registre (``tracker.py``) et la documentation (``docs.py``) : la liste d'ici ne s'allonge pas, et
+raccourcit quand un sous-sujet d'avant sort de ``faculty.py``.
 
 Lu par l'AST : un commentaire ou une docstring qui nomme un événement ne compte pas.
 """
@@ -25,11 +25,10 @@ ITSELF = frozenset({
 })
 
 #: les sous-sujets nés avant la règle, encore dans ``faculty.py`` : chacun en sort quand on y touche, et sa ligne
-#: s'efface alors d'ici (les jalons, les décisions techniques, les pull requests et leur CI, la fusion, les issues
-#: l'ont fait : ``milestones.py``, ``decisions.py``, ``pulls.py``, ``merge.py``, ``issues.py``)
-BORN_BEFORE = {
-    "la relecture (review.py)": frozenset({"review_asked", "reviewed"}),
-}
+#: s'efface alors d'ici. Tous l'ont fait : les jalons, les décisions techniques, les pull requests et leur CI, la
+#: fusion, les issues et la relecture (``milestones.py``, ``decisions.py``, ``pulls.py``, ``merge.py``,
+#: ``issues.py``, ``review.py``)
+BORN_BEFORE: dict[str, frozenset[str]] = {}
 
 
 def declared(module: str) -> set[str]:
@@ -60,7 +59,8 @@ def test_the_list_shrinks_when_a_subject_leaves_faculty():
 
 
 def test_a_subject_out_of_faculty_declares_its_own_events():
-    """Ce qui fait foi pour la règle : le registre et la documentation déclarent les leurs chez eux."""
+    """Ce qui fait foi pour la règle : le registre et la documentation déclarent les leurs chez eux, comme chaque
+    sous-sujet sorti de ``faculty.py``."""
     assert declared("tracker.py") >= {"list_set", "item_added", "item_changed", "item_noted"}
     assert declared("docs.py") >= {"doc_written", "doc_moved", "doc_removed"}
     assert declared("milestones.py") >= {"milestone_added", "milestone_changed"}
@@ -68,3 +68,4 @@ def test_a_subject_out_of_faculty_declares_its_own_events():
     assert declared("pulls.py") >= {"pull_seen", "checks_seen", "base_seen"}
     assert declared("merge.py") >= {"merge_asked", "merge_answered", "pull_write_asked", "pull_write_answered"}
     assert declared("issues.py") >= {"issue_asked"}
+    assert declared("review.py") >= {"review_asked", "reviewed"}

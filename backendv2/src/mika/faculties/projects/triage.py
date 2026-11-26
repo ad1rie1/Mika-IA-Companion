@@ -38,7 +38,6 @@ from mika.faculties.projects.faculty import (
     PROJECTS,
     REFRAMED,
     RESUMED,
-    REVIEWED,
     Item,
     Objective,
     Project,
@@ -53,6 +52,7 @@ from mika.faculties.projects.faculty import (
     written,
 )
 from mika.faculties.projects.pulls import CHECKS_SEEN, PULL_SEEN
+from mika.faculties.projects.review import REVIEWED
 from mika.faculties.projects.rhythm import framing
 from mika.faculties.projects.tool_common import RUNS, caretaker, gone_reply, running_project
 from mika.kernel.clock import MINUTE

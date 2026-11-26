@@ -25,8 +25,6 @@ from mika.faculties.projects.atelier import PushArgs, project_push
 from mika.faculties.projects.faculty import (
     PULL_REQUEST_CAPABILITY,
     REFRAMED,
-    REVIEW_ASKED,
-    REVIEWED,
     Milestone,
     Objective,
     Project,
@@ -35,6 +33,7 @@ from mika.faculties.projects.faculty import (
     unreviewed,
 )
 from mika.faculties.projects.pulls import PULL_SEEN
+from mika.faculties.projects.review import REVIEW_ASKED, REVIEWED
 from mika.faculties.projects.tools import ReportArgs, report_run
 from mika.faculties.projects.tracker_tools import AddArgs, ItemArg, items_add
 from mika.kernel.events import Origin

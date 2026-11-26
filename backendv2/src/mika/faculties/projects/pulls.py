@@ -70,8 +70,6 @@ from mika.faculties.projects.faculty import (
     PULL_REQUEST_CAPABILITY,
     PULL_TRIES_MAX,
     REFRAMED,
-    REVIEW_ASKED,
-    REVIEWED,
     WORK_PREFIX,
     Objective,
     Project,
@@ -98,6 +96,7 @@ from mika.faculties.projects.faculty import (
 from mika.faculties.projects.inspect_pulls import CANNOT, DESCRIPTION, OPENED, PREVIEW, SUMMARY
 from mika.faculties.projects.inspect_reviews import UNREVIEWED, review_line
 from mika.faculties.projects.merge import MERGE_ANSWERED
+from mika.faculties.projects.review import REVIEW_ASKED, REVIEWED
 from mika.faculties.projects.tool_common import gone_reply, running_project
 from mika.faculties.projects.tools import TAKE_BASE
 from mika.kernel.clock import HOUR, MINUTE

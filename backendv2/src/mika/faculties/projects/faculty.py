@@ -41,6 +41,11 @@ ses événements font ressentir (ADR 0031).
   ici, avec ce qu'un départ fait du projet (``with_issue_move``, que les réducteurs des effets appellent) ; la
   demande de publier (``projects.issue_asked``), son réducteur, ses règles, ses capacités et son processus, dans
   ``issues.py`` (ADR 0313).
+- **Sa relecture indépendante** (ADR 0276) : les champs d'``Objective`` qu'elle tient (``review_due``,
+  ``reviewed``, ``review_refused``…) et les lectures que tous en font (``rereads``, ``review_holds``,
+  ``handed_over``, ``unreviewed``, ``review_waiting``, ``push_reviewed``) sont ici, avec la fin d'une relecture
+  sans verdict (``_review_ended``) ; sa demande et son verdict (``projects.review_asked``, ``projects.reviewed``),
+  leurs réducteurs, ses outils, ses sections et son processus, dans ``review.py`` (ADR 0313).
 - **Ses jalons** (ADR 0273) : un objectif ponctuel dit où il en est (``Objective.milestones``, ``Milestone``). Leur
   forme et les lectures que tous en font sont ici ; leurs événements, leurs réducteurs, ce qui s'écrit et ce qu'on
   en lit, dans ``milestones.py`` (ADR 0313) ; ses outils, dans ``milestones_tools.py``. Un jalon atteint ne se défait pas ;
@@ -1307,33 +1312,6 @@ class Answered(Payload):
     about: tuple[str, ...] = ()
 
 
-class ReviewAsked(Payload):
-    """Une relecture indépendante est demandée pour le commit que porte le travail conclu d'un objectif (ADR 0276) :
-    ce commit-là, et aucun autre."""
-
-    project: int
-    objective: int
-    sha: str
-    owner: str | None = None
-    about: tuple[str, ...] = ()
-
-
-class Reviewed(Payload):
-    """Le verdict d'une relecture indépendante (ADR 0276), posé sur un objectif pour un commit : « bon », ou ses
-    constats — cinq au plus, chacun avec où et quoi : le dire d'une autre exécution, un contenu effaçable au niveau
-    de ce qui s'écrit sur cet objectif, avec ses sujets. ``by`` : le fournisseur de modèle qui a relu."""
-
-    project: int
-    objective: int
-    sha: str
-    good: bool = False
-    findings: Content | None = None
-    by: str = ""
-    owner: str | None = None
-    about: tuple[str, ...] = ()
-    read_about: tuple[str, ...] = ()
-
-
 class RemoteRequested(Payload):
     """L'opérateur demande de pousser (``push``) ou de récupérer (``pull``) maintenant."""
 
@@ -1370,8 +1348,6 @@ PLAN_ANSWERED = PROJECTS.event("plan_answered", PlanAnswered, content=("words",)
                                subjects=("owner", "about", "by", INHERITED))
 DEPOSITED = PROJECTS.event("deposited", Deposited, content=("note",), subjects=("owner", "about", "by", INHERITED))
 REMOTE_REQUESTED = PROJECTS.event("remote_requested", RemoteRequested, subjects=("owner", "about"))
-REVIEW_ASKED = PROJECTS.event("review_asked", ReviewAsked, subjects=("owner", "about"))
-REVIEWED = PROJECTS.event("reviewed", Reviewed, content=("findings",), subjects=("owner", "about", INHERITED))
 NETWORK_QUEUED = PROJECTS.event("network_queued", NetworkQueued, content=("why",),
                                 subjects=("owner", "about", INHERITED))
 ANSWERED = PROJECTS.event("answered", Answered, subjects=("owner", "about", "person"))
@@ -2283,50 +2259,6 @@ def push_reviewed(p: Project, sha: str) -> bool:
 def review_holds(o: Objective, sha: str) -> bool:
     """Un verdict favorable vaut-il pour ce commit ? Pour lui seul : si la branche a bougé depuis, il ne vaut plus."""
     return bool(sha) and o.review_ok and o.reviewed == sha
-
-
-@PROJECTS.reducer(REVIEW_ASKED)
-def _review_asked(s: ProjectsState, e, cx) -> ProjectsState:
-    """Une relecture est demandée pour un commit (ADR 0276). Jamais deux fois pour le même : ni un commit déjà jugé,
-    ni celui qu'on attend déjà ; et plus aucune quand la main est au propriétaire. Total : un objectif inconnu ne
-    change rien."""
-    d = e.data
-    p = s.projects.get(d.project)
-    o = objective_at(p, d.objective) if p is not None else None
-    if p is None or o is None or not d.sha or d.sha in (o.reviewed, o.review_due) or handed_over(o):
-        return s
-    return with_project(s, with_objective(p, replace(o, review_due=d.sha, review_tries=0)))
-
-
-@PROJECTS.reducer(REVIEWED)
-def _reviewed(s: ProjectsState, e, cx) -> ProjectsState:
-    """Le verdict d'une relecture indépendante (ADR 0276), pour le commit qu'elle attendait — un verdict pour un
-    autre commit ne change rien. Bon : il vaut pour ce commit, et ses refus d'avant s'effacent. Sinon : ses constats
-    reviennent à l'objectif, qui se rouvre comme lorsque l'hôte renvoie sa pull request ; au deuxième refus
-    d'affilée il ne se rouvre pas — il va au propriétaire, avec les deux avis (un ponctuel bloque, un constant dit
-    son besoin : dans les deux cas elle le lui dit, et sa réponse ou sa consigne rend la main)."""
-    d = e.data
-    p = s.projects.get(d.project)
-    o = objective_at(p, d.objective) if p is not None else None
-    if p is None or o is None or not d.sha or d.sha != o.review_due:
-        return s
-    run = s.running.get(e.correlation)
-    if run is not None and run.project == p.id:
-        s = replace(s, running=s.running.set(e.correlation, replace(run, reported=True)))
-    ref = d.findings.ref or "" if d.findings is not None else ""
-    o = replace(o, review_due="", review_tries=0, reviewed=d.sha, review_ok=d.good, review_at=e.at,
-                review_by=d.by[:80], review_ref="" if d.good else ref)
-    p = replace(p, failures=0)
-    if d.good:
-        # en flux direct, la relecture suivante lira ce qui a changé depuis ce commit-ci
-        return with_project(s, with_objective(p, replace(o, review_refused=(), since=o.since if by_pulls(p) else d.sha)))
-    o = replace(o, review_refused=(*o.review_refused, ref)[-REVIEW_REFUSALS_MAX:])
-    if not handed_over(o):
-        return with_project(s, with_objective(p, sent_back(o)))
-    if o.kind == c.ONCE and o.status in (c.DONE, c.OPEN):
-        o = replace(o, status=c.BLOCKED, closed_at=e.at)
-    return with_project(s, with_objective(p, replace(o, need_ref=ref or o.need_ref, asked=False, ask_attempts=0, asked_at=0,
-                                         answered_at=0, steered_at=0)))
 
 
 def issue_move(p: Project, ticket: int, what: str, note: int = 0) -> IssueMove | None:

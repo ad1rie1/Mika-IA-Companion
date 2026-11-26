@@ -33,9 +33,7 @@ from mika.faculties.projects.faculty import (
     PULL_REQUEST_CAPABILITY,
     PUSH_CAPABILITY,
     REFRAMED,
-    REVIEW_ASKED,
     REVIEW_REFUSALS_MAX,
-    REVIEWED,
     Item,
     Objective,
     Project,
@@ -49,6 +47,7 @@ from mika.faculties.projects.faculty import (
     review_waiting,
     unreviewed,
 )
+from mika.faculties.projects.review import REVIEW_ASKED, REVIEWED
 from mika.faculties.projects.tools import NoteArgs, ReportArgs, project_note, report_run
 from mika.kernel.events import Origin
 from mika.kernel.faculty import ToolResult
