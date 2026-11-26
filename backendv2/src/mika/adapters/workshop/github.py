@@ -57,6 +57,7 @@ import httpx
 
 from mika.adapters.workshop import DEFAULT_HOSTS
 from mika.ports.workshop import (
+    BRANCH_NAME,
     CHECK_RUNS_MAX,
     CHECKS_FAILED,
     CHECKS_NAMED,
@@ -103,8 +104,6 @@ HOST = "github.com"
 #: un dépôt GitHub : ``https://github.com/compte/depot`` (``.git`` et la barre finale facultatifs)
 _REPO = re.compile(r"^https://github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/([A-Za-z0-9._-]{1,100}?)(?:\.git)?/?$")
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
-#: une branche qu'on nomme à GitHub (celle d'une pull request, celle où elle veut entrer)
-_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 #: les relectures et les commentaires relus pour dire où en est une pull request : par page, et combien de pages,
 #: en partant de la fin (les plus récents)
 REVIEWS_READ, COMMENTS_READ = 50, 50
@@ -485,7 +484,7 @@ class GitHubRepos:
 
     async def pull(self, url: str, head: str) -> Pull:
         repo = repo_of(url)
-        if repo is None or not _BRANCH.match(head or ""):
+        if repo is None or not BRANCH_NAME.match(head or ""):
             return Pull(head=head, error="ce dépôt n'est pas sur GitHub, ou la branche ne se nomme pas ainsi")
         client = self._open()
         try:
@@ -505,7 +504,7 @@ class GitHubRepos:
         repo = repo_of(url)
         if repo is None:
             return Pull(head=head, error="ce dépôt n'est pas sur GitHub : pas de pull request à y ouvrir")
-        if not _BRANCH.match(head or "") or not _BRANCH.match(base or "") or head == base:
+        if not BRANCH_NAME.match(head or "") or not BRANCH_NAME.match(base or "") or head == base:
             return Pull(head=head, error="une pull request part d'une branche de travail vers une autre branche")
         if "Authorization" not in self._headers():  # sans jeton pour cet hôte, rien n'est envoyé
             return Pull(head=head, error=NO_TOKEN)

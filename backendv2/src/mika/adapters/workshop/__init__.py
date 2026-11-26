@@ -114,6 +114,7 @@ from mika.kernel.inspect import size_fr
 from mika.kernel.text import fold
 from mika.ports.workshop import (
     BASE_BRANCH,
+    BRANCH_NAME,
     DIFF_LINE_MAX,
     ENTRY_DIR,
     ENTRY_FILE,
@@ -147,6 +148,8 @@ from mika.ports.workshop import (
     TreeEntry,
     View,
     WorkshopFull,
+    check_branch,
+    check_remote,
     secret_file,
     view_entry,
     view_place,
@@ -205,7 +208,6 @@ _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 #: au plus, d'un fichier pour la chercher (octets)
 _CONFLICT_MARK = re.compile(rb"^(?:<<<<<<<|>>>>>>>) ", re.MULTILINE)
 _MARKS_READ = 4 << 20
-_BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 #: l'arbre vide de git (le diff « depuis le début du dépôt »), et ce qui dit qu'un diff trop long a été coupé
 _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 _PATCH_CUT = "\n[… le diff est plus long : la suite se lit fichier par fichier …]"
@@ -256,23 +258,11 @@ class Limits:
     view_bytes: int = 512 * 1024 ** 2
 
 
-def check_remote(url: str) -> str:
-    """Une adresse de dépôt distant acceptable (https, sans identifiants dedans), ou ``ValueError``."""
-    raw = (url or "").strip()
-    parts = urlsplit(raw)
-    if parts.scheme != "https" or not parts.hostname:
+def _remote(url: str) -> str:
+    """L'adresse d'un dépôt distant à joindre : acceptable (``ports.workshop.check_remote``), et dite."""
+    raw = check_remote(url or "")
+    if not raw:
         raise ValueError("une adresse https (https://github.com/compte/depot.git)")
-    if parts.username or parts.password or "@" in parts.netloc:
-        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Connexions › Dépôts Git")
-    if any(ch.isspace() for ch in raw) or raw.startswith("-"):
-        raise ValueError("adresse illisible")
-    return raw
-
-
-def check_branch(branch: str) -> str:
-    raw = (branch or "").strip() or "main"
-    if not _BRANCH.match(raw) or ".." in raw or raw.endswith((".lock", "/")):
-        raise ValueError(f"nom de branche refusé : {raw[:40]}")
     return raw
 
 
@@ -927,7 +917,7 @@ class BwrapWorkshop:
             return ""
         r = await self._git(project, "symbolic-ref", "--short", "-q", "HEAD")
         name = r.stdout.strip()
-        return name if r.ok and _BRANCH.match(name) else ""
+        return name if r.ok and BRANCH_NAME.match(name) else ""
 
     # ── les branches de travail (ADR 0274) ──
     async def base(self, project: int) -> str:
@@ -1040,7 +1030,7 @@ class BwrapWorkshop:
         return Joined(branch, base, conflicts=tuple(conflicts), stowed=stowed)
 
     async def span(self, project: int, branch: str) -> Span | None:
-        if not self._has_git(project) or not _BRANCH.match(branch or ""):
+        if not self._has_git(project) or not BRANCH_NAME.match(branch or ""):
             return None
         head = await self._ref(project, f"refs/heads/{branch}")
         base = await self._ref(project, f"refs/heads/{BASE_BRANCH}")
@@ -1121,7 +1111,7 @@ class BwrapWorkshop:
         raw = str(ref or "").strip()
         if not self._has_git(project) or ".." in raw:
             return ""
-        if _BRANCH.match(raw) and (sha := await self._ref(project, f"refs/heads/{raw}")):
+        if BRANCH_NAME.match(raw) and (sha := await self._ref(project, f"refs/heads/{raw}")):
             return sha
         return await self._ref(project, raw) if _SHA.match(raw) else ""
 
@@ -1133,7 +1123,7 @@ class BwrapWorkshop:
         for row in r.stdout.splitlines() if r.ok else ():
             sha, _, source = row.partition(" ")
             name = source.removeprefix("refs/heads/")  # git la dit courte ou entière, selon sa version
-            if _FULL_SHA.match(sha) and _BRANCH.match(name):
+            if _FULL_SHA.match(sha) and BRANCH_NAME.match(name):
                 out[sha] = name
         return out
 
@@ -1169,7 +1159,7 @@ class BwrapWorkshop:
             return []
         r = await self._git(project, "for-each-ref", "--format=%(refname:short)", f"--count={BRANCHES_MAX}",
                             "refs/heads", clip=False)
-        names = [x for x in r.stdout.splitlines() if _BRANCH.match(x)] if r.ok else []
+        names = [x for x in r.stdout.splitlines() if BRANCH_NAME.match(x)] if r.ok else []
         current = await self.branch(project)
         out = []
         for name in sorted(names, key=lambda x: (x != BASE_BRANCH, x)):
@@ -1394,7 +1384,7 @@ class BwrapWorkshop:
 
     async def push(self, project: int, url: str, branch: str, sha: str = "") -> RunResult:
         try:
-            url, branch = check_remote(url), check_branch(branch)
+            url, branch = _remote(url), check_branch(branch)
         except ValueError as exc:
             return RunResult(("git", "push"), None, refused=str(exc))
         env, secrets, why = self._auth(url)
@@ -1431,14 +1421,14 @@ class BwrapWorkshop:
         if not self._has_git(project):
             return ""
         try:
-            url, branch = check_remote(url), check_branch(branch)
+            url, branch = _remote(url), check_branch(branch)
         except ValueError:
             return ""
         return await self._ref(project, self._sent_ref(url, branch))
 
     async def pull(self, project: int, url: str, branch: str) -> RunResult:
         try:
-            url, branch = check_remote(url), check_branch(branch)
+            url, branch = _remote(url), check_branch(branch)
         except ValueError as exc:
             return RunResult(("git", "pull"), None, refused=str(exc))
         env, secrets, _ = self._auth(url)  # sans jeton (ou pour un autre hôte) : un dépôt public se récupère quand même
@@ -1517,7 +1507,7 @@ class BwrapWorkshop:
             return "les branches de l'atelier ne se lisent pas : rien n'est récupéré"
         moves: list[tuple[str, str, str]] = []
         for name in listed.stdout.split():
-            tip = await self._ref(project, f"refs/heads/{name}") if name != BASE_BRANCH and _BRANCH.match(name) else ""
+            tip = await self._ref(project, f"refs/heads/{name}") if name != BASE_BRANCH and BRANCH_NAME.match(name) else ""
             if not tip or not (await self._git(project, "merge-base", "--is-ancestor", old, tip)).ok:
                 continue
             chain = await self._git(project, "rev-list", "--reverse", "--first-parent", f"{old}..{tip}", clip=False)

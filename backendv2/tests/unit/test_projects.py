@@ -731,7 +731,8 @@ def test_an_old_project_goal_is_cancelled_without_feelings(tmp_path):
 def test_forms_accept_what_people_type_and_refuse_what_would_leak():
     import pytest as _pytest
 
-    from mika.faculties.projects.actions import check_remote, parse_hhmm
+    from mika.faculties.projects.actions import parse_hhmm
+    from mika.ports.workshop import check_branch, check_remote
 
     assert parse_hhmm("9") == 540 and parse_hhmm("9 h") == 540 and parse_hhmm("18h30") == 1110
     assert parse_hhmm("24:00", end=True) == 1440
@@ -742,6 +743,10 @@ def test_forms_accept_what_people_type_and_refuse_what_would_leak():
         with _pytest.raises(ValueError):
             check_remote(bad)
     assert check_remote("https://git.example:8443/a/b.git") == "https://git.example:8443/a/b.git"
+    assert check_remote("  ") == "" and check_branch("") == "main"  # vide : aucun distant ; la branche de base
+    for bad in ("-main", "a..b", "x.lock", "x/", "a b"):
+        with _pytest.raises(ValueError):
+            check_branch(bad)
 
 
 def test_retired_parameters_are_ignored_and_others_still_refused():

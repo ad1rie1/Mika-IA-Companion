@@ -21,7 +21,6 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Annotated, Any
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
@@ -86,7 +85,7 @@ from mika.kernel.forms import UPLOAD_MAX, FormField, Knob, Upload, describe
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.operate import ActionContext, Done, Refused
-from mika.ports.workshop import BASE_BRANCH, OutsideWorkshop, WorkshopFull
+from mika.ports.workshop import BASE_BRANCH, OutsideWorkshop, WorkshopFull, check_branch, check_remote
 from mika.vocab.circadian import DAYS_FR
 from mika.vocab.episodes import project_of
 from mika.vocab.phrasebook import family
@@ -216,28 +215,6 @@ def parse_hhmm(text: str, *, end: bool = False) -> int:
     if h > 24 or mins > 59 or (h == 24 and (mins or not end)):
         raise ValueError("heure hors bornes")
     return h * 60 + mins
-
-
-def check_remote(url: str) -> str:
-    """Une adresse de dépôt distant https sans identifiants (le jeton est un réglage, jamais dans l'adresse)."""
-    raw = url.strip()
-    if not raw:
-        return ""
-    parts = urlsplit(raw)
-    if parts.scheme != "https" or not parts.hostname or any(ch.isspace() for ch in raw):
-        raise ValueError("une adresse https, comme https://github.com/compte/depot.git")
-    if parts.username or parts.password or "@" in parts.netloc:
-        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Connexions › Dépôts Git")
-    if parts.query or parts.fragment or "?" in raw or "#" in raw:
-        raise ValueError("une adresse de dépôt, sans « ? » ni « # » (rien de secret ne va dans l'adresse)")
-    return raw
-
-
-def check_branch(branch: str) -> str:
-    raw = branch.strip() or "main"
-    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$", raw) or ".." in raw or raw.endswith((".lock", "/")):
-        raise ValueError("nom de branche refusé")
-    return raw
 
 
 def knob_of(bundle: str) -> str:

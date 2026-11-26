@@ -58,6 +58,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
+from urllib.parse import urlsplit
 
 
 class OutsideWorkshop(ValueError):
@@ -185,6 +186,35 @@ class Commit:
 #: celle d'où part chaque branche de travail (ADR 0274). Elle suit la branche du dépôt distant, quel que soit son nom
 #: là-bas, et n'avance que par une récupération
 BASE_BRANCH = "main"
+
+
+#: un nom de branche git que l'atelier et l'hôte du dépôt acceptent
+BRANCH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
+
+
+def check_remote(url: str) -> str:
+    """Une adresse de dépôt distant acceptable, ou ``ValueError`` : https, sans identifiants (le jeton est un réglage,
+    jamais dans l'adresse), sans « ? » ni « # ». Vide : aucun distant, rendu tel quel — qui en exige un le dit
+    lui-même. La seule règle : la faculté la passe à ce qu'on règle, l'atelier à ce qu'il joint."""
+    raw = url.strip()
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    if parts.scheme != "https" or not parts.hostname or any(ch.isspace() for ch in raw):
+        raise ValueError("une adresse https, comme https://github.com/compte/depot.git")
+    if parts.username or parts.password or "@" in parts.netloc:
+        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Connexions › Dépôts Git")
+    if parts.query or parts.fragment or "?" in raw or "#" in raw:
+        raise ValueError("une adresse de dépôt, sans « ? » ni « # » (rien de secret ne va dans l'adresse)")
+    return raw
+
+
+def check_branch(branch: str) -> str:
+    """Un nom de branche acceptable, ou ``ValueError`` ; vide : la branche de base."""
+    raw = (branch or "").strip() or BASE_BRANCH
+    if not BRANCH_NAME.match(raw) or ".." in raw or raw.endswith((".lock", "/")):
+        raise ValueError(f"nom de branche refusé : {raw[:40]}")
+    return raw
 
 
 @dataclass(frozen=True, slots=True)
