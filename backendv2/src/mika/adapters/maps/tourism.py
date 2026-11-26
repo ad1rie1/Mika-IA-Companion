@@ -48,13 +48,14 @@ from mika.adapters.maps.datatourisme import (
     THEME_BITS,
     UUID,
     Fiche,
-    _place_sort,
-    _plain_words,
     name_key,
+    place_sort,
+    plain_words,
 )
+from mika.adapters.maps.geo import box_around, meters_between
 from mika.adapters.maps.hours import PARIS
 from mika.adapters.maps.photos import PhotoOrigin, photo_ref
-from mika.adapters.maps.places import _box, _distance_m, _match
+from mika.adapters.maps.places import match_query
 from mika.adapters.maps.tags import read_kept
 from mika.adapters.maps.when import Occurrence, dates_fr, session, upcoming, when_text
 from mika.ports.maps import (
@@ -487,7 +488,7 @@ class TourismBase:
             conn.execute("UPDATE fiche SET twin = NULL, twin_m = NULL, venue = NULL, venue_place = ''")
         conn.execute("UPDATE fiche SET twin = '' WHERE kind = ? AND twin IS NULL AND lat IS NULL", (PLACE,))
         conn.execute("UPDATE fiche SET venue = '' WHERE kind = ? AND venue IS NULL AND lat IS NULL", (EVENT,))
-        lieux = _lieux(index)
+        lieux = open_places(index)
         twins = venues = 0
         last = 0
         try:
@@ -501,8 +502,8 @@ class TourismBase:
                 for fid, kind, name, lat, lon, street, town, themes, category, types in rows:
                     if kind == PLACE:
                         # une fiche lue avant qu'on connaisse sa classe (``Transport``) : sa sorte d'aujourd'hui
-                        sort = category or _place_sort((types or "").split(";"))[0]
-                        found = _twin(lieux, name, lat, lon, sort=sort, town=town) if lieux is not None else None
+                        sort = category or place_sort((types or "").split(";"))[0]
+                        found = index_twin(lieux, name, lat, lon, sort=sort, town=town) if lieux is not None else None
                         conn.execute("UPDATE fiche SET twin = ?, twin_m = ? WHERE id = ?",
                                      (found[0] if found else "", found[1] if found else None, fid))
                         twins += found is not None
@@ -568,7 +569,7 @@ def _write(conn: sqlite3.Connection, fiche: Fiche, *, run: str | None, synced: s
 _Lieux = tuple[sqlite3.Connection, bool]
 
 
-def _lieux(index: Path | None) -> _Lieux | None:
+def open_places(index: Path | None) -> _Lieux | None:
     """L'index des lieux en lecture seule, et s'il connaît les objets d'OpenStreetMap (schéma 2)."""
     if index is None or not index.is_file():
         return None
@@ -582,14 +583,14 @@ def _lieux(index: Path | None) -> _Lieux | None:
 
 def _near(lieux: _Lieux, lat: float, lon: float, radius: float) -> list[tuple[Any, ...]]:
     conn, detailed = lieux
-    w, s, e, n = _box(lat, lon, radius)
+    w, s, e, n = box_around(lat, lon, radius)
     columns = "p.id, p.name, p.kind, p.category, p.lat, p.lon" + (", p.osm" if detailed else ", ''")
     rows = conn.execute(f"SELECT {columns} FROM place_box b JOIN place p ON p.id = b.id "
                         "WHERE b.lat0 <= ? AND b.lat1 >= ? AND b.lon0 <= ? AND b.lon1 >= ? AND p.category != 'villes'",
                         (n, s, e, w)).fetchall()
     out = []
     for row in rows:
-        d = _distance_m(lat, lon, row[4], row[5])
+        d = meters_between(lat, lon, row[4], row[5])
         if d <= radius:
             out.append((d, row))
     out.sort(key=lambda item: item[0])
@@ -602,7 +603,7 @@ def _place_id(row: Sequence[Any]) -> str:
     return row[6] or f"l{row[0]}"
 
 
-def _twin(lieux: _Lieux, name: str, lat: float, lon: float, radius: float = TWIN_M, *,
+def index_twin(lieux: _Lieux, name: str, lat: float, lon: float, radius: float = TWIN_M, *,
           sort: str = "", town: str = "") -> tuple[str, int] | None:
     """Le lieu de l'index à moins de ``radius`` mètres qui est le plus ce lieu (``same_place`` : son nom, sa sorte —
     ``sort``, une catégorie de l'écran Carte —, sa commune ; le plus proche à égalité) : son identifiant durable et sa
@@ -635,13 +636,13 @@ def lone_twin(conn: sqlite3.Connection, name: str, lat: float, lon: float, radiu
               sort: str = "") -> tuple[str, int] | None:
     """Le lieu DATAtourisme qu'OpenStreetMap n'a pas (``t:<uuid>``) à moins de ``radius`` mètres qui est ce lieu (son
     nom, sa sorte ``sort`` : ``same_place``) : son identifiant et sa distance."""
-    w, s, e, n = _box(lat, lon, radius)
+    w, s, e, n = box_around(lat, lon, radius)
     best: tuple[float, float, str] | None = None
     for uuid, other, olat, olon, category, kind in conn.execute(
             "SELECT f.uuid, f.name, f.lat, f.lon, f.category, f.sort FROM fiche_box b JOIN fiche f ON f.id = b.id "
             "WHERE b.lat0 <= ? AND b.lat1 >= ? AND b.lon0 <= ? AND b.lon1 >= ? AND f.kind = ? AND f.twin = ''",
             (n, s, e, w, PLACE)):
-        d = _distance_m(lat, lon, olat, olon)
+        d = meters_between(lat, lon, olat, olon)
         score = same_place(name, sort, other, category, kind)
         if d <= radius and score >= TWIN_LIKENESS and (best is None or (score, -d) > (best[0], -best[1])):
             best = (score, d, uuid)
@@ -709,8 +710,8 @@ def _same_address(lieux: _Lieux, place: int, street: str) -> bool:
     number, way = tags.get("addr:housenumber", ""), tags.get("addr:street", "")
     if not number or not way:
         return False
-    want = _plain_words(f"{number} {way}")
-    return _plain_words(street)[:len(want)] == want
+    want = plain_words(f"{number} {way}")
+    return plain_words(street)[:len(want)] == want
 
 
 # ── lire ──
@@ -1033,7 +1034,7 @@ def _area(near: tuple[float, float] | None, bbox: tuple[float, float, float, flo
     if bbox is not None:
         return bbox
     if near is not None and radius_m is not None:
-        return _box(near[0], near[1], radius_m)
+        return box_around(near[0], near[1], radius_m)
     return None
 
 
@@ -1050,7 +1051,7 @@ def _candidates(conn: sqlite3.Connection, kind: str, *, area: tuple[float, float
         args += [n, s, e, w]
     if words:
         conditions.append("f.id IN (SELECT rowid FROM fiche_text WHERE fiche_text MATCH ?)")
-        args.append(_match(words))
+        args.append(match_query(words))
     if where:
         conditions.append(where)
         args += params
@@ -1077,7 +1078,7 @@ def _places(conn: sqlite3.Connection, words: list[str], *, near: tuple[float, fl
                        params=params, limit=limit * 3 + 20)
     out = []
     for row in rows:
-        d = _distance_m(near[0], near[1], row["lat"], row["lon"]) if near is not None else None
+        d = meters_between(near[0], near[1], row["lat"], row["lon"]) if near is not None else None
         if radius_m is not None and d is not None and d > radius_m:
             continue
         out.append(_place_hit(row, d))
@@ -1151,7 +1152,7 @@ def _hit(group: _Group, now: datetime, *, start: date | None = None, end: date |
          near: tuple[float, float] | None = None) -> EventHit | None:
     ahead = upcoming(group.occurrences, now, start, end)
     row = group.row
-    distance = _distance_m(near[0], near[1], row["lat"], row["lon"]) if near is not None and row["lat"] is not None \
+    distance = meters_between(near[0], near[1], row["lat"], row["lon"]) if near is not None and row["lat"] is not None \
         else None
     if ahead:
         day, first = ahead[0]
@@ -1236,7 +1237,7 @@ def merge_places(osm: Sequence[PlaceHit], tourism: Sequence[PlaceHit], *, near: 
     ``t:`` à moins de ``TWIN_M`` mètres d'un lieu de la liste qui est lui (``same_place``) s'en va. Autour d'un point,
     tous par la distance ; sinon ceux d'OpenStreetMap d'abord."""
     kept = [t for t in tourism if not any(
-        _distance_m(t.lat, t.lon, o.lat, o.lon) <= TWIN_M
+        meters_between(t.lat, t.lon, o.lat, o.lon) <= TWIN_M
         and same_place(t.name, t.category, o.name, o.category, o.kind, town=t.town) >= TWIN_LIKENESS for o in osm)]
     if near:
         both = sorted([*osm, *kept], key=lambda h: (h.distance_m is None, h.distance_m or 0))

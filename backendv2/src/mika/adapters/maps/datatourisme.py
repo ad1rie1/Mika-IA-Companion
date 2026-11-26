@@ -414,12 +414,12 @@ def plain(value: object, most: int = DESCRIPTION_MAX) -> str:
 def name_key(name: str) -> str:
     """Un nom pour comparer : sans accents ni casse ni ponctuation, sans ses articles ni les mots qui disent la sorte
     (« restaurant », « hôtel », « camping »…)."""
-    words = _plain_words(name)
+    words = plain_words(name)
     kept = [w for w in words if w not in GENERIC_WORDS]
     return " ".join(kept or words)
 
 
-def _plain_words(text: str) -> list[str]:
+def plain_words(text: str) -> list[str]:
     ascii_ = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().casefold()
     return re.findall(r"[a-z0-9]+", ascii_)
 
@@ -434,12 +434,12 @@ def street_without_town(street: str, town: str) -> str:
     """La rue d'une adresse sans la commune que DATAtourisme y recopie souvent, et le code postal ou le « à » qui la
     précèdent (« Roubaix » seule, « 1 allée du Musée VIlleneuve-d'Ascq », « Rue Kléber Loquet 59 560 Comines », « 13 rue
     de l'Hospice à Roubaix ») ; une rue qui porte le nom d'une ville (« 12 rue de Lille », à Lille) le garde."""
-    want = _plain_words(town)
+    want = plain_words(town)
     words = street.split()
     while want and words:
         size = next((k for k in range(1, min(len(words), _TOWN_WORDS_MAX) + 1)
-                     if _plain_words(" ".join(words[-k:])) == want), 0)
-        before = _plain_words(words[-size - 1]) if size and len(words) > size else []
+                     if plain_words(" ".join(words[-k:])) == want), 0)
+        before = plain_words(words[-size - 1]) if size and len(words) > size else []
         if not size or (before and before[-1] in _NAMED_AFTER):
             break
         words = words[:-size]
@@ -642,7 +642,7 @@ def _photos(raw: Mapping[str, Any]) -> tuple[PhotoFacts, ...]:
     return tuple(dict.fromkeys(out))[:PHOTOS_MAX]
 
 
-def _place_sort(types: Sequence[str]) -> tuple[str, str, str]:
+def place_sort(types: Sequence[str]) -> tuple[str, str, str]:
     """(catégorie, sorte, sorte en français) d'un lieu, d'après la première de ses classes qu'on connaît."""
     known = set(types)
     for name, sort, sort_fr, category in PLACE_TYPES:
@@ -700,7 +700,7 @@ def _read(raw: object) -> Fiche | None:
     prices, free = _prices(raw)
     updated = raw.get("lastUpdate")
     uri = raw.get("uri")
-    category, sort, sort_fr = ("", "event", "Événement") if kind == EVENT else _place_sort(types)
+    category, sort, sort_fr = ("", "event", "Événement") if kind == EVENT else place_sort(types)
     return Fiche(
         uuid=uuid, kind=kind, name=name, types=types, lat=lat, lon=lon,
         street=street_without_town(text_of(_strings(address.get("streetAddress")) and

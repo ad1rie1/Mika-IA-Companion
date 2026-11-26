@@ -38,6 +38,7 @@ from pmtiles.tile import Compression, TileType, deserialize_header, tileid_to_zx
 from mika.adapters.maps import hours
 from mika.adapters.maps import tags as osm_tags
 from mika.adapters.maps.config import PlacesConfig
+from mika.adapters.maps.geo import M_PER_DEG, box_around, meters_between, widened_box
 from mika.adapters.maps.mvt import read_points
 from mika.adapters.maps.tiles import BROKEN, DIR_MAX_BYTES, read_directory
 from mika.ports.maps import MapsUnavailable, OsmFacts, PlaceDetail, PlaceHit
@@ -183,8 +184,6 @@ ALONG_PER_SEGMENT = 200
 #: (une boîte grande comme un tronçon de 200 km ne rendrait que ses lieux les plus importants, souvent loin de la
 #: route) ; au plus tant de boîtes pour tout le trajet (au-delà, les morceaux s'allongent)
 ALONG_BOXES_MAX = 1_500
-#: mètres par degré de latitude (sphère de rayon moyen)
-M_PER_DEG = 6_371_008.8 * math.pi / 180
 #: ouest, sud, est, nord : partout
 WORLD = (-180.0, -90.0, 180.0, 90.0)
 
@@ -516,7 +515,7 @@ def towns(db: sqlite3.Connection) -> None:
 
 # ── chercher ──
 
-def _words(text: str) -> list[str]:
+def search_words(text: str) -> list[str]:
     """Les mots cherchés : des lettres et des chiffres seulement (ni guillemets ni opérateurs : une requête du texte
     intégral ne lève jamais) ; « le », « de »… et une lettre seule ne comptent que s'ils sont tout ce qu'on cherche."""
     words = [w[:40] for w in re.findall(r"[^\W_]+", text.lower())][:WORDS_MAX * 3]
@@ -524,30 +523,10 @@ def _words(text: str) -> list[str]:
     return (meaningful or words)[:WORDS_MAX]
 
 
-def _match(words: Sequence[str]) -> str:
+def match_query(words: Sequence[str]) -> str:
     """La requête du texte intégral : tous les mots (ET), chacun en début de mot — sauf un mot de deux lettres, exact
     (« ay » ne cherche pas tout ce qui commence par « ay »)."""
     return " ".join(f'"{w}"' if len(w) <= 2 else f'"{w}"*' for w in words)
-
-
-def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
-    return 2 * 6_371_008.8 * math.asin(min(1.0, math.sqrt(a)))
-
-
-def _expand(south: float, west: float, north: float, east: float, margin_m: float) -> tuple[float, float, float, float]:
-    """Ouest, sud, est, nord d'une boîte élargie de ``margin_m`` de chaque côté — en longitude, à la latitude où un
-    degré est le plus court (la marge n'y manque nulle part)."""
-    dlat = margin_m / M_PER_DEG
-    cos = max(0.01, min(math.cos(math.radians(south)), math.cos(math.radians(north))))
-    dlon = margin_m / (M_PER_DEG * cos)
-    return west - dlon, max(-90.0, south - dlat), east + dlon, min(90.0, north + dlat)
-
-
-def _box(lat: float, lon: float, radius_m: float) -> tuple[float, float, float, float]:
-    """Ouest, sud, est, nord autour d'un point."""
-    return _expand(lat, lon, lat, lon, radius_m)
 
 
 #: ce qu'une ligne de l'index donne : ses colonnes lues, selon le schéma (le 2 en ajoute quatre)
@@ -645,8 +624,8 @@ def _in_box(conn: sqlite3.Connection, box: tuple[float, float, float, float], as
 def _around(conn: sqlite3.Connection, lat: float, lon: float, radius_m: float, ask: _Ask,
             limit: int) -> list[PlaceHit]:
     near = []
-    for row in _in_box(conn, _box(lat, lon, radius_m), ask, limit=ask.widen(3 * limit + 50), closest_to=(lat, lon)):
-        d = _distance_m(lat, lon, row[4], row[5])
+    for row in _in_box(conn, box_around(lat, lon, radius_m), ask, limit=ask.widen(3 * limit + 50), closest_to=(lat, lon)):
+        d = meters_between(lat, lon, row[4], row[5])
         if d <= radius_m and ask.keeps(row):
             near.append((d, -row[6], row))
     near.sort(key=lambda t: (t[0], t[1]))
@@ -667,12 +646,12 @@ def _text(conn: sqlite3.Connection, words: list[str], near: tuple[float, float] 
           bbox: tuple[float, float, float, float] | None, ask: _Ask, limit: int) -> list[PlaceHit]:
     """Par le texte : chaque mot (en début de mot) dans le nom ou la ville ; puis la pertinence, l'importance du
     lieu et la distance au point donné. Autour d'un point : d'abord tout près, puis de plus en plus loin."""
-    match = _match(words)
+    match = match_query(words)
     boxes: list[tuple[float, float, float, float] | None]
     if bbox is not None:
         boxes = [bbox]
     elif near is not None:
-        boxes = [_box(near[0], near[1], km * 1000) for km in TEXT_RADII_KM] + [None]
+        boxes = [box_around(near[0], near[1], km * 1000) for km in TEXT_RADII_KM] + [None]
     else:
         boxes = [None]
     where, filters = ask.where()
@@ -702,7 +681,7 @@ def _text(conn: sqlite3.Connection, words: list[str], near: tuple[float, float] 
     best = max(-row[-1] for row in rows) or 1.0
     scored = []
     for row in rows:
-        d = _distance_m(near[0], near[1], row[4], row[5]) if near is not None else None
+        d = meters_between(near[0], near[1], row[4], row[5]) if near is not None else None
         score = 3.0 * (-row[-1] / best) + 0.1 * row[6] - (0.8 * math.log1p(d / 1000) if d is not None else 0.0)
         scored.append((score, d, row))
     scored.sort(key=lambda t: -t[0])
@@ -757,7 +736,7 @@ def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corrid
     walked = [0.0]
     step = max(10.0, corridor_m / 20)
     for p in line[1:]:
-        d = _distance_m(*thin[-1], *p)
+        d = meters_between(*thin[-1], *p)
         if d >= step or p is line[-1]:
             thin.append(p)
             walked.append(walked[-1] + d)
@@ -769,7 +748,7 @@ def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corrid
     lat0 = sum(p[0] for p in kept) / len(kept)
     xy = _project(kept, lat0)
     best: dict[int, tuple[float, float, tuple[Any, ...]]] = {}
-    lengths = [_distance_m(*kept[i], *kept[i + 1]) for i in range(len(kept) - 1)]
+    lengths = [meters_between(*kept[i], *kept[i + 1]) for i in range(len(kept) - 1)]
     piece_m = max(2.0 * corridor_m, 1_000.0, sum(lengths) / ALONG_BOXES_MAX)
     for i in range(len(kept) - 1):
         (a_lat, a_lon), (b_lat, b_lon) = kept[i], kept[i + 1]
@@ -779,7 +758,7 @@ def _along(conn: sqlite3.Connection, line: Sequence[tuple[float, float]], corrid
             t0, t1 = k / pieces, (k + 1) / pieces
             lat_a, lon_a = a_lat + (b_lat - a_lat) * t0, a_lon + (b_lon - a_lon) * t0
             lat_b, lon_b = a_lat + (b_lat - a_lat) * t1, a_lon + (b_lon - a_lon) * t1
-            box = _expand(min(lat_a, lat_b), min(lon_a, lon_b), max(lat_a, lat_b), max(lon_a, lon_b), corridor_m)
+            box = widened_box(min(lat_a, lat_b), min(lon_a, lon_b), max(lat_a, lat_b), max(lon_a, lon_b), corridor_m)
             for row in _in_box(conn, box, ask, limit=ALONG_PER_SEGMENT, tree=True):
                 px, py = _project([(row[4], row[5])], lat0)[0]
                 d, t = _segment(px, py, *xy[i], *xy[i + 1])
@@ -929,7 +908,7 @@ class Places:
         ask = self._ask(category, open_now=open_now, features=features, cuisine=cuisine)
         if ask is None:
             return []
-        words = _words(text or "")
+        words = search_words(text or "")
         if words:
             return await self._run(lambda conn: _text(conn, words, near, bbox, ask, limit))
         if bbox is not None:
@@ -942,7 +921,7 @@ class Places:
 
             def framed(conn: sqlite3.Connection) -> list[PlaceHit]:
                 rows = _in_box(conn, bbox, ask, limit=ask.widen(3 * limit + 50), closest_to=near)
-                ranked = sorted((_distance_m(near[0], near[1], r[4], r[5]), r) for r in rows if ask.keeps(r))
+                ranked = sorted((meters_between(near[0], near[1], r[4], r[5]), r) for r in rows if ask.keeps(r))
                 return [_hit(r, ask, distance_m=d) for d, r in ranked[:limit]]
 
             return await self._run(framed)
@@ -994,7 +973,7 @@ class Places:
                     for row in conn.execute(sql, [*part, *filters]).fetchall():
                         if ask.keeps(row):
                             found.setdefault(row[0], row)
-            out = [_hit(r, ask, distance_m=_distance_m(near[0], near[1], r[4], r[5]) if near is not None else None)
+            out = [_hit(r, ask, distance_m=meters_between(near[0], near[1], r[4], r[5]) if near is not None else None)
                    for r in found.values()]
             return sorted(out, key=lambda h: h.distance_m or 0) if near is not None else out
 
@@ -1051,7 +1030,7 @@ class Places:
             return [("Index des lieux", f"{index} : {info.reason}")]
         if info.schema >= 2:
             origin = f"tirés de {info.source} (OpenStreetMap" + \
-                (f", extrait du {_when_fr(info.extract).removeprefix('le ')})" if info.extract else ")")
+                (f", extrait du {when_fr(info.extract).removeprefix('le ')})" if info.extract else ")")
             facts = [("Index des lieux", f"{index} : {_count_fr(info.count)} lieux, {origin}"),
                      ("Détails", "cuisine, horaires, téléphone, site, terrasse, végétarien, accessibilité… : les "
                                  "filtres et la fiche d'un lieu")]
@@ -1060,7 +1039,7 @@ class Places:
                                          f"{info.zoom})"),
                      ("Détails", "aucun (tiré des tuiles) : ni horaires ni filtres ; refais-le depuis l'extrait "
                                  "OpenStreetMap (mika carte lieux --depuis cartes/france-latest.osm.pbf)")]
-        facts.append(("Construit", _when_fr(info.built)))
+        facts.append(("Construit", when_fr(info.built)))
         if info.bounds is not None:
             w, s, e, n = info.bounds
             facts.append(("Zone (ouest, sud → est, nord)", f"{w:.2f}, {s:.2f} → {e:.2f}, {n:.2f}"))
@@ -1095,7 +1074,7 @@ MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "ao�
           "novembre", "décembre")
 
 
-def _when_fr(iso: str) -> str:
+def when_fr(iso: str) -> str:
     try:
         at = datetime.fromisoformat(iso.replace("Z", "+00:00"))
     except ValueError:

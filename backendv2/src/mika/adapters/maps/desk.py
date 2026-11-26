@@ -47,6 +47,7 @@ from mika.adapters.maps.config import (
     tourism_key,
 )
 from mika.adapters.maps.datatourisme import EVENTS, PLACES, DataTourismeClient, tourism_limits
+from mika.adapters.maps.geo import box_around
 from mika.adapters.maps.geocode import Geocoder
 from mika.adapters.maps.google_places import (
     FOR_CATEGORY,
@@ -60,7 +61,7 @@ from mika.adapters.maps.google_places import (
 from mika.adapters.maps.hours import PARIS
 from mika.adapters.maps.pace import Pace
 from mika.adapters.maps.photos import PhotoRelay
-from mika.adapters.maps.places import LABELS, LIMIT_MAX, Places, _box, _when_fr, _words, utc_now
+from mika.adapters.maps.places import LABELS, LIMIT_MAX, Places, search_words, utc_now, when_fr
 from mika.adapters.maps.quota import QUOTAS_FILE, Limiter, Limits, QuotaStore, counting_sent
 from mika.adapters.maps.reviews import Reviews
 from mika.adapters.maps.reviews_cells import ReviewsCells
@@ -160,7 +161,7 @@ def _at_fr(iso: str) -> str:
         at = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(PARIS)
     except ValueError:
         return iso or "jamais"
-    return f"{_when_fr(at.isoformat())} à {at:%H:%M}"
+    return f"{when_fr(at.isoformat())} à {at:%H:%M}"
 
 
 def _with_photo(hit: PlaceHit, ref: str, *, credit: str, credit_url: str, licence: str = "",
@@ -284,14 +285,14 @@ class MapsDesk:
         asked = LIMIT_MAX if rated else limit
         hits = await self.places.search(text, near=near, bbox=bbox, category=category, limit=asked,
                                         open_now=open_now, features=features, cuisine=cuisine)
-        words = _words(text or "")
+        words = search_words(text or "")
         if not (open_now or features or cuisine.strip()):  # un lieu DATAtourisme ne sait rien de ces filtres
             radius = TOURISM_NEAR_M if near is not None and bbox is None and not words else None
             more = await self.tourism.places(words, near=near, bbox=bbox, radius_m=radius, category=category,
                                              limit=asked)
             hits = merge_places(hits, more, near=near is not None, limit=asked)
         if rated and not words and (bbox is not None or near is not None):
-            area = bbox if bbox is not None else _box(near[0], near[1], RATED_NEAR_M)  # type: ignore[index]
+            area = bbox if bbox is not None else box_around(near[0], near[1], RATED_NEAR_M)  # type: ignore[index]
             hits = await self._best_rated(hits, area, near=near, radius_m=None if bbox is not None else
                                           RATED_NEAR_M, category=category, min_rating=min_rating,
                                           open_now=open_now, features=features, cuisine=cuisine)
@@ -496,7 +497,7 @@ class MapsDesk:
                 raise MapsUnavailable("Les données touristiques ne sont pas réglées.")
             return []  # rien de lu encore : ``tourism_coverage`` dit pourquoi
         return await self.tourism.events(near=near, bbox=bbox, radius_m=radius, start=start, end=end, themes=bits,
-                                         words=_words(text or ""), free=bool(free),
+                                         words=search_words(text or ""), free=bool(free),
                                          limit=max(1, min(EVENTS_LIMIT_MAX, int(limit))))
 
     async def event(self, event_id: str) -> EventDetail | None:
@@ -533,7 +534,7 @@ class MapsDesk:
                                              limit=asked)
             hits = merge_places(hits, more, near=True, limit=asked)
         if rated:
-            hits = await self._best_rated(hits, _box(lat, lon, radius), near=(lat, lon), radius_m=radius,
+            hits = await self._best_rated(hits, box_around(lat, lon, radius), near=(lat, lon), radius_m=radius,
                                           category=category, min_rating=min_rating, open_now=open_now,
                                           features=features, cuisine=cuisine)
         return _rated(await self._noted(hits), min_rating, sort)[:limit]
@@ -673,7 +674,7 @@ class MapsDesk:
         facts.append(("Facturé ce mois", f"{said} (d'après les comptes de ce dossier de données : la même clé ailleurs "
                                          "puise dans le même quota offert, sans qu'ils le voient ; le mois de Google "
                                          "commence à minuit, heure du Pacifique ; prix vérifiés "
-                                         f"{_when_fr(PRICES_CHECKED)})"))
+                                         f"{when_fr(PRICES_CHECKED)})"))
         rel = self.reviews.path.relative_to(self.reviews.data) if self.reviews.path.is_relative_to(self.reviews.data) \
             else self.reviews.path
         if info.ready:

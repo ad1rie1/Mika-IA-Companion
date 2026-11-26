@@ -48,7 +48,7 @@ from mika.adapters.maps.google_places import (
     attribute_facts,
 )
 from mika.adapters.maps.photos import photo_ref
-from mika.adapters.maps.tourism import _lieux, _twin, busy, lone_places, lone_twin
+from mika.adapters.maps.tourism import busy, index_twin, lone_places, lone_twin, open_places
 from mika.ports.maps import Photo, Review, ReviewFacts
 
 #: le schéma 2 : Google (le 1 était celui de la source d'avant : un fichier d'une autre version s'efface, il se relit)
@@ -310,12 +310,12 @@ class ReviewsBase:
         rows = conn.execute("SELECT id, name, lat, lon, category FROM spot WHERE twin IS NULL").fetchall()
         if not rows:
             return 0
-        lieux = _lieux(index)
+        lieux = open_places(index)
         lone = lone_places(tourism) if tourism is not None else None
         found = 0
         try:
             for sid, name, lat, lon, sort in rows:
-                twin = _twin(lieux, name, lat, lon, TWIN_M, sort=sort) if lieux is not None else None
+                twin = index_twin(lieux, name, lat, lon, TWIN_M, sort=sort) if lieux is not None else None
                 if twin is None and lone is not None:
                     twin = lone_twin(lone, name, lat, lon, TWIN_M, sort=sort)
                 conn.execute("UPDATE spot SET twin = ?, twin_m = ? WHERE id = ?",

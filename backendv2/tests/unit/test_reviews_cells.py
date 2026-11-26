@@ -19,10 +19,11 @@ from mika.adapters.maps import reviews as rv
 from mika.adapters.maps import tourism as tourism_module
 from mika.adapters.maps.cells import cell_of, neighbours
 from mika.adapters.maps.config import ReviewsConfig, WarmConfig
+from mika.adapters.maps.geo import meters_between
 from mika.adapters.maps.google_places import PRIMARY_TYPES, read_place
 from mika.adapters.maps.quota import MONTH, QuotaExceeded
 from mika.adapters.maps.reviews import ReviewsBase
-from mika.adapters.maps.reviews_cells import AVIS, _distance_m, circle
+from mika.adapters.maps.reviews_cells import AVIS, circle
 from mika.adapters.maps.tourism import TourismBase
 from mika.adapters.maps.warm import Warmer
 from tests.fixtures import google_places as gp
@@ -47,7 +48,7 @@ def test_the_circle_of_a_cell_covers_its_corners_and_its_quarters_split_it():
     cell = cell_of(*LILLE, 3)
     lat, lon, radius = circle(cell)
     assert (lat, lon) == (pytest.approx(cell.center[0]), pytest.approx(cell.center[1]))
-    assert radius >= _distance_m(lat, lon, cell.south, cell.west) and 2100 < radius < 2200  # ~3 km × √2 / 2
+    assert radius >= meters_between(lat, lon, cell.south, cell.west) and 2100 < radius < 2200  # ~3 km × √2 / 2
     qlat, qlon, qradius = circle(cell, "3")  # le quart nord-est
     assert qlat > lat and qlon > lon and qradius == pytest.approx(radius / 2, rel=0.01)
     slat, slon, _r = circle(cell, "03")  # le quart nord-est de son quart sud-ouest

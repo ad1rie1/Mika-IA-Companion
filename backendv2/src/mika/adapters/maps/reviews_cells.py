@@ -39,6 +39,7 @@ from pathlib import Path
 
 from mika.adapters.maps.cells import Cell, cell_of, cells_in, neighbours
 from mika.adapters.maps.config import ReviewsConfig
+from mika.adapters.maps.geo import meters_between
 from mika.adapters.maps.google_places import (
     AUTH,
     BROKEN,
@@ -113,12 +114,6 @@ def not_found(fetched: str) -> ReviewFacts:
                                                    f"(cherché {day_fr(fetched)}).")
 
 
-def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
-    return 2 * 6_371_008.8 * math.asin(min(1.0, math.sqrt(a)))
-
-
 def circle(cell: Cell, path: str = "") -> tuple[float, float, float]:
     """Le cercle d'une partie d'une case — « » la case entière, « 0 » à « 3 » ses quarts (sud-ouest, sud-est,
     nord-ouest, nord-est), « 03 » le quart nord-est de son quart sud-ouest… — : son centre et son rayon en mètres (la
@@ -130,7 +125,7 @@ def circle(cell: Cell, path: str = "") -> tuple[float, float, float]:
         w, e = (mid_lon, e) if k & 1 else (w, mid_lon)
         s, n = (mid_lat, n) if k & 2 else (s, mid_lat)
     lat, lon = (s + n) / 2, (w + e) / 2
-    return round(lat, 6), round(lon, 6), round(_distance_m(lat, lon, n, e) * CIRCLE_MARGIN, 1)
+    return round(lat, 6), round(lon, 6), round(meters_between(lat, lon, n, e) * CIRCLE_MARGIN, 1)
 
 
 class ReviewsCells:
