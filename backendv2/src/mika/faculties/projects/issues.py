@@ -30,6 +30,12 @@ accord — le défaut —, toujours) ; ici :
 Les règles sont pures (``reasons``, ``unpublishable``, ``verdict`` ; le ticket que reflète une issue, que lisent la
 console et l'API par personne : ``issue_ticket``) ; les textes de console sont dans
 ``inspect_issues.py``, ses phrases et ce qui part dans la voix (``projects.issues``).
+
+Son fait est ici (ADR 0313) : la demande de publier (``projects.issue_asked``), sa charge utile et son réducteur —
+elle attend sa proposition. Ce qui part ou doit partir (``Project.issue_moves``, ``IssueMove``), ce qu'un départ
+fait du projet (``with_issue_move``) et les lectures que tous en font (``issue_move``, ``reflected``) sont dans
+``faculty.py``, dont les réducteurs des effets les écrivent aussi ; le numéro d'une issue et son état, dans
+``tracker.py``.
 """
 
 from __future__ import annotations
@@ -49,8 +55,8 @@ from mika.contracts import self_ as self_c
 from mika.faculties.projects import tracker
 from mika.faculties.projects.atelier import SEEN_KEY
 from mika.faculties.projects.capability_common import effect_project, pin_of, project_refusal
+from mika.faculties.projects.faculty import INHERITED as READ_ABOUT
 from mika.faculties.projects.faculty import (
-    ISSUE_ASKED,
     ISSUE_CAPABILITY,
     ISSUE_NOTE_CAPABILITY,
     ISSUE_STATE_CAPABILITY,
@@ -72,13 +78,15 @@ from mika.faculties.projects.faculty import (
     reflected,
     repo_page,
     subjects_of,
+    with_issue_move,
+    with_project,
     written,
 )
 from mika.faculties.projects.inspect_issues import CANNOT, DESCRIPTION, DONE, HOW, PREVIEW, SUMMARY, WHY
 from mika.faculties.projects.pulls import named, names_someone
 from mika.faculties.projects.tool_common import caretaker, gone_reply, running_project
 from mika.kernel.clock import MINUTE
-from mika.kernel.events import Content, Draft
+from mika.kernel.events import Content, Draft, Payload
 from mika.kernel.faculty import CatchUp, ToolResult
 from mika.kernel.frame import Frame
 from mika.kernel.operate import Preview
@@ -225,6 +233,47 @@ def verdict(item: Item, seen: Issue) -> tuple[str, bool]:
     local_at = item.closed_at if item.closed else item.reopened_at
     host_at = seen.state_at if seen.state == ISSUE_CLOSED else seen.at
     return (HOST if host_at >= local_at else LOCAL), True
+
+
+# ── Son fait et son réducteur (ADR 0313) ──────────────────────────────────
+
+
+class IssueAsked(Payload):
+    """Quelqu'un demande de publier un ticket en issue, ou une note de son fil (ADR 0275) : elle, pendant une
+    exécution, ou une personne depuis la console. Aucun texte : des numéros — ce qui partira se compose à l'aperçu."""
+
+    project: int
+    ticket: int
+    #: ``MOVE_PUBLISH`` ou ``MOVE_NOTE`` (et alors ``note`` : l'événement qui porte la note)
+    what: str = MOVE_PUBLISH
+    note: int = 0
+    #: qui le demande (``self``, ``operator``, ``person``) et sa personne
+    author: str = c.BY_SELF
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+    read_about: tuple[str, ...] = ()
+
+
+ISSUE_ASKED = PROJECTS.event("issue_asked", IssueAsked, subjects=("owner", "about", "by", READ_ABOUT))
+
+
+@PROJECTS.reducer(ISSUE_ASKED)
+def _issue_asked(s: ProjectsState, e, cx) -> ProjectsState:
+    """Une publication demandée (ADR 0275) attend sa proposition (le processus ``projects.issues``). Total : un
+    projet qui ne reflète rien, une sorte inconnue, un départ déjà en route ou déjà fait ne changent rien ; un
+    départ refusé ou en échec repart de zéro — le redemander est un geste."""
+    d = e.data
+    p = s.projects.get(d.project)
+    if p is None or not reflected(p) or d.what not in (MOVE_PUBLISH, MOVE_NOTE) or d.ticket <= 0:
+        return s
+    note = max(0, d.note) if d.what == MOVE_NOTE else 0
+    if d.what == MOVE_NOTE and not note:
+        return s
+    old = issue_move(p, d.ticket, d.what, note)
+    if old is not None and (old.proposal or old.sent_at):
+        return s
+    return with_project(s, with_issue_move(p, IssueMove(d.ticket, d.what, note, d.author, d.by, asked=e.seq, at=e.at)))
 
 
 # ── Ce qui doit partir ────────────────────────────────────────────────────

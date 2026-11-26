@@ -26,7 +26,6 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import issues, tickets, tracker
 from mika.faculties.projects.faculty import (
-    ISSUE_ASKED,
     ISSUE_CAPABILITY,
     ISSUE_NOTE_CAPABILITY,
     ISSUE_STATE_CAPABILITY,
@@ -39,7 +38,7 @@ from mika.faculties.projects.faculty import (
     Project,
     written,
 )
-from mika.faculties.projects.issues import PublishArgs, ticket_publish
+from mika.faculties.projects.issues import ISSUE_ASKED, PublishArgs, ticket_publish
 from mika.faculties.projects.tracker import ITEM_ADDED, ITEM_CHANGED, ITEM_NOTED
 from mika.faculties.projects.tracker_tools import (
     AddArgs,

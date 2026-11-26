@@ -20,7 +20,6 @@ from mika.contracts import projects as c
 from mika.faculties.projects import issues, tickets, tracker
 from mika.faculties.projects.actions import PRIORITY_CHOICES, can_edit, refuse_reserved
 from mika.faculties.projects.faculty import (
-    ISSUE_ASKED,
     LISTS_MAX,
     MOVE_NOTE,
     MOVE_PUBLISH,
@@ -50,6 +49,7 @@ from mika.faculties.projects.inspect_common import (
     unchanged,
 )
 from mika.faculties.projects.inspect_issues import CANNOT, ISSUE_FR, PUBLISH_HELP
+from mika.faculties.projects.issues import ISSUE_ASKED
 from mika.faculties.projects.milestones import MILESTONE_ADDED
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame

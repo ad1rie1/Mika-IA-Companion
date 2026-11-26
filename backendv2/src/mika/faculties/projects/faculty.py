@@ -36,6 +36,11 @@ ses événements font ressentir (ADR 0031).
   ``projects.checks_seen``, ``projects.base_seen``), leurs réducteurs et ce qui les propose, les ouvre et les relit,
   dans ``pulls.py`` ; la fusion qu'une personne demande et ce que l'hôte en répond (``projects.merge_asked``,
   ``projects.merge_answered``), dans ``merge.py`` (ADR 0313). Rien ici ne fusionne.
+- **Ses issues** (ADR 0275) : le reflet de ses tickets chez l'hôte. Ce qui part ou doit partir
+  (``Project.issue_moves``, ``IssueMove``) et les lectures que tous en font (``issue_move``, ``reflected``) sont
+  ici, avec ce qu'un départ fait du projet (``with_issue_move``, que les réducteurs des effets appellent) ; la
+  demande de publier (``projects.issue_asked``), son réducteur, ses règles, ses capacités et son processus, dans
+  ``issues.py`` (ADR 0313).
 - **Ses jalons** (ADR 0273) : un objectif ponctuel dit où il en est (``Objective.milestones``, ``Milestone``). Leur
   forme et les lectures que tous en font sont ici ; leurs événements, leurs réducteurs, ce qui s'écrit et ce qu'on
   en lit, dans ``milestones.py`` (ADR 0313) ; ses outils, dans ``milestones_tools.py``. Un jalon atteint ne se défait pas ;
@@ -1329,23 +1334,6 @@ class Reviewed(Payload):
     read_about: tuple[str, ...] = ()
 
 
-class IssueAsked(Payload):
-    """Quelqu'un demande de publier un ticket en issue, ou une note de son fil (ADR 0275) : elle, pendant une
-    exécution, ou une personne depuis la console. Aucun texte : des numéros — ce qui partira se compose à l'aperçu."""
-
-    project: int
-    ticket: int
-    #: ``MOVE_PUBLISH`` ou ``MOVE_NOTE`` (et alors ``note`` : l'événement qui porte la note)
-    what: str = MOVE_PUBLISH
-    note: int = 0
-    #: qui le demande (``self``, ``operator``, ``person``) et sa personne
-    author: str = c.BY_SELF
-    by: str = ""
-    owner: str | None = None
-    about: tuple[str, ...] = ()
-    read_about: tuple[str, ...] = ()
-
-
 class RemoteRequested(Payload):
     """L'opérateur demande de pousser (``push``) ou de récupérer (``pull``) maintenant."""
 
@@ -1382,7 +1370,6 @@ PLAN_ANSWERED = PROJECTS.event("plan_answered", PlanAnswered, content=("words",)
                                subjects=("owner", "about", "by", INHERITED))
 DEPOSITED = PROJECTS.event("deposited", Deposited, content=("note",), subjects=("owner", "about", "by", INHERITED))
 REMOTE_REQUESTED = PROJECTS.event("remote_requested", RemoteRequested, subjects=("owner", "about"))
-ISSUE_ASKED = PROJECTS.event("issue_asked", IssueAsked, subjects=("owner", "about", "by", INHERITED))
 REVIEW_ASKED = PROJECTS.event("review_asked", ReviewAsked, subjects=("owner", "about"))
 REVIEWED = PROJECTS.event("reviewed", Reviewed, content=("findings",), subjects=("owner", "about", INHERITED))
 NETWORK_QUEUED = PROJECTS.event("network_queued", NetworkQueued, content=("why",),
@@ -2347,7 +2334,7 @@ def issue_move(p: Project, ticket: int, what: str, note: int = 0) -> IssueMove |
     return next((m for m in p.issue_moves if (m.ticket, m.what, m.note) == (ticket, what, note)), None)
 
 
-def _moved_issue(p: Project, move: IssueMove | None, *, drop: IssueMove | None = None) -> Project:
+def with_issue_move(p: Project, move: IssueMove | None, *, drop: IssueMove | None = None) -> Project:
     """Le projet avec ce départ posé (à la place de celui qu'il remplace) ou retiré. Borné : les plus anciens
     départs réglés tombent d'abord."""
     gone = drop if drop is not None else move
@@ -2371,24 +2358,6 @@ def issue_settled(p: Project, ticket: int, *whats: str) -> Project:
 def reflected(p: Project) -> bool:
     """Ce projet reflète-t-il ses tickets en issues (ADR 0275) ? Il lui faut un dépôt distant, et son réglage."""
     return bool(p.remote) and p.issues in (c.ISSUES_ASK, c.ISSUES_ALWAYS) and p.status != c.ARCHIVED
-
-
-@PROJECTS.reducer(ISSUE_ASKED)
-def _issue_asked(s: ProjectsState, e, cx) -> ProjectsState:
-    """Une publication demandée (ADR 0275) attend sa proposition (le processus ``projects.issues``). Total : un
-    projet qui ne reflète rien, une sorte inconnue, un départ déjà en route ou déjà fait ne changent rien ; un
-    départ refusé ou en échec repart de zéro — le redemander est un geste."""
-    d = e.data
-    p = s.projects.get(d.project)
-    if p is None or not reflected(p) or d.what not in (MOVE_PUBLISH, MOVE_NOTE) or d.ticket <= 0:
-        return s
-    note = max(0, d.note) if d.what == MOVE_NOTE else 0
-    if d.what == MOVE_NOTE and not note:
-        return s
-    old = issue_move(p, d.ticket, d.what, note)
-    if old is not None and (old.proposal or old.sent_at):
-        return s
-    return with_project(s, _moved_issue(p, IssueMove(d.ticket, d.what, note, d.author, d.by, asked=e.seq, at=e.at)))
 
 
 @PROJECTS.reducer(NETWORK_QUEUED)
@@ -2914,8 +2883,8 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
         if ticket > 0 and what in MOVES:
             note = _request_of(e.data.args_json, "note") if what == MOVE_NOTE else 0
             old = issue_move(p, ticket, what, note)
-            p = _moved_issue(p, replace(old, proposal=e.seq) if old is not None else
-                             IssueMove(ticket, what, note, proposal=e.seq, at=e.at))
+            p = with_issue_move(p, replace(old, proposal=e.seq) if old is not None else
+                                IssueMove(ticket, what, note, proposal=e.seq, at=e.at))
     awaiting = s.awaiting.set(e.seq, e.data.args_json) if e.data.approval else s.awaiting
     s = replace(with_project(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)), awaiting=awaiting)
     if e.data.capability == STEER_CAPABILITY:
@@ -3020,7 +2989,7 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     unsent = _issue_asked_by(p, e.data.proposal) if got[1] in ISSUE_CAPABILITIES else None
     if unsent is not None:
         # refusé ici même : ce départ ne se repropose pas de lui-même (le redemander, ou le ticket qui change d'état)
-        p = _moved_issue(p, replace(unsent, proposal=0, tries=MOVE_TRIES_MAX))
+        p = with_issue_move(p, replace(unsent, proposal=0, tries=MOVE_TRIES_MAX))
     # la note de qui refuse est gardée à part (l'oubli l'atteint) : seule celle d'un journal ancien est en clair
     note = f" : « {e.data.legacy_note[:200]} »" if e.data.legacy_note else ""
     if e.data.note is not None and e.data.note.ref:
@@ -3065,8 +3034,8 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
     if left is not None:
         # parti chez l'hôte (le fait — le numéro de l'issue, son état — viendra de sa lecture, ``projects.issues``),
         # ou en échec : un essai de plus, ``MOVE_TRIES_MAX`` au plus
-        p = _moved_issue(p, replace(left, proposal=0, sent_at=e.at, tries=0) if e.data.ok else
-                         replace(left, proposal=0, tries=left.tries + 1))
+        p = with_issue_move(p, replace(left, proposal=0, sent_at=e.at, tries=0) if e.data.ok else
+                            replace(left, proposal=0, tries=left.tries + 1))
     asked = s.steer_proposals.get(e.data.proposal, "") if got[1] == STEER_CAPABILITY else ""
     if asked in s.steers:  # acceptée : son geste s'écrit (l'effet ``steer._steer_accepted``)
         s = replace(s, steers=s.steers.set(asked, replace(s.steers[asked], applied=True)))
