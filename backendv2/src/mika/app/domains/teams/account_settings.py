@@ -43,7 +43,7 @@ async def teams_get(call: Call) -> dict[str, Any]:
     found = settings_of(call).named("teams").teams().accounts.get(key)
     if found is None:
         raise missing()
-    return {**_teams_settings(key, found, call), "rules": settings_me._rules_json(call, f"{TEAMS}:{key}")}
+    return {**_teams_settings(key, found, call), "rules": settings_me.rules_json(call, f"{TEAMS}:{key}")}
 
 
 async def teams_save(call: Call) -> dict[str, Any]:
@@ -62,7 +62,7 @@ async def _teams_save(call: Call) -> dict[str, Any]:
 
 async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
     cfg = settings.named("teams").teams()
-    values = settings_me._values(call, TEAMS_FIELDS)
+    values = settings_me.posted_values(call, TEAMS_FIELDS)
     key = call.arg("account", limit=40)
     if key:
         teams_me.owned(call, key)
@@ -71,13 +71,13 @@ async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
         merged = {**cfg.accounts[key].model_dump(), **values, "owner": cfg.accounts[key].owner,
                   "shares": cfg.accounts[key].shares}
     else:
-        own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me._owner_for(call)))
+        own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me.owner_for(call)))
         s = teams_me.state(call)
         traces = {*(d.account for d in s.drafts.values()), *(m.account for m in s.messages.values()),
                   *(a.account for a in s.asked.values())}
-        key = settings_me._slug(str(values.get("label") or call.me.name or "teams"), set(cfg.accounts) | traces,
+        key = settings_me.fresh_key(str(values.get("label") or call.me.name or "teams"), set(cfg.accounts) | traces,
                                 ACCOUNT_KEY)
-        merged = {**values, "owner": settings_me._owner_for(call)}
+        merged = {**values, "owner": settings_me.owner_for(call)}
     bounds = forms.within(forms.describe(TeamsAccount), merged)
     if bounds:
         raise Denied(400, "Le formulaire a des erreurs.", bounds)
@@ -88,7 +88,7 @@ async def _teams_write(call: Call, settings: Any) -> dict[str, Any]:
     except ValidationError as exc:
         raise refused(exc) from None
     await settings.named("teams").save_teams(new)
-    await settings_me._rejournal(call)
+    await settings_me.rejournal(call)
     await audit(call.kernel, "moi.compte_teams", by=call.me.handle, subject_kind="compte_teams", subject=key)
     return {"ok": True, "message": "Compte Teams enregistré.", "account": key}
 
@@ -108,7 +108,7 @@ async def teams_remove(call: Call) -> dict[str, Any]:
         store = call.port("teams")
         if store is not None:
             store.drop_account(key)
-        await settings_me._rejournal(call)
+        await settings_me.rejournal(call)
     await audit(call.kernel, "moi.compte_teams_retire", by=call.me.handle, subject_kind="compte_teams", subject=key)
     return {"ok": True, "message": "Compte Teams retiré."}
 

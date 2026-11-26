@@ -84,7 +84,7 @@ async def box_get(call: Call) -> dict[str, Any]:
     signin = port.signin(key) if port is not None and found.microsoft else None
     got["signin"] = {"state": signin.state, "code": signin.code, "url": signin.url, "until": signin.until // 1000,
                      "error": signin.error} if signin is not None else None
-    got["rules"] = settings_me._rules_json(call, f"{MAIL}:{key}")
+    got["rules"] = settings_me.rules_json(call, f"{MAIL}:{key}")
     return got
 
 
@@ -126,7 +126,7 @@ async def box_save(call: Call) -> dict[str, Any]:
 async def _box_save(call: Call) -> dict[str, Any]:
     settings = settings_of(call)
     cfg = settings.named("mail").email()
-    values = settings_me._values(call, MAIL_FIELDS)
+    values = settings_me.posted_values(call, MAIL_FIELDS)
     key = call.arg("box", limit=40)
     before: MailAccount | None = None
     if key:
@@ -141,10 +141,10 @@ async def _box_save(call: Call) -> dict[str, Any]:
         # quand elle le devient
         microsoft = hosts if before.microsoft else {f: merged.get(f) for f in HOSTS}
     else:
-        own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me._owner_for(call)))
-        key = settings_me._slug(str(values.get("label") or values.get("address") or ""),
+        own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me.owner_for(call)))
+        key = settings_me.fresh_key(str(values.get("label") or values.get("address") or ""),
                                 set(cfg.accounts) | _traces(call), ACCOUNT_KEY)
-        merged = {**values, "owner": settings_me._owner_for(call)}
+        merged = {**values, "owner": settings_me.owner_for(call)}
         hosts = microsoft = {f: merged.get(f) for f in HOSTS}
     await public_only(call, hosts)
     if merged.get("auth") == MICROSOFT:
@@ -169,16 +169,16 @@ async def _box_save(call: Call) -> dict[str, Any]:
             if cfg.accounts[key] != before:
                 raise Denied(409, "Cette boîte vient d'être réglée ailleurs : rouvre-la, puis recommence.")
         else:
-            own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me._owner_for(call)))
+            own_room(call, sum(1 for a in cfg.accounts.values() if a.owner == settings_me.owner_for(call)))
             if key in cfg.accounts:
-                key = settings_me._slug(str(values.get("label") or values.get("address") or ""),
+                key = settings_me.fresh_key(str(values.get("label") or values.get("address") or ""),
                                 set(cfg.accounts) | _traces(call), ACCOUNT_KEY)
         try:
             new = MailConfig(accounts={**cfg.accounts, key: account})
         except ValidationError as exc:
             raise refused(exc) from None
         await settings.named("mail").save_email(new)
-        await settings_me._rejournal(call)
+        await settings_me.rejournal(call)
     await audit(call.kernel, "moi.boite", by=call.me.handle, subject_kind="compte", subject=key)
     return {"ok": True, "message": "Boîte enregistrée.", "box": key, "ready": account.ready}
 
@@ -193,7 +193,7 @@ async def box_remove(call: Call) -> dict[str, Any]:
         if key not in cfg.accounts:
             raise missing()
         await settings.named("mail").save_email(MailConfig(accounts={k: a for k, a in cfg.accounts.items() if k != key}))
-        await settings_me._rejournal(call)
+        await settings_me.rejournal(call)
     await audit(call.kernel, "moi.boite_retiree", by=call.me.handle, subject_kind="compte", subject=key)
     return {"ok": True, "message": "Boîte retirée."}
 

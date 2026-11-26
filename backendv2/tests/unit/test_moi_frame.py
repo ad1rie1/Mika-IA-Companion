@@ -199,4 +199,4 @@ def test_without_tiles_the_map_says_unplugged_as_the_map_screen_does():
 
 
 def test_a_new_box_key_folds_accents_and_ligatures():
-    assert settings_me._slug("Cœur.Été@exemple.fr", set(), ACCOUNT_KEY).startswith("coeur-ete-")
+    assert settings_me.fresh_key("Cœur.Été@exemple.fr", set(), ACCOUNT_KEY).startswith("coeur-ete-")

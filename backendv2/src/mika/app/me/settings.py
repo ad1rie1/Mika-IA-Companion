@@ -40,17 +40,17 @@ RULE_FIELDS = ("prepare", "reply")
 REPLY_CODES = tuple(code for code, _words in REPLIES)
 
 
-def _owner_for(call: Call) -> str:
+def owner_for(call: Call) -> str:
     """À qui est ce qu'elle branche : « à toi » pour une de ses propriétaires, sinon à son nom."""
     return "" if call.me.owner else PERSON + call.me.person
 
 
-async def _rejournal(call: Call) -> None:
+async def rejournal(call: Call) -> None:
     if call.api.reconfigure is not None:
         await call.api.reconfigure()
 
 
-def _slug(text: str, taken: set[str], rule: re.Pattern[str]) -> str:
+def fresh_key(text: str, taken: set[str], rule: re.Pattern[str]) -> str:
     """Une clé neuve (minuscules, chiffres, - ou _) tirée d'un nom ou d'une adresse, suivie d'un suffixe tiré au
     hasard et libre parmi ``taken`` : une clé ne sert jamais deux fois, car le courrier gardé, ses pièces et ce
     qu'elle en sait restent rangés sous la clé d'une boîte retirée (une boîte neuve ne les rouvre pas). ``rule`` : la
@@ -63,7 +63,7 @@ def _slug(text: str, taken: set[str], rule: re.Pattern[str]) -> str:
             return key
 
 
-def _values(call: Call, allowed: tuple[str, ...]) -> dict[str, Any]:
+def posted_values(call: Call, allowed: tuple[str, ...]) -> dict[str, Any]:
     raw = call.data.get("values")
     if not isinstance(raw, dict):
         raise Denied(400, "« values » : un objet.")
@@ -123,7 +123,7 @@ def _version(table: CanalTable) -> str:
     return hashlib.sha256(said.encode()).hexdigest()[:16]
 
 
-def _rules_json(call: Call, canal: str) -> dict[str, Any]:
+def rules_json(call: Call, canal: str) -> dict[str, Any]:
     """La règle d'un de ses comptes, en mots comme dans la matrice (``app/me/rights.py``) : ses lignes (qui, quand,
     préparer d'elle-même, comment ça part), sa ligne par défaut, et son empreinte (``version``)."""
     table, own, common = _canal_table(settings_of(call).canals(), canal)
@@ -175,7 +175,7 @@ async def rules_save(call: Call) -> dict[str, Any]:
         rows = tuple(_ruled(found, canal, line, sent, n)
                      for n, (line, sent) in enumerate(zip(table.lines, lines, strict=True), start=1))
         await settings.save_canal(canal, CanalTable(lines=rows, default=_ruled(found, canal, table.default, default, 0)))
-        await _rejournal(call)
+        await rejournal(call)
     # la règle est un réglage du compte : son geste est celui qui le règle, que son canal dit
     await audit(call.kernel, found.audit, by=call.me.handle, subject_kind=found.subject_kind, subject=key)
     return {"ok": True, "message": "Règle d'envoi enregistrée."}
