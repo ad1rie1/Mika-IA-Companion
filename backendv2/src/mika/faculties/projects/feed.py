@@ -40,8 +40,9 @@ PULLS = (f.PULL_SEEN, f.CHECKS_SEEN, "projects.merge_asked", "projects.merge_ans
          "projects.pull_write_asked", "projects.pull_write_answered")
 TICKETS = tracker.MOVES
 GESTURES = (f.REFRAMED, f.PAUSED, f.RESUMED, f.ARCHIVED, f.RESTORED, f.NUDGED, f.OBJECTIVE_ADDED,
-            f.OBJECTIVE_CHANGED, milestones.MILESTONE_ADDED, milestones.MILESTONE_CHANGED, f.DECIDED, f.DECISION_CHANGED,
-            decisions.DECISION_REVISED, f.AMENDED, f.PLAN_ANSWERED, f.LINKS_SET, f.DEPOSITED)
+            f.OBJECTIVE_CHANGED, milestones.MILESTONE_ADDED, milestones.MILESTONE_CHANGED, decisions.DECIDED,
+            decisions.DECISION_CHANGED, decisions.DECISION_REVISED, f.AMENDED, f.PLAN_ANSWERED, f.LINKS_SET,
+            f.DEPOSITED)
 ALL = (*RUNS, *PULLS, *TICKETS, *GESTURES)
 #: ce qu'un filtre par sorte lit du journal : un geste peut porter sur tout sauf une exécution
 READS = {RUN: RUNS, COMMIT: RUNS, PULL: PULLS, TICKET: TICKETS, GESTURE: (*PULLS, *TICKETS, *GESTURES)}

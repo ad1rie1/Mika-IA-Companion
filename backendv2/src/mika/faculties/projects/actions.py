@@ -37,14 +37,13 @@ from mika.contracts import mcp as mcp_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects import access, asks, decisions, links, triggers
+from mika.faculties.projects.decisions import DECIDED, DECISION_CHANGED
 from mika.faculties.projects.faculty import (
     AMENDED,
     APPROVE,
     ARCHIVED,
     ASAP,
     BASE_BUNDLES,
-    DECIDED,
-    DECISION_CHANGED,
     DECISIONS_KEPT,
     DEPOSITED,
     EXTRA_BUNDLES,

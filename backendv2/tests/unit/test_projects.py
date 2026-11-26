@@ -30,8 +30,8 @@ from mika.contracts import goals as goals_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.faculties.projects.decisions import DECIDED
 from mika.faculties.projects.faculty import (
-    DECIDED,
     ISSUE_CAPABILITIES,
     NETWORKED_CAPABILITY,
     OBJECTIVE_ADDED,
@@ -679,7 +679,7 @@ def test_a_pull_is_refused_while_a_run_works_in_the_workshop():
 
 
 def test_two_additions_of_the_same_number_both_land(tmp_path):
-    from mika.faculties.projects.faculty import DECIDED
+    from mika.faculties.projects.decisions import DECIDED
 
     async def scenario(kernel, llm):
         pid = await create(kernel, "p1", title="Le module", objectives="Écrire le module", start="3:00", end="4:00")

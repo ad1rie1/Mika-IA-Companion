@@ -61,10 +61,10 @@ from mika.faculties.projects.actions import (
     pending_of,
     service_words,
 )
+from mika.faculties.projects.decisions import DECISION_CHANGED
 from mika.faculties.projects.faculty import (
     AMENDED,
     ARCHIVED,
-    DECISION_CHANGED,
     DEPOSITED,
     EXTRA_BUNDLES,
     NETWORKED_CAPABILITY,

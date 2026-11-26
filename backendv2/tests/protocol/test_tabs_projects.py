@@ -11,7 +11,8 @@ import re
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects.faculty import AMENDED, DECIDED, NOTED, OBJECTIVE_CHANGED, subject_of
+from mika.faculties.projects.decisions import DECIDED
+from mika.faculties.projects.faculty import AMENDED, NOTED, OBJECTIVE_CHANGED, subject_of
 from mika.kernel.events import Content, Origin
 from mika.runtime.operations import perform
 from mika.vocab.episodes import Kind, project_target

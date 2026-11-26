@@ -64,9 +64,9 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.projects import links, milestones, triggers
+from mika.faculties.projects.decisions import DECIDED
 from mika.faculties.projects.faculty import (
     ARCHIVED,
-    DECIDED,
     DECISIONS_KEPT,
     DEFAULT_BUNDLES,
     LINKS_MAX,
