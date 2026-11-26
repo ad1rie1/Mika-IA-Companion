@@ -6,7 +6,9 @@ Seul le propriétaire partage, et seulement avec une personne qui a un compte �
 le monde ». Chaque sorte de ressource est à un domaine, qui dit dans sa part (``SharingPart``, ADR 0310 : le
 ``sharing.py`` de son dossier) comment ses partages se rangent, se lisent et s'écrivent ; ce module les réunit, dans
 l'ordre de ``KINDS``, et n'en connaît aucune. Il garde ce qui vaut pour toutes : qui reçoit (une personne qui a un
-compte, pas soi, pas qui l'a déjà : ``not_hers_already``), à quel niveau, l'audit.
+compte, pas soi, pas qui l'a déjà : ``not_hers_already``), à quel niveau, l'audit. Une sorte rangée dans les réglages
+avec ses partages (une boîte, un compte Teams : leur fiche porte ``shares``) fait sa part par ``kept_in_settings``, en
+ne disant que ce qui est à elle.
 
 Tous se lisent ici, dans les réglages (``every_share``) : Réglages › Droits › Partages les montre tous ; Paramètres ›
 Partages (``list_shares``) et l'onglet Comptes de la fiche d'une personne y lisent ce qu'une personne donne et ce
@@ -23,17 +25,19 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
 from starlette.routing import Route
 
 from mika.app.domains import DOMAINS, SharingPart, part
-from mika.app.me.api import Call, Denied, MeApiBase, missing, person_of
+from mika.app.me.api import Call, Denied, MeApiBase, either, missing, person_of, refused
 from mika.app.me.common import settings_of
 from mika.contracts import identity as identity_c
 from mika.runtime.operations import audit
 from mika.vocab.access import PERSON, SHARES
 from mika.vocab.ownership import holds
 
-#: ce qui se partage, dans l'ordre où les partages se lisent : une sorte par domaine, que sa part dit (``SharingPart``)
+#: ce qui se partage, dans l'ordre où les partages se lisent : une sorte par domaine, que sa part dit (``SharingPart``) ;
+#: le refus d'une sorte inconnue les énumère dans cet ordre (``set_share``)
 KINDS = ("mail", "teams", "mcp", "agenda")
 LEVELS = tuple(level for level, _label in SHARES)
 #: une clé fait au plus tant de caractères, sauf ce qu'en dit sa sorte (``SharingPart.key_limit``)
@@ -120,6 +124,59 @@ def not_hers_already(call: Call, owner: str, person: str, level: str) -> None:
                      {"person": "déjà propriétaire"})
 
 
+def kept_in_settings(kind: str, *, word: str, article: str, config: Callable[[Any], Any], account: type[BaseModel],
+                     save: Callable[[Any, Any, dict[str, Any]], Awaitable[Any]], owned: Callable[[Call, str], Any],
+                     sharer: Callable[..., str] | None = None) -> SharingPart:
+    """La part des partages d'une sorte de ressource rangée dans les réglages avec ses partages (une boîte, un compte
+    Teams) : chacune a sa fiche dans ``config(settings).accounts``, par sa clé, qui dit son nom (``label``), son
+    propriétaire (``owner``) et ses partages (``shares`` : « personne:<clé> » → niveau), journalisés avec les
+    paramètres de son plugin — sa règle s'étend à qui la reçoit. Sa sorte dit le reste : ses mots (``word``,
+    ``article``), sa fiche revalidée (``account``, sa forme), ses fiches récrites (``save(settings, cfg, accounts)``,
+    asynchrone : toutes, celle-ci changée), une ressource à qui demande (``owned(call, key)``, qui lève ``Denied``),
+    qui la partage (``sharer`` ; ``None`` : son propriétaire)."""
+
+    def every(settings: Any, names: Mapping[str, str] | None = None) -> list[Shared]:
+        # ses partages, ressource par ressource : ceux rangés avec chacune
+        out: list[Shared] = []
+        for key, spec in sorted(config(settings).accounts.items()):
+            out += [Shared(kind, key, spec.label or key, spec.owner, who[len(PERSON):], level)
+                    for who, level in sorted(spec.shares.items())]
+        return out
+
+    async def share(call: Call, settings: Any, key: str, person: str, level: str) -> None:
+        # son propriétaire partage une de ses ressources : elle est à lui, et pas déjà à cette personne — jugé sur sa
+        # fiche relue sous le verrou des réglages
+        def hers(spec: Any) -> None:
+            owned(call, key)
+            not_hers_already(call, spec.owner, person, level)
+
+        await write(settings, call.api.reconfigure, key, person, level, hers)
+
+    async def write(settings: Any, reconfigure: Callable[[], Awaitable[Any]] | None, key: str, person: str,
+                    level: str, check: Callable[[Any], None] | None = None) -> None:
+        # le partage d'une ressource à cette personne, à ce niveau (vide : retiré), relu puis réécrit d'un seul tenant
+        # (``Settings.writing``), avec ce qui en dérive (``shares``, rejournalisé : sa règle s'étend) : un partage
+        # retiré ailleurs entre-temps ne revient pas ; ``check`` juge la fiche relue, sous le verrou
+        async with settings.writing:
+            cfg = config(settings)
+            spec = cfg.accounts.get(key)
+            if spec is None:
+                raise missing()
+            if check is not None:
+                check(spec)
+            who = PERSON + person
+            shares = {k: v for k, v in spec.shares.items() if k != who} | ({who: level} if level else {})
+            try:
+                await save(settings, cfg, {**cfg.accounts, key: account.model_validate(
+                    {**spec.model_dump(), "shares": shares})})
+            except ValidationError as exc:
+                raise refused(exc) from None
+            if reconfigure is not None:
+                await reconfigure()
+
+    return SharingPart(kind, every=every, share=share, write=write, sharer=sharer, word=word, article=article)
+
+
 async def list_people(call: Call) -> dict[str, Any]:
     return {"items": people(call)}
 
@@ -184,7 +241,7 @@ async def set_share(call: Call) -> dict[str, Any]:
     person = call.arg("person", limit=200)
     level = call.arg("level", limit=20)
     if kind not in KINDS:
-        raise Denied(400, "« kind » : mail, teams, mcp ou agenda.")
+        raise Denied(400, f"« kind » : {either(KINDS)}.")
     if level and level not in LEVELS:
         raise Denied(400, "« level » : lire, preparer ou servir (vide : retirer).")
     settings = settings_of(call)

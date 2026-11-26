@@ -613,7 +613,7 @@ Trois règles tiennent l'ensemble :
 | Ce que le serveur construit pour lui | `wiring.py` (`app/wiring.py::Wiring`) | `wire(w)` avant le noyau ; `bind(w)` après ; `inputs(settings)` ; `start`, `stop`, `release` | `wiring=` |
 | Ses routes de `/api/moi` | `api.py` (ou un paquet `api/`) | `routes(api)`, `COUNTERS` | `api=` |
 | Sa part du direct | `live.py` | `LIVE`, une `LivePart` | `live=` |
-| Ce qui se partage chez lui | `sharing.py` | `SHARING`, une `SharingPart` | `sharing=` |
+| Ce qui se partage chez lui (une ressource rangée dans les réglages avec ses partages, comme une boîte ou un compte Teams : `app/me/sharing.py::kept_in_settings` fait la part, qui ne dit que ses mots, ses réglages lus et récrits, à qui est une ressource et qui la partage) | `sharing.py` | `SHARING`, une `SharingPart` | `sharing=` |
 | Les comptes de son canal (et comment part ce qu'elle y prépare : le geste audité qui règle un compte, `audit` et `subject_kind` ; un compte dit à sa propriétaire, `yours` ; s'il n'a pas de brouillon qu'elle enverrait elle-même, `no_drafts`) | `accounts.py` | `ACCOUNTS`, une `AccountsPart` | `accounts=` |
 | Des outils qui viennent d'ailleurs (et leur sous-onglet de Réglages › Droits : `tab`, `tab_title`, `tab_hint`) | `outside.py` | `OUTSIDE`, une `OutsidePart` | `outside=` |
 | Ses méthodes du port d'entrée | `port.py` | `PORT`, une `PortPart` | `port=` |
