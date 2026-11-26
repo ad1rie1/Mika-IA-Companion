@@ -304,7 +304,8 @@ Dessiné à la main (`app/handmade/home.py`), il répond à trois questions et s
   l'Annuaire, `app/domains/contacts/console/person.py`) ; ce que la vue d'ensemble résume (Synthèse, Lien, Ce qu'elle devine, Affect, Pensées) est rangé au bout
   de la barre, sous « Le détail ». Un onglet qu'un seul domaine nourrit (ses agendas, ses voyages et sa position, son
   téléphone, ce qui l'identifie et ses contacts, ses projets) est dessiné et compté par la part de ce domaine
-  (`PersonPart`, ADR 0310). Ses onglets disent leur compte (`PersonOverview.counts`) : ses moyens de
+  (`PersonPart`, ADR 0310), qui dit aussi ses feuilles (`styles` : celle de l'annuaire, celle de l'agenda) ; chaque
+  onglet, du cadre ou d'un domaine, reçoit les formulaires de la console (`forms`). Ses onglets disent leur compte (`PersonOverview.counts`) : ses moyens de
   communication, ses messages et ce que liste sa Mémoire (un `COUNT` chacun ; la mémoire compte aux clauses de son
   onglet, tous statuts), ce qu'il y a sous Comptes, ses voyages, ses buts, ses projets ; Fichiers n'en dit pas (deux
   facultés, deux tables), ni ce qui est rangé sous « Le détail ».

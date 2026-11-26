@@ -134,7 +134,8 @@ async def gpx(ui: UI, request: Request, outbound: SlidingWindow) -> Response:
     return secure(gpx_response(trip, body))
 
 
-def position_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+def position_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
+                 forms: Mapping[str, Any] | None = None) -> Markup | None:
     """La fiche d'une personne › Sa position : sa dernière position, téléphone par téléphone, et son journal."""
     look = Look.of(ui, DAY)
     s = slice_of(look, "location")
@@ -167,5 +168,5 @@ def routes(ui: UI, outbound: SlidingWindow) -> list[Route]:
 PERSON_PART = PersonPart(
     # où son téléphone dit qu'elle est (seulement s'il en a dit quelque chose) ;
     # ses voyages (seulement si elle en a) : leurs arrêts jour par jour, leur GPX, « Supprimer » (ADR 0204)
-    tabs={"voyages": voyages, "position": position_tab}, formed=("voyages",), counts={"voyages": count},
+    tabs={"voyages": voyages, "position": position_tab}, counts={"voyages": count},
     routes=routes)

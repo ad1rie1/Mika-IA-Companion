@@ -30,7 +30,8 @@ sources factices, pour qu'il échoue vraiment quand on nomme un domaine.
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator, Mapping
+import inspect
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -53,7 +54,7 @@ from mika.app.domains import (
     part,
 )
 from mika.app.handmade.person import TABS as PERSON_TABS
-from mika.app.handmade.person import account_tabs
+from mika.app.handmade.person import account_tabs, every_tab
 from mika.app.handmade.rights import share_consoles
 from mika.app.handmade.waiting import TABS as QUEUE_TABS
 from mika.app.me.accounts import CHANNELS
@@ -62,7 +63,7 @@ from mika.app.me.sharing import KINDS as SHARED_KINDS
 from mika.app.mindport import MIXED, KernelPort
 from mika.app.settings import SettingsPart
 from mika.inspector.pages.approvals import HISTORY_ORDER
-from mika.inspector.ui import QueueTab
+from mika.inspector.ui import QueueTab, static_roots
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / "mika"
@@ -354,7 +355,11 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             # … ou, en sous-onglet de Comptes, ce qu'elle a chez lui : (son ancre, son nom, ce qui le lit)
             assert sheet.owned is None or (len(sheet.owned) == 3 and all(isinstance(x, str) and x for x in sheet.owned[:2])
                                            and callable(sheet.owned[2])), d.name
-            assert set(sheet.formed) <= set(sheet.tabs), f"{d.name} : {sorted(set(sheet.formed) - set(sheet.tabs))}"
+            # … qui reçoit toujours les formulaires de la console (``forms``), et ses feuilles, chacune servie
+            assert all(takes_forms(draw) for draw in sheet.tabs.values()), \
+                f"{d.name} : {sorted(tab for tab, draw in sheet.tabs.items() if not takes_forms(draw))}"
+            assert all(isinstance(s, str) and s.endswith(".css") and served(s) for s in sheet.styles), \
+                f"{d.name} : {sheet.styles}"
             # … ou, pour un compte qui s'ajoute à celui du cadre, un onglet du cadre
             unknown = set(sheet.counts) - {*sheet.tabs, *PERSON_TABS, *account_tabs()}
             assert not unknown and all(callable(count) for count in sheet.counts.values()), f"{d.name} : {sorted(unknown)}"
@@ -425,6 +430,28 @@ def test_a_pane_of_the_accounts_of_a_person_is_said_once():
     anchors = [*account_tabs(), *(s.owned[0] for d in DOMAINS if (s := _person_part(d)) is not None and s.owned),
                "partages"]
     assert len(anchors) == len(set(anchors)), anchors
+
+
+def takes_forms(draw: Callable[..., object]) -> bool:
+    """Un onglet de la fiche d'une personne reçoit les formulaires de la console par leur nom
+    (``draw(ui, key, blocks, query, forms=…)``, ``app/handmade/person/__init__.py::PersonOverview.render_tab``)."""
+    params = inspect.signature(draw).parameters.values()
+    return any(p.name == "forms" or p.kind is p.VAR_KEYWORD for p in params)
+
+
+def served(sheet: str) -> bool:
+    """Une feuille que la console sert : sous ``static/``, chez l'inspecteur ou dans le dossier de console d'un domaine."""
+    return any((root / sheet).is_file() for root in static_roots())
+
+
+def test_every_tab_of_the_sheet_of_a_person_takes_the_forms():
+    """La fiche d'une personne passe toujours les formulaires de la console à l'onglet qu'elle dessine, le sien comme
+    celui d'un domaine : un onglet qui ne les prendrait pas échouerait à son premier dessin."""
+    refused = sorted(tab for tab, draw in every_tab().items() if not takes_forms(draw))
+    assert not refused, refused
+    assert takes_forms(lambda ui, key, blocks, query, forms=None: None) and takes_forms(lambda *a, **k: None)
+    assert not takes_forms(lambda ui, key, blocks, query: None)
+    assert served("handmade/person.css") and not served("handmade/absente.css")
 
 
 def _person_part(d: Domain) -> PersonPart | None:

@@ -262,11 +262,13 @@ class PersonPart:
     """Sa part de la fiche d'une personne (``app/handmade/person/``) : les onglets qu'il y dessine, ce qu'il y
     compte. La fiche réunit les parts ; elle n'en connaît aucune."""
 
-    #: onglet de sa barre → ce qui le dessine : ``draw(ui, key, blocks, query)`` (les données restent celles de sa
-    #: faculté ou de son plugin)
+    #: onglet de sa barre → ce qui le dessine : ``draw(ui, key, blocks, query, forms=None)`` (les données restent
+    #: celles de sa faculté ou de son plugin) ; ``forms``, les formulaires de la console (son jeton, ses actions), lui
+    #: est toujours passé — un onglet qui ne pose ni bouton ni formulaire l'ignore
     tabs: Mapping[str, Callable[..., Any]] = field(default_factory=dict)
-    #: ceux de ses onglets qui posent aussi les formulaires de la console : ``draw(ui, key, blocks, query, forms)``
-    formed: tuple[str, ...] = ()
+    #: les feuilles de ses onglets (sous ``static/`` : les siennes, dans son dossier de console) ; la fiche les charge
+    #: après les siennes, dans l'ordre des fiches, chacune une fois
+    styles: tuple[str, ...] = ()
     #: onglet → ce qu'il y compte : ``count(look, who)``, qui s'ajoute à ce que le cadre y compte déjà
     counts: Mapping[str, Callable[..., int]] = field(default_factory=dict)
     #: ses onglets à taire pour cette personne : ``hidden(ui, key)`` rend leurs noms

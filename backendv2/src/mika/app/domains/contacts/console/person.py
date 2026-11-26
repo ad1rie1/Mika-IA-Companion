@@ -187,8 +187,10 @@ def hidden(ui: UI, key: str) -> Sequence[str]:
 PERSON_PART = PersonPart(
     # ce qui l'identifie : ses moyens de communication, et les identifiants des fiches de l'annuaire qui lui sont
     # reliées (« Détacher » sur ceux-là) ; ses contacts (ADR 0298)
-    tabs={"adresses": identifies, "contacts": contacts}, formed=("adresses",),
-    counts={"adresses": _identifiers, "contacts": _contacts}, hidden=hidden)
+    tabs={"adresses": identifies, "contacts": contacts},
+    counts={"adresses": _identifiers, "contacts": _contacts}, hidden=hidden,
+    # la feuille de l'annuaire (« Ce qui l'identifie », « Contacts ») ; ``personnes.css``, la fiche la charge déjà
+    styles=("handmade/personnes_annuaire.css",))
 
 
 __all__ = ["PERSON_PART", "contacts", "contacts_count", "hidden", "identifies", "linked_sheets"]

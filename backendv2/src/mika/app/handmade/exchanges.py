@@ -67,7 +67,8 @@ def _short(text: str) -> str:
     return (head[:cut] if cut > FOLD_CHARS // 2 else head).rstrip() + " …"
 
 
-def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+def exchanges(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
+              forms: Mapping[str, Any] | None = None) -> Markup | None:
     table = raw_table(blocks, TITLE) or raw_table(blocks, FIL_TITLE)
     if table is None:
         return None

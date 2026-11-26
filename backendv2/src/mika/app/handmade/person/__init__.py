@@ -565,8 +565,11 @@ def owned(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
 # ── la page ──
 
 #: les onglets des facultés que le cadre dessine : leur nom → ce qui les dessine (les données restent celles de la
-#: faculté). Ceux qu'un seul domaine nourrit sont dans sa part (``PersonPart.tabs``) : ``every_tab`` les réunit
-TABS: dict[str, Callable[[UI, str, Sequence[Any], Mapping[str, str]], Any]] = {
+#: faculté), ``draw(ui, key, blocks, query, forms=None)`` — les formulaires de la console (``Forms``) lui sont toujours
+#: passés : le détail bloc par bloc (la Synthèse : « C'est la personne dont on lui a parlé »), les fichiers
+#: (« Retirer ») et Comptes (« Retirer » un partage, par le jeton de la page) s'en servent. Ceux qu'un seul domaine
+#: nourrit sont dans sa part (``PersonPart.tabs``) : ``every_tab`` les réunit
+TABS: dict[str, Callable[..., Any]] = {
     "echanges": exchanges,
     "memoire": memory,
     # ce qu'elle a envoyé et ce qu'on lui a envoyé, en deux sous-onglets (``joined``), « Retirer » sur chacun
@@ -589,12 +592,6 @@ def account_tabs() -> dict[str, Callable[..., Any]]:
     return {first[0]: owned, **{tab: drawn(roles, tab) for tab, _label, roles in others}}
 
 
-#: les onglets dessinés qui posent aussi les formulaires de la console (``Forms``) : le détail bloc par bloc (la
-#: Synthèse : « C'est la personne dont on lui a parlé »), les fichiers (« Retirer ») et Comptes (« Retirer » un
-#: partage, par le jeton de la page) ; ceux des domaines le disent dans leur part (``PersonPart.formed``)
-FORMED = (blocks_tab, files, owned)
-
-
 @functools.cache
 def persons() -> tuple[PersonPart, ...]:
     """La part de chaque domaine dans la fiche d'une personne, dans l'ordre des fiches. Lue à la demande, une fois :
@@ -614,12 +611,6 @@ def every_tab() -> dict[str, Callable[..., Any]]:
     """Les onglets dessinés de la fiche : ceux du cadre (``TABS``, puis ses comptes : ``account_tabs``), puis ceux de
     chaque domaine."""
     return {**TABS, **account_tabs(), **{tab: draw for p in persons() for tab, draw in p.tabs.items()}}
-
-
-def every_formed() -> tuple[Callable[..., Any], ...]:
-    """Ce qui dessine un onglet qui pose aussi les formulaires de la console : ceux du cadre (``FORMED``), puis ceux que
-    chaque domaine nomme dans sa part."""
-    return (*FORMED, *(p.tabs[tab] for p in persons() for tab in p.formed))
 
 
 # ── le compte de ses onglets ──
@@ -688,9 +679,8 @@ class PersonOverview(Overview):
 
     slug = "ensemble"
     title = "Vue d'ensemble"
-    # et celles de l'annuaire : « Ce qui l'identifie » et « Contacts » (ADR 0298)
-    styles = ("handmade/person.css", "handmade/sens.css", "handmade/personnes.css", "handmade/personnes_annuaire.css",
-              "handmade/agendas.css")
+    #: ses feuilles à elle ; celles des onglets des domaines s'y ajoutent (``styles``)
+    STYLES = ("handmade/person.css", "handmade/sens.css", "handmade/personnes.css")
     scripts = ("handmade/live.js",)
     #: ce que la vue d'ensemble résume (son ressenti, leur lien, ce qu'elle lit d'elle, ses pensées, et la mécanique
     #: de ce qu'elle peut lui dire) : le détail reste à un clic, au bout de la barre
@@ -706,6 +696,12 @@ class PersonOverview(Overview):
     def __init__(self) -> None:
         #: la console, posée quand ses routes le sont (la fiche, elle, passe la sienne à ``render``)
         self.ui: UI | None = None
+
+    @property
+    def styles(self) -> tuple[str, ...]:  # type: ignore[override]
+        """Ses feuilles (``STYLES``), puis celles des onglets de chaque domaine (``PersonPart.styles`` : l'annuaire,
+        l'agenda), dans l'ordre des fiches, chacune une fois."""
+        return tuple(dict.fromkeys((*self.STYLES, *(sheet for p in persons() for sheet in p.styles))))
 
     @property
     def tabs(self) -> tuple[str, ...]:
@@ -772,7 +768,7 @@ class PersonOverview(Overview):
         draw = every_tab().get(tab)
         if draw is None or not self.known(ui, key):
             return None
-        return draw(ui, key, blocks, query, forms) if draw in every_formed() else draw(ui, key, blocks, query)
+        return draw(ui, key, blocks, query, forms=forms)
 
     async def fragment(self, request: Request) -> Response:
         assert self.ui is not None

@@ -1,12 +1,13 @@
 """La part de l'annuaire dans la console (ADR 0298, 0310) : l'annuaire tel que la console le montre
 (``directory.py`` : une entrée, à qui est un contact, la liste), son onglet de Personnes (``tabs.py`` : Annuaire), la
 fiche dessinée d'un contact (``subject.py``), sa part de la file « À valider » (``queue.py``), ses deux onglets de la
-fiche d'une personne, Ce qui l'identifie et Contacts (``person.py``), et leurs gabarits (``templates/``), sous les noms
-et aux adresses qu'ils avaient dans l'inspecteur.
+fiche d'une personne, Ce qui l'identifie et Contacts (``person.py``), leurs gabarits (``templates/``) et leur feuille
+(``static/`` : ``handmade/personnes_annuaire.css``, que la fiche d'une personne charge par sa part,
+``PersonPart.styles``), sous les noms et aux adresses qu'ils avaient dans l'inspecteur.
 
 Ce que les pages du cadre dessinent aussi reste dans l'inspecteur : les gabarits de Personnes (sa vue d'ensemble, Liens,
-Présents, ce qu'ils partagent — ``handmade/personnes/``), et les deux feuilles, ``handmade/personnes.css`` et
-``handmade/personnes_annuaire.css``, que la fiche d'une personne charge aussi (``app/handmade/person/``).
+Présents, ce qu'ils partagent — ``handmade/personnes/``), et sa feuille, ``handmade/personnes.css``, que la fiche
+d'une personne charge aussi (``app/handmade/person/``).
 """
 
 from __future__ import annotations

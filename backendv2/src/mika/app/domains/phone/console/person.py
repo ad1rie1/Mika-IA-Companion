@@ -23,7 +23,8 @@ from mika.kernel.clock import DAY
 from mika.plugins.phone.inspect import PER_THREAD, threads
 
 
-def phone_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+def phone_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
+              forms: Mapping[str, Any] | None = None) -> Markup | None:
     """La fiche d'une personne › Son téléphone : ses conversations, les réponses qu'elle a proposées."""
     look = Look.of(ui, DAY)
     s = slice_of(look, "phone")

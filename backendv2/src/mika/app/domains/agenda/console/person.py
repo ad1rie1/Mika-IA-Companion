@@ -112,7 +112,7 @@ def count(look: Look, who: Who) -> int:
 #: sa part de la fiche d'une personne (ADR 0310)
 PERSON_PART = PersonPart(
     # ses agendas, ce qu'on lui partage, ce qu'elle partage, ses prochains événements (ADR 0309, lot 5)
-    tabs={"agendas": agendas}, formed=("agendas",), counts={"agendas": count})
+    tabs={"agendas": agendas}, counts={"agendas": count}, styles=("handmade/agendas.css",))
 
 
 __all__ = ["PERSON_PART", "agendas", "count"]

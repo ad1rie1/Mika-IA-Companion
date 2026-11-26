@@ -27,7 +27,8 @@ KINDS = (("vie des autres", 0, "Les moments de sa vie", "moments"), ("promesse",
 PLAIN = frozenset({"origine"})
 
 
-def memory(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str]) -> Markup | None:
+def memory(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
+           forms: Mapping[str, Any] | None = None) -> Markup | None:
     tables = [b for b in blocks if isinstance(b, Table)]
     if not tables:
         return None
