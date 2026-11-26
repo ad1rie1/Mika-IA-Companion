@@ -80,7 +80,7 @@ STYLES = ("handmade/memoire.css",)
 
 
 #: les clés (``Badge.key``) des étiquettes qui disent l'état ordinaire d'un élément retenu : actif, en cours, anodin
-QUIET = frozenset({"active", "pending", str(int(Sensitivity.ANODYNE))})
+QUIET = frozenset({memory_c.ACTIVE_STATUS, memory_c.PENDING_STATUS, str(int(Sensitivity.ANODYNE))})
 
 
 def _item(line: Line, body: str, *quiet: str, shown: Iterable[str] = ()) -> dict[str, Any]:
@@ -107,7 +107,7 @@ GESTURES = {"memory.tenir": "promise", "memory.abandonner": "promise", "memory.f
 CHOSEN = {"memory.issue": "Noter"}
 #: les statuts (la clé de l'étiquette) d'un souvenir ou d'une croyance qu'elle tient encore pour vrai : actif, ou
 #: actif qui dort
-HELD = frozenset({"active", DORMANT})
+HELD = frozenset({memory_c.ACTIVE_STATUS, DORMANT})
 
 
 def _number(raw: Mapping[str, Any]) -> str:
@@ -216,7 +216,7 @@ def croyances(got: Got) -> Markup | None:
 # ── Promesses ─────────────────────────────────────────────────────────────
 
 #: le statut d'une promesse (la clé de son étiquette, le statut gardé) et sa place dans la page
-PROMISE_STATES = {"pending": "open", memory_c.HONORED: "kept", memory_c.DROPPED: "dropped"}
+PROMISE_STATES = {memory_c.PENDING_STATUS: "open", memory_c.HONORED: "kept", memory_c.DROPPED: "dropped"}
 
 
 def _promise(line: Line, raw: Mapping[str, Any], now: int) -> dict[str, Any]:
@@ -225,7 +225,7 @@ def _promise(line: Line, raw: Mapping[str, Any], now: int) -> dict[str, Any]:
     state = PROMISE_STATES.get(status, "open")
     due = instant(raw.get("échéance"))
     item = _item(line, "promesse", *PROMISE_STATES, shown=("faite",))
-    pending = status == "pending" and not item["faded"]
+    pending = status == memory_c.PENDING_STATUS and not item["faded"]
     return {**item, "state": state, "to": line.get("à qui"),
             "due": line.get("échéance") if due else None, "late": state == "open" and 0 < due < now,
             "made": line.get("faite"),
@@ -258,7 +258,7 @@ def _moment(frame: Frame, line: Line, raw: Mapping[str, Any]) -> dict[str, Any]:
     at = instant(raw.get("quand"))
     situation = key_of(line.get("situation"))
     ongoing = situation == ONGOING
-    item = _item(line, "moment", str(int(Sensitivity.PERSONAL)), "ended")
+    item = _item(line, "moment", str(int(Sensitivity.PERSONAL)), memory_c.ENDED_STATUS)
     tags = [line["issue"]] if not blank(line.get("issue")) else []
     if not blank(line.get("chaque année")):
         tags.append({"text": "revient chaque année", "tone": "info"})
@@ -277,7 +277,7 @@ def _moment_gestures(line: Line, item: Mapping[str, Any], situation: str) -> tup
     """Ce qui se corrige d'un moment encore suivi (son statut gardé, ``active``) : une situation qui dure se finit ;
     un moment daté qui n'a pas d'issue en reçoit une. Une date qui revient chaque année, une situation finie, un
     moment déjà tranché, remplacé ou vidé par l'oubli : rien."""
-    if item["faded"] or key_of(line.get("statut")) != "active":
+    if item["faded"] or key_of(line.get("statut")) != memory_c.ACTIVE_STATUS:
         return ()
     if situation == ONGOING:
         return ("memory.finir",)

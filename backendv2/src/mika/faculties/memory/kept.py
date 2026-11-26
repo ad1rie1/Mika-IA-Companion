@@ -60,7 +60,7 @@ def kept_secrets(store: Any, persons: Sequence[str]) -> list[str]:
     t, ab = tb.items(), tb.about()
     for person in persons:
         out += [str(text) for (text,) in store.query_mind(
-            select(t.c.text).where(t.c.secret == 1, t.c.status == "active",
+            select(t.c.text).where(t.c.secret == 1, t.c.status == c.ACTIVE_STATUS,
                                    or_(t.c.id.in_(select(ab.c.item).where(ab.c.person == handle_key(person))),
                                        json_has(t.c.told_by, person)))
             .order_by(t.c.id.desc()).limit(50))]
@@ -569,7 +569,7 @@ def _called(heard: dict[str, list[int]], ours: list[str], store: Any, conv: Conv
     noted = ours
     t, ab = tb.items(), tb.about()
     known = store.query_mind(select(t.c.id, t.c.text)
-                             .where(t.c.kind == c.BELIEF, t.c.status == "active", t.c.between_us == 1,
+                             .where(t.c.kind == c.BELIEF, t.c.status == c.ACTIVE_STATUS, t.c.between_us == 1,
                                     t.c.id.in_(select(ab.c.item).where(ab.c.person == handle_key(person))))
                              .order_by(t.c.id))
     name = next((sp.name for sp in conv.speakers if sp.person == person), "")
@@ -633,8 +633,8 @@ def _about_self(b: x.XSouvenir | x.XCroyance, store: Any, provenance: Provenance
     replaces = replaces if durable and replaces in known_ids else None
     if replaces is not None and not target_of(store, replaces, nature, None, about_self=True):
         replaces = None  # changer d'avis ne vaut que sur ce qu'elle a dit d'elle-même
-    twin = _self_twin(store, b.texte, status="active")
-    former = None if twin is not None else _self_twin(store, b.texte, status="superseded")
+    twin = _self_twin(store, b.texte, status=c.ACTIVE_STATUS)
+    former = None if twin is not None else _self_twin(store, b.texte, status=c.SUPERSEDED_STATUS)
     head = head_of(store, former) if former is not None else None  # ce qu'elle en pense maintenant
     if (twin is not None and twin != replaces) or head is not None:
         # ce qu'elle redit d'elle-même : son propre témoignage, redit
@@ -656,7 +656,7 @@ def _self_twin(store: Any, text: str, *, status: str) -> int | None:
     rows = store.query_mind(
         select(t.c.id, t.c.text).where(t.c.fingerprint == fingerprint(text), t.c.kind == c.BELIEF,
                                        t.c.status == status, t.c.about_self > 0)
-        .order_by(t.c.id if status == "active" else t.c.id.desc()))
+        .order_by(t.c.id if status == c.ACTIVE_STATUS else t.c.id.desc()))
     return next((int(k) for k, previous in rows if same_words(previous, text)), None)
 
 
@@ -997,7 +997,7 @@ def _closed_memories(frame: Frame, store: Any, conv: Conversation, items: Sequen
     # un souvenir né de l'un de ces messages (``sources`` : une liste JSON, lue par ``json_has`` — ``json_each``
     # n'existe pas sous MariaDB)
     found = store.query_mind(
-        select(t.c.id).where(t.c.kind == c.EPISODE_MEMORY, t.c.status == "active", t.c.secret == 0,
+        select(t.c.id).where(t.c.kind == c.EPISODE_MEMORY, t.c.status == c.ACTIVE_STATUS, t.c.secret == 0,
                              or_(*(json_has(t.c.sources, m) for m in theirs))).order_by(t.c.id))
     return [c.REINFORCED.draft(item=int(i), secret=True, sensitivity=int(Sensitivity.CONFIDENCE), restricts=True)
             for (i,) in found]

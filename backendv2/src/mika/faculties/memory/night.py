@@ -207,7 +207,7 @@ class Sort:
         end = instant(datetime.combine(day + timedelta(days=1), time(5), tzinfo=tz))
         t = items()
         rows = store.query_mind(select(t.c.id, t.c.text, t.c.about, t.c.told_by, t.c.heard_by)
-                                .where(t.c.kind == c.EPISODE_MEMORY, t.c.status == "active", t.c.born_at >= start,
+                                .where(t.c.kind == c.EPISODE_MEMORY, t.c.status == c.ACTIVE_STATUS, t.c.born_at >= start,
                                        t.c.born_at < end).order_by(t.c.id.desc()))
         merged: set[int] = set()
         out: list[tuple[int, int]] = []
@@ -222,7 +222,7 @@ class Sort:
                 # la fusion unit les personnes, confidents et témoins : « Bob m'a dit que son père est hospitalisé »
                 # fondu dans la confidence d'Alice la rendrait « ses propres mots » pour Bob, et l'oubli de Bob
                 # l'effacerait — seuls deux souvenirs des mêmes personnes, confiés et entendus par les mêmes, se fondent
-                if (alive and alive[0][0] == "active" and _same_people(alive[0][1:4], people)
+                if (alive and alive[0][0] == c.ACTIVE_STATUS and _same_people(alive[0][1:4], people)
                         and same_words(text, alive[0][4])):
                     out.append((hit, item_id))
                     merged |= {hit, item_id}
@@ -238,7 +238,7 @@ def joinable_pairs(store: Any, p: Any) -> tuple[tuple[int, int], ...]:
     La base ne groupe que par l'empreinte (une clé) ; les listes des personnes et la nature, des textes longs que
     MariaDB ne grouperait que par leur début (``max_sort_length``), se comparent ici en entier."""
     t = items()
-    active = (t.c.kind == c.BELIEF, t.c.status == "active")
+    active = (t.c.kind == c.BELIEF, t.c.status == c.ACTIVE_STATUS)
     twice = select(t.c.fingerprint).where(*active).group_by(t.c.fingerprint).having(func.count() > 1)
     found = [(int(i), text, about, nature, int(int(own) > 0), holder, origin, mark) for i, text, about, nature, own,
              holder, origin, mark in store.query_mind(

@@ -188,7 +188,7 @@ def gather(frame: Frame, store: Any, s: SelfState, p: SelfParams, *, floor: Audi
     since = frame.now - p.narrative_lookback_us
     v, lv = memory_c.KNOWLEDGE, memory_c.LIVED
     rows = knowns(store.query_mind(
-        memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == "active", v.c.born_at >= since)
+        memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == memory_c.ACTIVE_STATUS, v.c.born_at >= since)
         .order_by(v.c.id.desc()).limit(NARRATIVE_ROWS)), memory_c.KNOWN_COLUMNS)
     lived_rows = store.query_mind(memory_c.select_known(lv).add_columns(lv.c.gist)
                                   .where(lv.c.born_at >= since).order_by(lv.c.id.desc()).limit(NARRATIVE_ROWS))
@@ -198,7 +198,7 @@ def gather(frame: Frame, store: Any, s: SelfState, p: SelfParams, *, floor: Audi
     resolve, presumed = identity_c.resolvers(frame.get)
     # départagés par l'élément : la même liste sur les deux moteurs
     for k in knowns(store.query_mind(
-            memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == "active", v.c.about_self >= 2)
+            memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == memory_c.ACTIVE_STATUS, v.c.about_self >= 2)
             .order_by(v.c.touched_at.desc(), v.c.id.desc()).limit(40)), memory_c.KNOWN_COLUMNS):
         if len(out.beliefs) < BELIEFS_SHOWN and not k.secret and k.origin != memory_c.LIED \
                 and admits(k.lineage, None, floor, resolve=resolve, presumed=presumed).ok:

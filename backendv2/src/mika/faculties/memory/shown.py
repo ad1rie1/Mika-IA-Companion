@@ -121,7 +121,7 @@ async def known_beliefs(store: Any, vectors: Any, conv: Conversation, people: Pe
     ids = [k for k, _ in hits]
     t, tt = tb.items(), tb.testimonies()
     found = store.query_mind(select(t.c.id, t.c.text, t.c.about, t.c.told_by, t.c.sensitivity, t.c.secret)
-                             .where(t.c.id.in_(ids), t.c.status == "active"))
+                             .where(t.c.id.in_(ids), t.c.status == c.ACTIVE_STATUS))
     persons = set(conv.persons)
     named = {k for w in set(WORD.findall(fold(text))) for k in directory.get(w, ())
              if len(directory.get(w, ())) == 1}
@@ -333,7 +333,7 @@ def _forecasts(frame: Frame, store: Any, conv: Conversation, p: MemoryParams,
     rows = store.query_mind(
         select(t.c.id, t.c.text, t.c.about, t.c.holder, t.c.told_by, t.c.likelihood, t.c.importance, t.c.due,
                t.c.until, t.c.sensitivity, t.c.secret, t.c.felt, t.c.empathy)
-        .where(t.c.kind == c.BELIEF, t.c.knowledge_kind == "prediction", t.c.status == "active",
+        .where(t.c.kind == c.BELIEF, t.c.knowledge_kind == "prediction", t.c.status == c.ACTIVE_STATUS,
                t.c.due.is_not(None), ends < frame.now, ends >= since).order_by(t.c.id))
     shown: list[tuple[int, str, str]] = []
     found: dict[int, Forecast] = {}

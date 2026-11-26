@@ -993,11 +993,31 @@ def shown_by_thread(sources: Sequence[int], touched_at: int, now: int, *, last: 
 KNOWN_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
                  "emotion", "born_at", "touched_at", "status", "recipient", "due", "sources", "told_by", "heard_by",
                  "secret", "about_self", "between_us", "knowledge_kind", "holder", "constraints", "internal_only")
+# Les statuts d'un élément : la colonne ``status`` de ``memory_items`` et des vues de la porte (``Item.status``). La
+# projection les écrit (``faculties.memory.projections``), la porte les publie, la console les dit en mots
+# (``faculties.memory.inspect.STATUS_FR``) et l'onglet dessiné les lit par la clé de leur étiquette (``Badge.key``) ;
+# une promesse tenue ou abandonnée prend ``HONORED`` ou ``DROPPED``. Chacun se nomme ``…_STATUS`` : ``JOINED`` et
+# ``RESOLVED`` sont des événements, ``SUPERSEDED`` et ``ENDED`` des raisons de retrait (``withdrawals``), un autre
+# vocabulaire aux mêmes mots.
+#: un souvenir, une croyance, un moment qu'elle tient pour sien
+ACTIVE_STATUS = "active"
+#: une promesse qui l'engage encore
+PENDING_STATUS = "pending"
+#: une croyance qu'une autre a remplacée (``superseded_by``), un moment qu'un autre a déplacé
+SUPERSEDED_STATUS = "superseded"
+#: un souvenir que la nuit a fondu dans un autre, presque identique (``memory.night_sorted``)
+MERGED_STATUS = "merged"
+#: une croyance que la nuit a jointe à la même, dite par un autre (``memory.joined``, ADR 0080)
+JOINED_STATUS = "joined"
+#: une situation finie (``memory.situation_ended``) : de l'histoire, toujours vraie, qui reste dans ce qu'elle sait
+ENDED_STATUS = "ended"
+#: une prévision constatée (``memory.resolved``, ADR 0099) : de l'histoire, qui ne se montre plus à constater
+RESOLVED_STATUS = "resolved"
 #: un souvenir ou une croyance démenti par l'opératrice (``memory.retracted``, ADR 0230)
 RETRACTED_STATUS = "retracted"
 #: Les statuts qui sortent de ce qu'elle sait (``FORMER_VIEW``) : remplacée, fondue la nuit dans un souvenir, jointe
 #: la nuit à la même croyance dite par un autre (ADR 0080), démentie par l'opératrice (ADR 0230).
-FORMER_STATUSES = ("superseded", "merged", "joined", RETRACTED_STATUS)
+FORMER_STATUSES = (SUPERSEDED_STATUS, MERGED_STATUS, JOINED_STATUS, RETRACTED_STATUS)
 
 # ── Les colonnes des vues (ADR 0101) : on les lit par des requêtes (``select(KNOWLEDGE.c.text)``), compilées pour le
 # moteur. Les vues elles-mêmes se créent dans la mémoire (``faculties.memory.projections``), sur ses tables.

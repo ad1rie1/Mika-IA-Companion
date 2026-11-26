@@ -264,7 +264,7 @@ async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list
     t, ct = tb.items(), tb.contests()
     rows = store.query_mind(
         select(t.c.id, t.c.text, t.c.about)
-        .where(t.c.kind == c.BELIEF, t.c.status == "active", t.c.about_self == 0, t.c.about != "[]",
+        .where(t.c.kind == c.BELIEF, t.c.status == c.ACTIVE_STATUS, t.c.about_self == 0, t.c.about != "[]",
                t.c.knowledge_kind == "claim", t.c.born_at >= frame.now - round(p.confront_days * DAY))
         .order_by(t.c.id.desc()).limit(40))
     out: list[Pair] = []
@@ -275,7 +275,7 @@ async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list
         others = items_by_id(store, [k for k, sim in hits if k != item and sim >= p.recall_floor])
         for other in others.values():
             pair = (min(item, other.id), max(item, other.id))
-            if pair in seen or other.status != "active" or other.about_self or other.knowledge_kind != "claim":
+            if pair in seen or other.status != c.ACTIVE_STATUS or other.about_self or other.knowledge_kind != "claim":
                 continue
             if not _persons(frame, other.about) & mine:
                 continue
@@ -344,7 +344,7 @@ async def _known(store: Any, vectors: Any, read_items: Sequence[ReadItem], *, mi
         for k, sim in await vectors.search(f"{read_item.title} {read_item.excerpt[:300]}", 6, kinds={c.BELIEF}):
             found[k] = max(sim, found.get(k, 0.0))
     items = items_by_id(store, sorted(found))
-    chosen = [it for it in items.values() if it.status == "active" and not it.secret and (
+    chosen = [it for it in items.values() if it.status == c.ACTIVE_STATUS and not it.secret and (
         it.durable_self if mine else (not it.about_self and it.sensitivity <= Sensitivity.ANODYNE))]
     chosen.sort(key=lambda it: (-found[it.id], it.id))
     return [(it.id, it.text) for it in chosen[:OPINIONS_SHOWN if mine else KNOWN_SHOWN]]
@@ -650,7 +650,7 @@ async def _learned(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> li
     memo: dict[str, str] = {}
     out: list[Learned] = []
     for item in sorted(items_by_id(store, sorted(read)).values(), key=lambda it: (-it.importance, -read[it.id][1])):
-        if item.kind != c.BELIEF or item.status != "active" or item.about_self or item.id in told \
+        if item.kind != c.BELIEF or item.status != c.ACTIVE_STATUS or item.about_self or item.id in told \
                 or (item.valid_until is not None and item.valid_until < frame.now):
             continue
         if person and aud is not None:

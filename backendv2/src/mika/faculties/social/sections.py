@@ -209,7 +209,7 @@ def between_us(store: Any, frame: Frame, person: str) -> tuple[tuple[int, str, t
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
     v = memory_c.KNOWLEDGE
     rows = knowns(store.query_mind(
-        memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == "active", v.c.between_us == 1,
+        memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == memory_c.ACTIVE_STATUS, v.c.between_us == 1,
                                       memory_c.concerning(v, handles))
         .order_by(v.c.importance.desc(), v.c.id.desc()).limit(BETWEEN_SHOWN * 2)), memory_c.KNOWN_COLUMNS)
     aud = frame.audience

@@ -447,7 +447,7 @@ def notes_of(frame: Frame, store: Any, state: SelfState,
         names.update(_names(frame, {k.recipient for k in promised if k.recipient and k.recipient not in names}))
     souvenirs = knowns(store.query_mind(
         memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.born_at >= start, v.c.born_at < end,
-                                      v.c.status == "active")
+                                      v.c.status == memory_c.ACTIVE_STATUS)
         .order_by(v.c.importance.desc(), v.c.id).limit(6)), memory_c.KNOWN_COLUMNS)
     if souvenirs:
         lines += [phrase("self.night.notes.kept")] + [f"- {clean_tokens(k.text)}" for k in souvenirs]
@@ -790,7 +790,7 @@ class Dreaming:
         # rêve encore de ce qui revient (ADR 0058) ; ``touched_at`` vaut au moins ``born_at``
         v = memory_c.KNOWLEDGE
         rows = knowns(store.query_mind(
-            memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == "active",
+            memory_c.select_known().where(v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == memory_c.ACTIVE_STATUS,
                                           v.c.touched_at >= frame.now - DREAM_LOOKBACK)
             .order_by(v.c.importance.desc(), v.c.id.desc()).limit(8)), memory_c.KNOWN_COLUMNS)
         picked = rng.sample(rows, k=min(3, len(rows))) if rows else []

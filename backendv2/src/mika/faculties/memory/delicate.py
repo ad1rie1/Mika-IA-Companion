@@ -132,7 +132,7 @@ def _queries() -> tuple[Prepared, Prepared]:
     l'est au même endroit sur les deux moteurs)."""
     a, i = alias_of(about(), "a"), alias_of(items(), "i")
     base = (select(a.c.person, i.c.id, i.c.text).select_from(a.join(i, i.c.id == a.c.item))
-            .where(i.c.status.in_(("active", "pending")), i.c.sensitivity < int(Sensitivity.CONFIDENCE))
+            .where(i.c.status.in_((c.ACTIVE_STATUS, c.PENDING_STATUS)), i.c.sensitivity < int(Sensitivity.CONFIDENCE))
             .order_by(i.c.id.desc(), a.c.person).limit(BATCH))
     return (Prepared(base.where(i.c.id > bindparam("upto"))),
             Prepared(base.where(a.c.person.in_(bindparam("keys", expanding=True)))))

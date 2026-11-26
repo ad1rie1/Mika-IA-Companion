@@ -37,7 +37,7 @@ def twin_of(store: Any, text: str, kind: str, about: tuple[str, ...], *, told_by
     if kind == c.BELIEF:
         rows = store.query_mind(
             select(t.c.id, t.c.text, t.c.knowledge_kind, t.c.holder)
-            .where(t.c.fingerprint == fingerprint(text), t.c.kind == kind, t.c.status == "active",
+            .where(t.c.fingerprint == fingerprint(text), t.c.kind == kind, t.c.status == c.ACTIVE_STATUS,
                    t.c.about == keys_json(about),
                    t.c.about_self > 0 if about_self else t.c.about_self <= 0).order_by(t.c.id))
         for k, previous, nature, owner in rows:
@@ -48,7 +48,7 @@ def twin_of(store: Any, text: str, kind: str, about: tuple[str, ...], *, told_by
     encoded = tuple(keys_json(keys) for keys in (about, told_by, heard_by))
     rows = store.query_mind(
         select(t.c.id, t.c.text).where(t.c.fingerprint == fingerprint(text), t.c.kind == kind,
-                                       t.c.status == "active", t.c.about == encoded[0], t.c.told_by == encoded[1],
+                                       t.c.status == c.ACTIVE_STATUS, t.c.about == encoded[0], t.c.told_by == encoded[1],
                                        t.c.heard_by == encoded[2]).order_by(t.c.id))
     for k, previous in rows:
         if same_words(previous, text):
@@ -65,7 +65,7 @@ def target_of(store: Any, item: int | None, nature: str, holder: str | None, *,
         return None
     t = tb.items()
     rows = store.query_mind(select(t.c.knowledge_kind, t.c.holder, t.c.about_self)
-                            .where(t.c.id == item, t.c.kind == c.BELIEF, t.c.status == "active"))
+                            .where(t.c.id == item, t.c.kind == c.BELIEF, t.c.status == c.ACTIVE_STATUS))
     if not rows:
         return None
     kind, owner, self_item = rows[0]
@@ -90,7 +90,7 @@ def former_twin(store: Any, text: str, about: tuple[str, ...], nature: str, hold
     t = tb.items()
     rows = store.query_mind(
         select(t.c.id, t.c.text, t.c.knowledge_kind, t.c.holder)
-        .where(t.c.fingerprint == fingerprint(text), t.c.kind == c.BELIEF, t.c.status == "superseded",
+        .where(t.c.fingerprint == fingerprint(text), t.c.kind == c.BELIEF, t.c.status == c.SUPERSEDED_STATUS,
                t.c.about == keys_json(about), t.c.about_self == 0)
         .order_by(t.c.id.desc()))
     for k, previous, kind, owner in rows:
@@ -110,7 +110,7 @@ def head_of(store: Any, item: int) -> int | None:
         if not rows:
             return None
         status, after = rows[0]
-        if status == "active":
+        if status == c.ACTIVE_STATUS:
             return current if current != item else None
         current = after
     return None

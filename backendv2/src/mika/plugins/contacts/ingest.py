@@ -244,7 +244,7 @@ class Ingest:
                 select(a.c.person, i.c.id, i.c.told_by, i.c.born_at, i.c.text, i.c.secret, i.c.internal_only,
                        i.c.constraints)
                 .select_from(a.join(i, i.c.id == a.c.item))
-                .where(a.c.person >= NAME_PREFIX, a.c.person < _NAMED_END, i.c.status == "active",
+                .where(a.c.person >= NAME_PREFIX, a.c.person < _NAMED_END, i.c.status == memory_c.ACTIVE_STATUS,
                        i.c.kind.in_(list(TOLD_KINDS)), i.c.id > cursor)
                 .order_by(i.c.id, a.c.person).limit(BATCH))
             if not rows:

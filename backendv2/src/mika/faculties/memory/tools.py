@@ -94,7 +94,7 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
         scores = {i: relevance(hits[i], wanted, it.text) for i, it in items.items()}
         for item in sorted((it for it in items.values() if scores[it.id] >= p.recall_floor * 0.8),
                            key=lambda it: (-scores[it.id], it.id)):
-            if item.status != "active" or any(it.id == item.id for it, _v in found):
+            if item.status != c.ACTIVE_STATUS or any(it.id == item.id for it, _v in found):
                 continue
             verdict = verdict_of(frame, item, person, aud, memo, store)
             if verdict.ok:
@@ -130,7 +130,7 @@ async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: s
     strongest = func.max(f.c.intensity)
     rows = store.query_mind(
         select(f.c.item, f.c.whose, strongest).select_from(f.join(i, i.c.id == f.c.item))
-        .where(f.c.whose.in_(whose), f.c.emotion.in_(emotions), i.c.status == "active",
+        .where(f.c.whose.in_(whose), f.c.emotion.in_(emotions), i.c.status == c.ACTIVE_STATUS,
                i.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)))
         .group_by(f.c.item, f.c.whose).order_by(strongest.desc(), f.c.item, f.c.whose).limit(FEELING_CANDIDATES))
     felt: dict[int, dict[str, float]] = {}

@@ -321,7 +321,7 @@ def life_of(store: Any, frame: Frame, person: str) -> list[tuple[str, int]]:
     handles = tuple(frame.get(identity_c.HANDLES(person)) or (person,))
     v = memory_c.KNOWLEDGE
     rows = knowns(store.query_mind(
-        memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == "active", v.c.about_self == 0,
+        memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == memory_c.ACTIVE_STATUS, v.c.about_self == 0,
                                       v.c.born_at >= frame.now - BELIEFS_SINCE, memory_c.concerning(v, handles))
         .order_by(v.c.born_at.desc(), v.c.id.desc()).limit(BELIEFS_SHOWN * 4)), memory_c.KNOWN_COLUMNS)
     beliefs = [(k.text, k.sensitivity) for k in rows if hears(k.lineage)][:BELIEFS_SHOWN]

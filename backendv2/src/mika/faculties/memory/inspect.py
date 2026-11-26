@@ -93,11 +93,11 @@ KIND_FR = {c.EPISODE_MEMORY: "souvenir", c.BELIEF: "croyance", c.PROMISE: "prome
 #: chaque statut que la projection écrit (``projections.py``), en mots, et son ton ; une situation finie
 #: (``ended``) et une prévision constatée (``resolved``) ont une étiquette discrète, mais ne sont pas des statuts
 #: d'avant (``c.FORMER_STATUSES``, dont la liste estompe toute la ligne)
-STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "joined": "jointe à une autre", "pending": "en cours",
-             c.HONORED: "tenue", c.DROPPED: "abandonnée", "ended": "finie", "resolved": "constatée",
+STATUS_FR = {c.ACTIVE_STATUS: "actif", c.SUPERSEDED_STATUS: "remplacée", c.MERGED_STATUS: "fondu dans un autre", c.JOINED_STATUS: "jointe à une autre", c.PENDING_STATUS: "en cours",
+             c.HONORED: "tenue", c.DROPPED: "abandonnée", c.ENDED_STATUS: "finie", c.RESOLVED_STATUS: "constatée",
              c.RETRACTED_STATUS: "démenti(e) par l'opératrice"}
-STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "joined": "muted", "pending": "info", c.HONORED: "ok",
-               c.DROPPED: "muted", "ended": "muted", "resolved": "muted", c.RETRACTED_STATUS: "muted"}
+STATUS_TONE = {c.ACTIVE_STATUS: "ok", c.SUPERSEDED_STATUS: "muted", c.MERGED_STATUS: "muted", c.JOINED_STATUS: "muted", c.PENDING_STATUS: "info", c.HONORED: "ok",
+               c.DROPPED: "muted", c.ENDED_STATUS: "muted", c.RESOLVED_STATUS: "muted", c.RETRACTED_STATUS: "muted"}
 #: d'où elle tient une croyance (``Item.origin``), en une phrase (la colonne « origine ») ; la seule table de ces
 #: mots — ``ORIGIN_SHORT`` en est la forme courte (la fiche d'une personne). Un souvenir né d'un mensonge
 #: (``LIED``) n'est pas une croyance : il a sa mention à lui (``_text``)
@@ -247,7 +247,7 @@ def _status(item: Item, frame: Frame, p: MemoryParams) -> Badge:
     listing = LISTINGS.get(item.kind)
     label = dict(listing.statuses).get(item.status) if listing else None
     label = label or STATUS_FR.get(item.status, item.status)
-    if item.status == "active" and item.kind in (c.EPISODE_MEMORY, c.BELIEF) and dormant(item, frame.now, p):
+    if item.status == c.ACTIVE_STATUS and item.kind in (c.EPISODE_MEMORY, c.BELIEF) and dormant(item, frame.now, p):
         return Badge(f"{label} (dort)", "muted", key=DORMANT)
     return Badge(label, STATUS_TONE.get(item.status, ""), key=item.status)
 
@@ -367,23 +367,23 @@ def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> t
 
 N = Column("n°", "fit", detail=True)
 EPISODE_MEMORIES = Listing(c.EPISODE_MEMORY, "Ses souvenirs", "pas encore de souvenir",
-                           (("active", "actif"), ("merged", "fondu dans un autre"), (c.RETRACTED_STATUS, "démenti")),
+                           ((c.ACTIVE_STATUS, "actif"), (c.MERGED_STATUS, "fondu dans un autre"), (c.RETRACTED_STATUS, "démenti")),
                            (N, Column("souvenir", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"), Column("importance", detail=True),
                             Column("ce qu'il en reste", hint="l'importance, estompée depuis la dernière fois qu'il a été "
                                                              "touché ; sous le seuil, il dort", detail=True),
                             Column("émotion", detail=True), Column("statut", "fit", role="badge"), Column("né", "fit")), _episode_memory)
 BELIEFS = Listing(c.BELIEF, "Ses croyances", "pas encore de croyance",
-                  (("active", "active"), ("superseded", "remplacée"), ("joined", "jointe à une autre"),
-                   ("resolved", "constatée"), (c.RETRACTED_STATUS, "démentie")),
+                  ((c.ACTIVE_STATUS, "active"), (c.SUPERSEDED_STATUS, "remplacée"), (c.JOINED_STATUS, "jointe à une autre"),
+                   (c.RESOLVED_STATUS, "constatée"), (c.RETRACTED_STATUS, "démentie")),
                   (N, Column("croyance", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"),
                    Column("confiance", hint="effective : elle baisse lentement avec le temps"), Column("importance", detail=True),
                    Column("origine"), Column("statut", "fit", role="badge"), Column("née", "fit", detail=True)), _belief)
 PROMISES = Listing(c.PROMISE, "Ses promesses", "pas encore de promesse",
-                   (("pending", "en cours"), (c.HONORED, "tenue"), (c.DROPPED, "abandonnée")),
+                   ((c.PENDING_STATUS, "en cours"), (c.HONORED, "tenue"), (c.DROPPED, "abandonnée")),
                    (N, Column("promesse", role="body"), Column("à qui"), Column("sensibilité", "fit", role="badge"), Column("échéance", "fit"),
                     Column("statut", "fit", role="badge"), Column("faite", "fit", detail=True)), _promise)
 EVENTS = Listing(c.EVENT, "Ce qui se passe dans la vie des autres", "pas encore de moment noté",
-                 (("active", "à suivre"), ("superseded", "remplacé"), ("ended", "finie")),
+                 ((c.ACTIVE_STATUS, "à suivre"), (c.SUPERSEDED_STATUS, "remplacé"), (c.ENDED_STATUS, "finie")),
                  (N, Column("moment", role="body"), Column("de qui"), Column("sensibilité", "fit", role="badge"), Column("quand", "fit"),
                   Column("chaque année", "fit", hint="une date qui revient chaque année (un anniversaire, la date "
                                                      "d'un deuil) : « quand » est sa prochaine occurrence"),
@@ -513,9 +513,9 @@ def _volumes(ctx: InspectContext) -> Stats | None:
 
     return Stats((
         Stat("Souvenirs", of(c.EPISODE_MEMORY),
-             plural(of(c.EPISODE_MEMORY, "merged"), "fondu dans un autre", "fondus dans un autre")),
-        Stat("Croyances", of(c.BELIEF), plural(of(c.BELIEF, "superseded"), "remplacée", "remplacées")),
-        Stat("Promesses en cours", of(c.PROMISE, "pending"),
+             plural(of(c.EPISODE_MEMORY, c.MERGED_STATUS), "fondu dans un autre", "fondus dans un autre")),
+        Stat("Croyances", of(c.BELIEF), plural(of(c.BELIEF, c.SUPERSEDED_STATUS), "remplacée", "remplacées")),
+        Stat("Promesses en cours", of(c.PROMISE, c.PENDING_STATUS),
              f"{plural(of(c.PROMISE, c.HONORED), 'tenue', 'tenues')}, "
              f"{plural(of(c.PROMISE, c.DROPPED), 'abandonnée', 'abandonnées')}"),
     ), title="Ce qu'elle garde")

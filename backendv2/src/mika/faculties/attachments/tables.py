@@ -347,7 +347,7 @@ def linked_knowledge(store: Any, items: Sequence[int]) -> dict[int, Any]:
         return {}
     v = memory_c.KNOWLEDGE
     found = knowns(store.query_mind(memory_c.select_known().where(v.c.id.in_(sorted(set(items))),
-                                                                  v.c.status == "active")),
+                                                                  v.c.status == memory_c.ACTIVE_STATUS)),
                    memory_c.KNOWN_COLUMNS)
     return {k.id: k for k in found}
 

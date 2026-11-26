@@ -110,7 +110,7 @@ class Index:
                                    .order_by(ch.c.seq, ch.c.item))
         if changed:
             rows = _by_ids(store, tb.items(), ITEM_COLUMNS, [int(i) for i, _ in changed])
-            active = [r for r in rows if r["status"] in ("active", "pending")]
+            active = [r for r in rows if r["status"] in (c.ACTIVE_STATUS, c.PENDING_STATUS)]
             valid = {int(r["id"]) for r in active}
             await vectors.remove([int(i) for i, _ in changed if int(i) not in valid])
             todo = list({v.key: v for v in [*todo, *map(_item_vector, active)]}.values())
@@ -129,7 +129,7 @@ class Index:
                        .order_by(ch.c.id), _CHUNK_COLUMNS)
         upto = (max([self.upto[0], *(int(r["id"]) for r in items)]),
                 max([self.upto[1], *(int(r["id"]) for r in chunks)]))
-        return [*map(_item_vector, (r for r in items if r["status"] in ("active", "pending"))),
+        return [*map(_item_vector, (r for r in items if r["status"] in (c.ACTIVE_STATUS, c.PENDING_STATUS))),
                 *map(_chunk_vector, chunks)], upto
 
     @staticmethod
@@ -138,7 +138,7 @@ class Index:
         n'est qu'un cache) ; ce qui manque (un index neuf, jeté) s'ajoute."""
         indexed = vectors.indexed()
         t, ch = tb.items(), c.chunks_table()
-        items = {int(r[0]) for r in store.query_mind(select(t.c.id).where(t.c.status.in_(("active", "pending"))))}
+        items = {int(r[0]) for r in store.query_mind(select(t.c.id).where(t.c.status.in_((c.ACTIVE_STATUS, c.PENDING_STATUS))))}
         chunks = {int(r[0]) for r in store.query_mind(select(ch.c.id))}
         gone = indexed - items - chunks
         if gone:

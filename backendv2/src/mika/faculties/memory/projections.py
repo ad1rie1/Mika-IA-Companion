@@ -130,7 +130,7 @@ def _supersede(sql: Sql, sfx: str, old: int, new: int, at: int) -> None:
     """``new`` remplace ``old`` : ce qu'elle croyait ne l'est plus, et sait par quoi (ADR 0081) ; le doute qui
     portait sur l'ancienne n'a plus d'objet."""
     t, ct = items(sfx), contests(sfx)
-    sql.execute(update(t).where(t.c.id == old).values(status="superseded", superseded_by=new, superseded_at=at))
+    sql.execute(update(t).where(t.c.id == old).values(status=c.SUPERSEDED_STATUS, superseded_by=new, superseded_at=at))
     sql.execute(delete(ct).where(or_(ct.c.item == old, ct.c.other == old)))
 
 
@@ -227,7 +227,7 @@ def create_views(sql: Sql, sfx: str) -> None:
                        greatest(o.c.sensitivity, n.c.sensitivity).label("sensitivity"),
                        greatest(o.c.secret, n.c.secret).label("secret"), o.c.superseded_at.label("changed_at"))
                 .select_from(o.join(n, n.c.id == o.c.superseded_by))
-                .where(o.c.status == "superseded", o.c.about_self > 0, n.c.about_self > 0, n.c.status == "active",
+                .where(o.c.status == c.SUPERSEDED_STATUS, o.c.about_self > 0, n.c.about_self > 0, n.c.status == c.ACTIVE_STATUS,
                        o.c.internal_only == 0, n.c.internal_only == 0))
     create_view(sql, f"{c.LIVED_VIEW}{sfx}",
                 select(*known, t.c.gist).where(t.c.kind == c.EPISODE_MEMORY, t.c.gist != "", held))
@@ -314,7 +314,7 @@ class Items:
             if name == c.REMEMBERED.name:
                 insert({"id": e.seq, "kind": c.EPISODE_MEMORY, "text": d.text.text or "", "about": keys_json(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance,
-                        "born_at": e.at, "touched_at": e.at, "status": "active", "sources": json.dumps(list(d.sources)),
+                        "born_at": e.at, "touched_at": e.at, "status": c.ACTIVE_STATUS, "sources": json.dumps(list(d.sources)),
                         "told_by": keys_json(d.told_by), "heard_by": keys_json(d.heard_by), "secret": int(d.secret),
                         "constraints": json.dumps([rule.model_dump() for rule in d.constraints]),
                         "internal_only": int(d.internal_only), "origin": c.LIED if d.lie else None,
@@ -325,7 +325,7 @@ class Items:
                 insert({"id": e.seq, "kind": c.BELIEF, "text": d.text.text or "", "about": keys_json(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "confidence": d.confidence,
                         "origin": d.origin, "source": d.source, "born_at": e.at, "touched_at": e.at,
-                        "status": "active", "replaces": d.replaces, "sources": json.dumps(list(d.sources)),
+                        "status": c.ACTIVE_STATUS, "replaces": d.replaces, "sources": json.dumps(list(d.sources)),
                         "told_by": keys_json(d.told_by), "heard_by": keys_json(d.heard_by), "secret": int(d.secret),
                         "informants": keys_json(informants_of(d.source, d.told_by)),
                         # 1 : ce qu'elle raconte d'elle, qui s'efface ; 2 : ce qui la définit (un goût, un avis), qui tient
@@ -350,26 +350,26 @@ class Items:
             elif name == c.PROMISE_NOTICED.name:
                 insert({"id": e.seq, "kind": c.PROMISE, "text": d.text.text or "", "about": keys_json([d.to]),
                         "sensitivity": d.sensitivity, "importance": 0.6, "born_at": e.at, "touched_at": e.at,
-                        "status": "pending", "recipient": d.to, "due": d.due, "sources": json.dumps(list(d.sources))})
+                        "status": c.PENDING_STATUS, "recipient": d.to, "due": d.due, "sources": json.dumps(list(d.sources))})
             elif name == c.EVENT_NOTED.name:
                 insert({"id": e.seq, "kind": c.EVENT, "text": d.text.text or "", "about": keys_json(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "born_at": e.at, "touched_at": e.at,
-                        "status": "active", "due": d.when, "replaces": d.replaces,
+                        "status": c.ACTIVE_STATUS, "due": d.when, "replaces": d.replaces,
                         "sources": json.dumps(list(d.sources)), "told_by": keys_json(d.told_by),
                         "heard_by": keys_json(d.heard_by), "secret": int(d.secret), "emotion": dominant(d.empathy),
                         "felt": _facets_json(d.felt), "empathy": _facets_json(d.empathy), "until": d.until,
                         "precision": d.precision, "likelihood": d.likelihood})
                 if d.replaces is not None:
-                    sql.execute(update(t).where(t.c.id == d.replaces, t.c.kind == c.EVENT).values(status="superseded"))
+                    sql.execute(update(t).where(t.c.id == d.replaces, t.c.kind == c.EVENT).values(status=c.SUPERSEDED_STATUS))
             elif name == c.PROMISE_RESOLVED.name:
                 sql.execute(update(t).where(t.c.id == d.promise).values(status=d.status, touched_at=e.at))
             elif name == c.SITUATION_ENDED.name:
-                sql.execute(update(t).where(t.c.id == d.event).values(status="ended", touched_at=e.at))
+                sql.execute(update(t).where(t.c.id == d.event).values(status=c.ENDED_STATUS, touched_at=e.at))
             elif name == c.RETRACTED.name:
                 # démenti par l'opératrice (ADR 0230) : un statut d'avant, son texte gardé ; seulement un souvenir ou
                 # une croyance qu'elle tient encore
                 sql.execute(update(t).where(t.c.id == d.item, t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)),
-                                            t.c.status == "active")
+                                            t.c.status == c.ACTIVE_STATUS)
                             .values(status=c.RETRACTED_STATUS, touched_at=e.at))
             elif name == c.REINFORCED.name:
                 self._reinforce(sql, sfx, d, e.at)
@@ -388,7 +388,7 @@ class Items:
             elif name == c.RESOLVED.name and d.nature == c.PREDICTION:
                 # une prévision constatée (ADR 0099) : de l'histoire — elle ne se montre plus à constater
                 sql.execute(update(t).where(t.c.id == d.event, t.c.kind == c.BELIEF)
-                            .values(status="resolved", touched_at=e.at))
+                            .values(status=c.RESOLVED_STATUS, touched_at=e.at))
             elif name == c.DELICATE.name:
                 # un sujet délicat de la personne : une confidence, pour tous ses témoignages (ADR 0099)
                 tt = testimonies(sfx)
@@ -524,8 +524,8 @@ class Items:
                 _feel(sql, sfx, d.item, [list(f) for f in d.felt], json.loads(row["empathy"] or "[]"), row["emotion"])
         if d.replaces is not None and d.replaces != d.item:
             # ce qu'elle croyait, redit, revient (ADR 0081) : la croyance qui l'avait remplacée le cède
-            sql.execute(update(t).where(t.c.id == d.item, t.c.status == "superseded")
-                        .values(status="active", superseded_by=None, superseded_at=None))
+            sql.execute(update(t).where(t.c.id == d.item, t.c.status == c.SUPERSEDED_STATUS)
+                        .values(status=c.ACTIVE_STATUS, superseded_by=None, superseded_at=None))
             _supersede(sql, sfx, d.replaces, d.item, at)
         if d.contests is not None and d.contests != d.item:
             _contest(sql, sfx, d.item, d.contests, at)
@@ -551,7 +551,7 @@ class Items:
             # sous-requête sur la table qu'on met à jour)
             between_us=greatest(t.c.between_us, int(b["between_us"]))))
         _about_rows(sql, sfx, keep, keys_of(b["about"]))
-        sql.execute(update(t).where(t.c.id == drop).values(status="joined"))
+        sql.execute(update(t).where(t.c.id == drop).values(status=c.JOINED_STATUS))
         _settle(sql, sfx, keep)
 
     @staticmethod
@@ -586,7 +586,7 @@ class Items:
             secret=int(bool(a["secret"]) or bool(b["secret"])), touched_at=at,
             sources=json.dumps(sorted({*map(int, keys_of(a["sources"])), *map(int, keys_of(b["sources"]))}))))
         _about_rows(sql, sfx, keep, keys_of(b["about"]))
-        sql.execute(update(t).where(t.c.id == drop).values(status="merged"))
+        sql.execute(update(t).where(t.c.id == drop).values(status=c.MERGED_STATUS))
 
     @staticmethod
     def _uttered(sql: Sql, sfx: str, d: Any, at: int) -> None:

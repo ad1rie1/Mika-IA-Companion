@@ -285,7 +285,7 @@ def free_names(s: IdentityState, store: Any) -> list[str]:
     # un intervalle de clés (``name:`` ≤ clé < ``name;``) : comparé en binaire sur les deux moteurs
     rows = store.query_mind(
         select(a.c.person).distinct().select_from(a.join(i, i.c.id == a.c.item))
-        .where(a.c.person >= NAMED, a.c.person < _NAMED_END, i.c.status == "active", i.c.kind.in_(list(NAMED_KINDS))))
+        .where(a.c.person >= NAMED, a.c.person < _NAMED_END, i.c.status == memory_c.ACTIVE_STATUS, i.c.kind.in_(list(NAMED_KINDS))))
     return sorted({str(k) for (k,) in rows} - set(s.names))
 
 
@@ -319,7 +319,7 @@ def _named_items(store: Any, keys: Sequence[str]) -> dict[str, list[tuple[str, i
     rows = store.query_mind(
         select(a.c.person, i.c.kind, i.c.sensitivity, i.c.secret, i.c.told_by, i.c.born_at)
         .select_from(a.join(i, i.c.id == a.c.item))
-        .where(a.c.person.in_(list(keys)), i.c.status == "active", i.c.kind.in_(list(NAMED_KINDS))))
+        .where(a.c.person.in_(list(keys)), i.c.status == memory_c.ACTIVE_STATUS, i.c.kind.in_(list(NAMED_KINDS))))
     out: dict[str, list[tuple[str, int, bool, tuple[str, ...], int]]] = {}
     for key, kind, sensitivity, secret, told_by, born_at in rows:
         try:

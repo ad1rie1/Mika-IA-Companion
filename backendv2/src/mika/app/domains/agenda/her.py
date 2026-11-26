@@ -188,7 +188,7 @@ def _everyone(frame: Frame, store: Any) -> list[str]:
     """Les personnes à qui elle a promis quelque chose, ou dont elle retient un moment (par sa porte)."""
     v = memory_c.KNOWLEDGE
     rows = store.query_mind(select(v.c.recipient, v.c.about).where(
-        v.c.kind.in_((memory_c.PROMISE, memory_c.EVENT)), v.c.status.in_(("pending", "active"))))
+        v.c.kind.in_((memory_c.PROMISE, memory_c.EVENT)), v.c.status.in_((memory_c.PENDING_STATUS, memory_c.ACTIVE_STATUS))))
     keys: set[str] = set()
     for recipient, about in rows:
         if recipient:

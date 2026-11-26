@@ -346,8 +346,8 @@ def knows(look: Look, who: Who) -> dict[str, Any]:
     frame, now, person = look.frame, look.now, who.person
     v = memory_c.KNOWLEDGE
     about = memory_c.concerning(v, who.keys)
-    beliefs = _known(look, (v.c.kind == memory_c.BELIEF, v.c.status == "active", about), SHOWN)
-    souvenirs = _known(look, (v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == "active", about,
+    beliefs = _known(look, (v.c.kind == memory_c.BELIEF, v.c.status == memory_c.ACTIVE_STATUS, about), SHOWN)
+    souvenirs = _known(look, (v.c.kind == memory_c.EPISODE_MEMORY, v.c.status == memory_c.ACTIVE_STATUS, about,
                               or_(v.c.origin.is_(None), v.c.origin != memory_c.LIED)), SHOWN)
     lies = _known(look, (v.c.kind == memory_c.EPISODE_MEMORY, v.c.origin == memory_c.LIED, about), SHOWN)
     moments = []

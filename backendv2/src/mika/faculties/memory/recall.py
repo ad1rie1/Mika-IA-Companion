@@ -335,7 +335,7 @@ def between_us(frame: Frame, store: Any, person: str, aud: Audience, memo: dict[
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
     t = tb.items()
     rows = store.query_mind(select(*item_columns())
-                            .where(t.c.kind == c.BELIEF, t.c.status == "active", t.c.between_us == 1,
+                            .where(t.c.kind == c.BELIEF, t.c.status == c.ACTIVE_STATUS, t.c.between_us == 1,
                                    about_any(handles))
                             .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_BETWEEN_SHOWN))
     out = []
@@ -367,7 +367,7 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     tokens = set(said.split())
     a, i = alias_of(tb.about(), "a"), alias_of(tb.items(), "i")
     rows = store.query_mind(select(a.c.person).distinct().select_from(a.join(i, i.c.id == a.c.item))
-                            .where(i.c.status == "active", i.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF))))
+                            .where(i.c.status == c.ACTIVE_STATUS, i.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF))))
     raw = {str(k) for (k,) in rows if k}
     by_name: dict[str, set[str]] = {}
     keys_of: dict[str, set[str]] = {}
@@ -410,7 +410,7 @@ def about_named(frame: Frame, store: Any, named: Mapping[str, tuple[str, ...]], 
             continue
         t = tb.items()
         rows = store.query_mind(select(*item_columns())
-                                .where(t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)), t.c.status == "active", about_any(keys))
+                                .where(t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)), t.c.status == c.ACTIVE_STATUS, about_any(keys))
                                 .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_THEIR_LIFE_POOL))
         items = [Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows]
         items.sort(key=lambda it: (-it.importance * min(1.0, salience(it, frame.now, p)), -it.id))
@@ -482,7 +482,7 @@ def news(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams, 
     since = frame.now - round(p.veiled_fresh_days * DAY)
     t = tb.items()
     ids = [int(i) for (i,) in store.query_mind(
-        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)),
+        select(t.c.id).where(t.c.status == c.ACTIVE_STATUS, t.c.veiled != "", t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)),
                              t.c.born_at >= since).order_by(t.c.importance.desc(), t.c.id.desc()).limit(30))]
     found = items_by_id(store, ids)
     return [candidate_of(frame, found[i], person, memo, store) for i in ids
@@ -497,7 +497,7 @@ def veiled_pool(store: Any) -> tuple[int, ...]:
     """Les souvenirs et croyances qui ont une version sans nom (ADR 0091), les plus récents d'abord."""
     t = tb.items()
     return tuple(int(i) for (i,) in store.query_mind(
-        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)))
+        select(t.c.id).where(t.c.status == c.ACTIVE_STATUS, t.c.veiled != "", t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)))
         .order_by(t.c.id.desc()).limit(VEILED_POOL)))
 
 
@@ -604,7 +604,7 @@ def contested_line(frame: Frame, item: Item, person: str | None, aud: Audience, 
     others = [int(o) for (o,) in store.query_mind(select(ct.c.other).where(ct.c.item == item.id)
                                                   .order_by(ct.c.other))]
     for other in items_by_id(store, others).values():
-        if other.status != "active":
+        if other.status != c.ACTIVE_STATUS:
             continue
         verdict = verdict_of(frame, other, person, aud, memo, store)
         if not verdict.ok:
@@ -803,7 +803,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     asked: dict[str, tuple[str, ...]] = {}
     close = aud.level >= Sensitivity.PERSONAL
     for item in items.values():
-        if item.status != "active" or item.kind not in (c.EPISODE_MEMORY, c.BELIEF):
+        if item.status != c.ACTIVE_STATUS or item.kind not in (c.EPISODE_MEMORY, c.BELIEF):
             continue
         if item.valid_until is not None and item.valid_until < now and candidates[item.id] < p.strong_cue:
             continue  # ce qui ne valait que jusqu'à une date passée ne revient plus de lui-même (ADR 0081)
@@ -960,7 +960,7 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
     since = frame.now - round(p.person_recall_days * DAY)
     t = tb.items()
     rows = store.query_mind(select(*item_columns())
-                            .where(t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)), t.c.status == "active", t.c.born_at >= since,
+                            .where(t.c.kind.in_((c.EPISODE_MEMORY, c.BELIEF)), t.c.status == c.ACTIVE_STATUS, t.c.born_at >= since,
                                    about_any(handles))
                             .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_THEIR_LIFE_POOL))
     picked: list[tuple[float, Item, Verdict]] = []
@@ -990,7 +990,7 @@ async def _self_said(vectors: Any, store: Any, query: str, p: MemoryParams) -> l
         return []
     t = tb.items()
     ids = [int(r[0]) for r in store.query_mind(
-        select(t.c.id).where(t.c.kind == c.BELIEF, t.c.about_self >= 2, t.c.status == "active")
+        select(t.c.id).where(t.c.kind == c.BELIEF, t.c.about_self >= 2, t.c.status == c.ACTIVE_STATUS)
         .order_by(t.c.id.desc()).limit(200))]
     if not ids:
         return []

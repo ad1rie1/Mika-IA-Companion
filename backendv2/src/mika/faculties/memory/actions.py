@@ -186,7 +186,7 @@ def _deny(s: MemoryState, frame: Frame, args: ItemArgs, ctx: ActionContext) -> D
         if ctx.store is not None and tb.has_table(ctx.store, t) else []
     if not rows or rows[0][0] not in DENIABLE:
         raise Refused("Seul un souvenir ou une croyance se dément, et celui-ci n'est plus noté.")
-    if rows[0][1] != "active":
+    if rows[0][1] != c.ACTIVE_STATUS:
         raise Refused("Elle ne le tient déjà plus pour sien : remplacé, fondu, joint, constaté ou démenti.")
     draft = c.RETRACTED.draft(item=args.item, dedupe_key=f"démenti:{args.item}")
     return Done(drafts=(draft,), message="Démenti : elle ne le tient plus pour vrai.")
