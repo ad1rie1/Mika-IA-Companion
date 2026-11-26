@@ -20,6 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from mika.contracts import affect as affect_c
 from mika.contracts import agenda as agenda_c
 from mika.contracts import attention as attention_c
 from mika.contracts import email as email_c
@@ -31,6 +32,7 @@ from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import projects as projects_c
+from mika.contracts import rss as rss_c
 from mika.contracts import social as social_c
 from mika.contracts import wakeup as wakeup_c
 from mika.kernel.episode import Outcome
@@ -139,6 +141,15 @@ GIVE_UP_AFTER = 2
 #: dite, elle en a une de plus, et plus rien ne passe. Être ignorée n'en diminue pas l'envie (c'est déjà rare, et
 #: unique).
 ONCE_MORE = frozenset({social_c.REKINDLE})
+
+#: Ce qui est une initiative **ordinaire, exprès** : prendre la parole, sans rien de dû ni de pressant — toutes les
+#: retenues d'``agency`` s'y appliquent. Chaque raison d'initiative qu'un propriétaire déclare est rangée ici ou dans un
+#: des ensembles ci-dessus ; sinon elle deviendrait ordinaire sans que personne l'ait dit (un rappel dû oublié
+#: d'``OWED`` partirait trop tard, ou pas du tout devant une rancune). Rien ne lit cet ensemble que la garde qui le
+#: vérifie (``tests/architecture/test_initiative_reasons_are_classed.py``) : il ne change aucun comportement.
+ORDINARY = frozenset({social_c.PRESENT_PERSON, social_c.RECONTACT, social_c.COMFORT, social_c.CHAT,
+                      needs_c.NEED_SOCIAL, needs_c.NEED_EXPRESSION, affect_c.MOOD_OVERFLOW, rss_c.FOR_FRIEND,
+                      projects_c.PLAN, SECOND_THOUGHTS})
 
 #: Les fins d'une initiative qui ne sont pas un **essai** : elle a été devancée (la personne a écrit pendant
 #: qu'elle composait), interrompue, annulée — elle n'a pas eu lieu. (Un murmure sans suite non plus : elle s'est
