@@ -1,13 +1,12 @@
 """Agenda, pour qui est connecté (ADR 0309, lot 4) : ses agendas — les siens, ceux qu'on lui partage, ses abonnements,
 « L'agenda de Mika » vu par elle —, une période, un événement, chercher, ses invitations et ce que Mika propose ;
-écrire, répondre, décider ; le tableau de droits de ses agendas. Ses comptes d'agenda (Paramètres › Agendas) ont leurs
-routes dans ``account_settings.py``, qu'il ajoute aux siennes.
+écrire, répondre, décider ; le tableau de droits de ses agendas ; ce qui attend son geste, pour la barre du haut
+(``COUNTERS``). Ses comptes d'agenda (Paramètres › Agendas) ont leurs routes dans ``account_settings.py``, qu'il
+ajoute aux siennes.
 
-Un agenda est à elle quand son compte l'est (son compte du système ``moi:<sa clé>`` ; un compte branché à son nom, ou
-« à toi » si elle est une de ses propriétaires : la règle de ``vocab.ownership``, ADR 0185) ; un agenda qu'on lui
-partage s'y ajoute, à son niveau (``plugins/agenda/actions.py::level_of``) — masqué par son propriétaire, ou sous un
-compte décoché, il ne l'est plus. Un événement, une proposition sont à l'agenda qu'ils désignent : hors de ses agendas,
-rien n'existe (404). Un événement privé d'une autre personne se lit « Occupé ».
+Quels agendas sont à elle et ce qu'elle peut y faire, il le lit dans ``reach.py`` (la base de l'API, des partages et du
+direct). Un événement, une proposition sont à l'agenda qu'ils désignent : hors de ses agendas, rien n'existe (404). Un
+événement privé d'une autre personne se lit « Occupé ».
 
 Ce qui s'écrit passe par les actions du plugin (``agenda.creer``, ``modifier``, ``supprimer``, ``dupliquer``,
 ``repondre``, ``rappel``, ``accepter``, ``refuser``, ``ajouter_modifie``), au nom de la personne, auditées
@@ -25,18 +24,34 @@ from typing import Any
 from pydantic import ValidationError
 from starlette.routing import Route
 
-from mika.adapters.agenda import AgendaConfig
 from mika.adapters.agenda.config import COLORS
 from mika.app.domains.agenda import account_settings
 from mika.app.domains.agenda.her import her_agenda, title_of
+from mika.app.domains.agenda.reach import (
+    NO_ANSWER_PRIVATE,
+    NO_ANSWER_READ_ONLY,
+    NO_ANSWER_SHARED,
+    NO_ANSWER_TOLD,
+    ONLY_OWNER,
+    agenda_ports,
+    alerts_json,
+    answers_reach,
+    calendar_json,
+    can_use,
+    can_write,
+    done_with_made,
+    mine,
+    opened_calendar,
+    owned_calendar,
+    person_name,
+)
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, refused
 from mika.app.me.common import millis, settings_of
-from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import instant, local
-from mika.plugins.agenda import CREATE, RESPOND, WAITING, AgendaState, owner, params_of, reminder
-from mika.plugins.agenda.actions import KEEP, account_level, handles_of, level_of
+from mika.plugins.agenda import CREATE, RESPOND, WAITING, AgendaState, params_of
+from mika.plugins.agenda.actions import KEEP, handles_of, level_of
 from mika.plugins.agenda.rights import table_of
 from mika.plugins.agenda.tools import busy_summary
 from mika.plugins.agenda.watch import invitation_key
@@ -44,11 +59,8 @@ from mika.ports.agenda import (
     ALERT_METHODS,
     ALERTS_MAX,
     DAY_US,
-    ICAL,
-    KIND_WORDS,
     NEEDS,
     REMINDERS,
-    SYSTEM,
     Alert,
     Calendar,
     Event,
@@ -58,18 +70,13 @@ from mika.ports.agenda import (
     masked,
     occurrences,
     readable_key,
-    split_calendar_key,
-    system_account,
-    system_person,
 )
 from mika.runtime import decisions
 from mika.runtime.operations import audit
 from mika.runtime.state import RUNTIME
 from mika.vocab.access import (
     KEEP_WORDS,
-    PERSON,
     SHARE_PREPARE,
-    SHARE_USE,
     WRITE_WORDS,
     AgendaRule,
     Table,
@@ -89,168 +96,9 @@ PERIOD_DAYS, SEARCH_PAST, SEARCH_AHEAD, SEARCH_MAX = 100, 90, 366, 50
 TOO_LOW = {"lire": "Cet agenda t'est partagé en lecture : tu le lis, sans y écrire.",
            "preparer": "Cet agenda t'est partagé en lecture et préparation : elle peut t'y préparer un ajout, que son "
                        "propriétaire approuve ; tu n'y écris pas toi-même."}
-ONLY_OWNER = "Seul son propriétaire règle cet agenda."
 
 
-# ── à qui ──
-
-
-def agenda_ports(call: Call) -> tuple[Any, Any]:
-    store, providers = call.port("agenda"), call.port("agenda_providers")
-    if store is None or providers is None:
-        raise Denied(503, "L'agenda n'est pas branché sur ce serveur.")
-    return store, providers
-
-
-def mine(call: Call) -> dict[str, tuple[Calendar, str]]:
-    """Ses agendas, par clé : l'agenda et son niveau — les siens (« Mon agenda » né au besoin), puis ceux qu'on lui
-    partage."""
-    store, providers = agenda_ports(call)
-    system = getattr(providers, "system", None)
-    if system is not None:
-        system.ensure(system_account(call.me.person))
-    p, frame = params_of(call.frame), call.frame
-    out: dict[str, tuple[Calendar, str]] = {}
-    for cal in store.calendars():
-        level = level_of(p, frame, call.me.person, cal.key)
-        if level:
-            out[cal.key] = (cal, level)
-    return out
-
-
-def _one(call: Call, key: str) -> tuple[Calendar, str]:
-    found = mine(call).get(key)
-    if found is None:
-        raise missing()
-    return found
-
-
-def owned_calendar(call: Call, key: str) -> Calendar:
-    cal, level = _one(call, key)
-    if level != OWNED:
-        raise Denied(403, ONLY_OWNER)
-    return cal
-
-
-def _usable(level: str) -> bool:
-    return level == OWNED or reaches(level, SHARE_USE)
-
-
-def agenda_settings(call: Call) -> AgendaSettings:
-    """Ses réglages (ses comptes, leurs connexions, l'application Google du serveur) ; 503 s'ils ne sont pas
-    branchés."""
-    found: AgendaSettings = settings_of(call).of(AgendaSettings)
-    return found
-
-
-def must_own_account(call: Call, key: str) -> None:
-    """Un compte à elle (son compte du système, ou un compte branché à elle) ; un compte d'une autre n'existe pas."""
-    if account_level(params_of(call.frame), call.frame, call.me.person, key) != OWNED:
-        raise missing()
-    if not system_person(key) and key not in agenda_settings(call).agenda().accounts:
-        raise missing()
-
-
-def _name(call: Call, person: str) -> str:
-    return identity_c.person_name(call.frame, person) or str(
-        getattr(call.frame.get(identity_c.IDENTITY(person)), "name", "") or person)
-
-
-def _owner_name(call: Call, account: str) -> str:
-    holder = owner(params_of(call.frame), account)
-    return _name(call, holder[len(PERSON):]) if holder.startswith(PERSON) else identity_c.keepers(call.frame)
-
-
-def account_kind(call: Call, account: str) -> str:
-    if system_person(account):
-        return SYSTEM
-    p = params_of(call.frame)
-    if account in p.kinds:
-        return p.kinds[account]
-    state = call.port("agenda").account(account) if call.port("agenda") is not None else None
-    return state.kind if state is not None else ""
-
-
-def _writable(call: Call, cal: Calendar, level: str) -> bool:
-    """Peut-elle écrire dans cet agenda d'ici : le sien ou « s'en servir », un agenda que son fournisseur laisse
-    écrire, sous un compte actif."""
-    if not _usable(level) or not cal.writable:
-        return False
-    _store, providers = agenda_ports(call)
-    conn = providers.connection(cal.account)
-    provider = providers.of(conn.kind) if conn is not None else None
-    return bool(conn is not None and provider is not None and conn.enabled
-                and cal.account not in params_of(call.frame).accounts_off and provider.abilities(conn).write)
-
-
-#: pourquoi elle ne répond pas d'ici à une invitation (une ligne sous ses boutons, que l'écran cache alors)
-NO_ANSWER_SHARED = "Cet agenda t'est partagé sans t'en servir : seul son propriétaire répond à ses invitations."
-NO_ANSWER_PRIVATE = "Cette invitation est privée : seul son propriétaire y répond."
-NO_ANSWER_READ_ONLY = "Cet agenda ne s'écrit pas d'ici (en lecture seule, ou son compte est coupé) : réponds depuis " \
-    "son application."
-NO_ANSWER_TOLD = "Son serveur ne transmet pas les réponses aux invitations (pas de planification CalDAV) : réponds " \
-    "depuis ta messagerie."
-
-
-def _answers_reach(call: Call, calendar: str) -> bool:
-    """Une réponse d'ici atteint-elle l'organisatrice : le fournisseur de cet agenda la transmet-il (un serveur CalDAV
-    sans planification, RFC 6638, ne la transmet pas ; avant de l'avoir découvert, on ne le sait pas) ?"""
-    _store, providers = agenda_ports(call)
-    conn = providers.connection(split_calendar_key(calendar)[0])
-    provider = providers.of(conn.kind) if conn is not None else None
-    return bool(conn is not None and provider is not None and provider.abilities(conn).invite)
-
-
-def _setting(cfg: AgendaConfig, calendar: str) -> Any:
-    account, local_ = split_calendar_key(calendar)
-    found = cfg.account(account)
-    return found.setting(local_) if found is not None else None
-
-
-def alerts_json(alerts: Iterable[Alert]) -> list[dict[str, Any]]:
-    """Des rappels du fournisseur : ``method`` (``notification``, ``email``) et ``minutes`` avant."""
-    return [{"method": a.method, "minutes": a.minutes} for a in alerts]
-
-
-def _abilities(call: Call, account: str) -> Any:
-    _store, providers = agenda_ports(call)
-    conn = providers.connection(account)
-    provider = providers.of(conn.kind) if conn is not None else None
-    return provider.abilities(conn) if provider is not None and conn is not None else None
-
-
-def calendar_json(call: Call, cal: Calendar, level: str, cfg: AgendaConfig | None = None) -> dict[str, Any]:
-    p = params_of(call.frame)
-    kind = account_kind(call, cal.account)
-    owned = level == OWNED
-    setting = _setting(cfg, cal.key) if cfg is not None else None
-    state = call.port("agenda").account(cal.account)
-    writable = _writable(call, cal, level)
-    abilities = _abilities(call, cal.account)
-    out: dict[str, Any] = {
-        "key": cal.key, "account": cal.account, "name": cal.name or split_calendar_key(cal.key)[1],
-        "provider_name": cal.provider_name, "kind": kind,
-        "kind_label": KIND_WORDS.get(kind, kind), "level": level, "owner_name": "" if owned else _owner_name(
-            call, cal.account),
-        "group": ("subscriptions" if kind == ICAL else "mine") if owned else "shared",
-        "color": setting.color if setting is not None else "", "provider_color": cal.color, "primary": cal.primary,
-        "hidden": cal.key in p.hidden, "enabled": cal.account not in p.accounts_off,
-        "reminder": reminder(p, cal.key, kind), "reminder_set": p.reminders.get(cal.key, ""),
-        "writable": writable, "read_only": not cal.writable,
-        "can": {"write": writable, "respond": writable and bool(abilities is not None and abilities.invite),
-                "settings": owned, "share": owned, "rights": owned,
-                "remind": owned, "rename": owned},
-        "synced_at": millis(cal.synced_at or (state.synced_at if state is not None else 0)),
-        "provider_reminders": {"max": abilities.reminders if abilities is not None and cal.writable else 0,
-                               "email": bool(abilities is not None and abilities.email_reminders),
-                               "defaults": alerts_json(cal.reminders)},
-    }
-    if owned:
-        out["error"] = state.error if state is not None else ""
-        shares = setting.shares if setting is not None else p.shares.get(cal.key, {})
-        out["shares"] = [{"person": who[len(PERSON):], "name": _name(call, who[len(PERSON):]), "level": lv}
-                         for who, lv in sorted(shares.items())]
-    return out
+# ── ses agendas ──
 
 
 def _her_json(call: Call) -> dict[str, Any]:
@@ -347,8 +195,8 @@ def event_json(call: Call, o: Occurrence, level: str, writable: bool,
     added = e.added if e.added is not None and not hidden_words else None
     why = ""
     if e.response:
-        why = (NO_ANSWER_SHARED if not _usable(level) else NO_ANSWER_READ_ONLY) if not writable \
-            else NO_ANSWER_PRIVATE if hidden_words else "" if _answers_reach(call, e.calendar) else NO_ANSWER_TOLD
+        why = (NO_ANSWER_SHARED if not can_use(level) else NO_ANSWER_READ_ONLY) if not writable \
+            else NO_ANSWER_PRIVATE if hidden_words else "" if answers_reach(call, e.calendar) else NO_ANSWER_TOLD
     return {
         "event": e.id, "occurrence": o.key, "uid": e.uid, "calendar": e.calendar, "title": shown.title,
         "masked": hidden_words, "start": millis(span.start), "end": millis(span.end), "all_day": span.all_day,
@@ -392,7 +240,7 @@ async def period(call: Call) -> dict[str, Any]:
     held = mine(call)
     first, last, lo, hi = _bounds(call)
     keys, with_her = _chosen(call, held)
-    writable = {k: _writable(call, held[k][0], held[k][1]) for k in keys}
+    writable = {k: can_write(call, held[k][0], held[k][1]) for k in keys}
     items = [event_json(call, o, held[o.event.calendar][1], writable[o.event.calendar],
                         held[o.event.calendar][0].reminders) for o in store.period(keys, lo, hi, zone=_tz(call))]
     her = [her_json(call, d) for d in her_agenda(call.kernel, person=call.me.person, since=lo, until=hi)] \
@@ -412,7 +260,7 @@ def _event_of(call: Call) -> tuple[Event, str, Calendar, str]:
     e = store.event(int(raw))
     if e is None:
         raise missing()
-    cal, level = _one(call, e.calendar)
+    cal, level = opened_calendar(call, e.calendar)
     key = call.arg("occurrence", limit=20)
     if key and not readable_key(key):
         raise Denied(400, "« occurrence » ne se lit pas.", {"occurrence": "la clé d'une occurrence de la série"})
@@ -431,7 +279,7 @@ async def event(call: Call) -> dict[str, Any]:
     else:
         first = occurrences(e, e.span.start, e.span.start + 400 * DAY_US, limit=1) if e.recurring else []
         o = first[0] if first else Occurrence(e, "", e.span)
-    out = event_json(call, o, level, _writable(call, cal, level), cal.reminders)
+    out = event_json(call, o, level, can_write(call, cal, level), cal.reminders)
     proposals = [x for x in await _proposals(call, mine(call)) if x["target"] and x["target"]["uid"] == e.uid
                  and x["calendar"] == e.calendar]
     out["proposals"] = proposals
@@ -462,7 +310,7 @@ async def search(call: Call) -> dict[str, Any]:
     found = [o for o in store.period(keys, lo, hi)
              if not (o.event.private and held[o.event.calendar][1] != OWNED) and _matches(o.event, words)]
     found.sort(key=lambda o: abs(o.span.start - now))
-    writable = {k: _writable(call, held[k][0], held[k][1]) for k in keys}
+    writable = {k: can_write(call, held[k][0], held[k][1]) for k in keys}
     items = [event_json(call, o, held[o.event.calendar][1], writable[o.event.calendar],
                         held[o.event.calendar][0].reminders) for o in found[:SEARCH_MAX]]
     her = [her_json(call, d) for d in her_agenda(call.kernel, person=call.me.person, since=lo, until=hi)
@@ -541,7 +389,7 @@ async def proposals(call: Call) -> dict[str, Any]:
 
 
 def _answerable(held: Mapping[str, tuple[Calendar, str]]) -> list[str]:
-    return [k for k, (_cal, level) in held.items() if _usable(level)]
+    return [k for k, (_cal, level) in held.items() if can_use(level)]
 
 
 async def invitations(call: Call) -> dict[str, Any]:
@@ -557,7 +405,7 @@ async def invitations(call: Call) -> dict[str, Any]:
         cal, level = held[e.calendar]
         nxt = occurrences(e, now, now + 400 * DAY_US, limit=1) if e.recurring and not e.original else []
         o = nxt[0] if nxt else Occurrence(e, e.original, e.span)
-        item = event_json(call, o, level, _writable(call, cal, level), cal.reminders)
+        item = event_json(call, o, level, can_write(call, cal, level), cal.reminders)
         inv = s.invitations.get(invitation_key(e))
         item["prepared"] = prepared.get(inv.key) if inv is not None else None
         item["calendar_name"] = cal.name
@@ -571,7 +419,7 @@ def count(call: Call) -> int:
     if store is None or call.port("agenda_providers") is None:
         return 0
     p, frame = params_of(call.frame), call.frame
-    keys = [c.key for c in store.calendars() if _usable(level_of(p, frame, call.me.person, c.key))]
+    keys = [c.key for c in store.calendars() if can_use(level_of(p, frame, call.me.person, c.key))]
     mine_ = handles_of(frame, call.me.handle)
     decided = sum(1 for w in _waiting(call) if w.decider and w.decider in mine_)
     return len(store.invitations(keys)) + decided
@@ -626,22 +474,17 @@ def _alerts_in(raw: Any) -> list[str]:
     return out
 
 
-def done_with_made(outcome: Any) -> dict[str, Any]:
-    made = next((x for x in outcome.show if isinstance(x, dict)), None) if outcome.ok else None
-    return done(outcome, **({"made": made} if made else {}))
-
-
 def _target(call: Call, need_write: bool = True) -> tuple[Event, str, Calendar, str]:
     e, key, cal, level = _event_of(call)
-    if need_write and not _usable(level):
+    if need_write and not can_use(level):
         raise Denied(403, TOO_LOW.get(level, "Cet agenda ne t'est pas ouvert pour cela."))
     return e, key, cal, level
 
 
 async def create(call: Call) -> dict[str, Any]:
     key = call.arg("calendar", limit=200)
-    _cal, level = _one(call, key)
-    if not _usable(level):
+    _cal, level = opened_calendar(call, key)
+    if not can_use(level):
         raise Denied(403, TOO_LOW.get(level, "Cet agenda ne t'est pas ouvert pour cela."))
     values = _fields(call, EVENT_FIELDS)
     return done_with_made(await call.act("agenda.creer", form(fixed={"calendar": key}, **values)))
@@ -667,7 +510,7 @@ async def duplicate(call: Call) -> dict[str, Any]:
     e, key, cal, _level = _target(call, need_write=False)
     to = call.arg("to", limit=200)
     if to:
-        _one(call, to)
+        opened_calendar(call, to)
     return done_with_made(await call.act("agenda.dupliquer", form(fixed={"calendar": cal.key, "event": e.id,
                                                                           "occurrence": key}, to=to)))
 
@@ -721,8 +564,8 @@ async def proposal_edit(call: Call) -> dict[str, Any]:
     if w.op != CREATE:
         raise Denied(409, "Seule une proposition d'ajout se modifie : accepte-la ou refuse-la.")
     key = call.arg("calendar", limit=200) or w.calendar
-    _cal, level = _one(call, key)
-    if not _usable(level):
+    _cal, level = opened_calendar(call, key)
+    if not can_use(level):
         raise Denied(403, TOO_LOW.get(level, "Cet agenda ne t'est pas ouvert pour cela."))
     values = _fields(call, EVENT_FIELDS)
     conversation = str(_args(call, w.proposal).get("ref") or "")
@@ -735,7 +578,7 @@ async def proposal_edit(call: Call) -> dict[str, Any]:
 
 def _rule_json(call: Call, line: AgendaRule) -> dict[str, Any]:
     return {**line.model_dump(mode="json"),
-            "words": {"who": who_words(line.who, lambda p: _name(call, p)) if line.who else "—",
+            "words": {"who": who_words(line.who, lambda p: person_name(call, p)) if line.who else "—",
                       "canal": canal_words(line.canal), "when": when_words(line.when),
                       "read": "oui" if line.read else "non", "write": WRITE_WORDS[line.write],
                       "respond": WRITE_WORDS[line.respond], "keep": KEEP_WORDS[line.keep]}}
@@ -779,39 +622,10 @@ async def rights_save(call: Call) -> dict[str, Any]:
     return {"ok": True, "message": "Tableau enregistré." if table is not None else "Tableau de départ rétabli."}
 
 
-# ── pour le direct et les partages ──
-
-
-def seen_calendars(call: Call) -> tuple[frozenset[str], frozenset[str]]:
-    """Ce que le direct lui fait relire (ADR 0308), sans base ni réglages : les agendas qu'on lui partage (tels que les
-    paramètres journalisés les disent, encore ouverts) et ses comptes (son compte du système, ceux qui sont à elle) —
-    tout agenda d'un compte à elle est à elle, même avant d'être dans les paramètres."""
-    p, frame, person = params_of(call.frame), call.frame, call.me.person
-    accounts = {system_account(person)} | {a for a in p.kinds if account_level(p, frame, person, a) == OWNED}
-    shared = {c for c in p.shares if split_calendar_key(c)[0] not in accounts and level_of(p, frame, person, c)}
-    return frozenset(shared), frozenset(accounts)
-
-
-def is_hers(call: Call, calendar: str) -> bool:
-    """Le direct : cet agenda la regarde-t-il (le sien, ou un partage encore ouvert) ?"""
-    return bool(level_of(params_of(call.frame), call.frame, call.me.person, calendar))
-
-
-def calendar_names(store: Any) -> dict[str, str]:
-    """Le nom de chaque agenda connu de la base (ce que les partages montrent)."""
-    return {c.key: c.name for c in store.calendars()} if store is not None else {}
-
-
-def holder_person(p: Any, calendar: str) -> str:
-    """À qui est un agenda, tel que les paramètres le disent (``personne:<clé>`` ; vide : à toi)."""
-    return owner(p, split_calendar_key(calendar)[0])
-
-
 #: ce qu'il compte pour la barre du haut
 COUNTERS = {"agenda": count}
 
-__all__ = ["COUNTERS", "HER", "calendar_names", "count", "event_json", "holder_person", "is_hers", "mine",
-           "routes", "seen_calendars"]
+__all__ = ["COUNTERS", "HER", "count", "event_json", "routes"]
 
 
 def routes(api: MeApiBase) -> list[Route]:

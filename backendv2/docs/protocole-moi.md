@@ -1389,7 +1389,8 @@ Ce que l'écran Agenda et Paramètres › Agendas montrent (ADR 0309) : les agen
 (« Mon agenda », sans rien régler), ceux qu'elle branche (Google Agenda, Outlook.com / Microsoft 365, CalDAV, un
 abonnement iCal), ceux qu'on lui partage — et « L'agenda de Mika », sa mémoire montrée comme un agenda. Le code fait foi
 dans [`app/domains/agenda/api.py`](../src/mika/app/domains/agenda/api.py) et, pour ses comptes (Paramètres › Agendas),
-[`app/domains/agenda/account_settings.py`](../src/mika/app/domains/agenda/account_settings.py) ; les écritures sont
+[`app/domains/agenda/account_settings.py`](../src/mika/app/domains/agenda/account_settings.py), et ce qu'elle a
+de chaque agenda dans [`app/domains/agenda/reach.py`](../src/mika/app/domains/agenda/reach.py) ; les écritures sont
 les actions du plugin ([`plugins/agenda/actions.py`](../src/mika/plugins/agenda/actions.py)), auditées
 `moi.agenda.<action>`.
 

@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from mika.app.domains.agenda import api as agenda_me
+from mika.app.domains.agenda.reach import calendar_names, holder_person, mine
 from mika.app.domains.domain import SharingPart
 from mika.app.me.api import Call, Denied, missing, refused
 from mika.app.me.sharing import Shared, not_hers_already
@@ -26,7 +26,7 @@ from mika.vocab.ownership import OWNED
 
 def names_of(port: Callable[[str], Any]) -> dict[str, str]:
     """Le nom de chaque agenda, tel que sa base le dit (``port`` : un port du noyau, par son nom)."""
-    return agenda_me.calendar_names(port("agenda"))
+    return calendar_names(port("agenda"))
 
 
 def every(settings: Any, names: Mapping[str, str] | None = None) -> list[Shared]:
@@ -44,12 +44,12 @@ def every(settings: Any, names: Mapping[str, str] | None = None) -> list[Shared]
 
 async def share(call: Call, settings: Any, key: str, person: str, level: str) -> None:
     """Son propriétaire partage un de ses agendas : il est à lui, et pas déjà à cette personne."""
-    cal, held_level = agenda_me.mine(call).get(key) or (None, "")
+    cal, held_level = mine(call).get(key) or (None, "")
     if cal is None:
         raise missing()
     if held_level != OWNED:
         raise Denied(403, "Seul son propriétaire partage cet agenda.")  # comme une boîte qu'on te partage
-    holder = agenda_me.holder_person(agenda_p.params_of(call.frame), key)
+    holder = holder_person(agenda_p.params_of(call.frame), key)
 
     def calendar_hers(spec: Any) -> None:
         not_hers_already(call, holder, person, level)

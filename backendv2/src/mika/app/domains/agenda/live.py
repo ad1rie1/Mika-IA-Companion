@@ -1,7 +1,7 @@
 """La part de l'agenda dans le direct (ADR 0308, 0309, 0310) : ce que le journal et sa base y changent, et qui le voit.
 
 Un agenda va à qui le voit (``CALENDARS``) : à elle par son compte ou par un partage encore ouvert — la règle même de
-ses routes, ``api.seen_calendars`` ; une règle qui juge elle-même (``judge``). Ce qu'elle propose d'écrire dans un
+ses routes, ``reach.seen_calendars`` ; une règle qui juge elle-même (``judge``). Ce qu'elle propose d'écrire dans un
 agenda est aussi un effet du moteur (``effect``). La connexion Google ou Microsoft d'un compte se dit d'elle-même
 (``signed``, posée par le câblage).
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mika.app.domains.agenda.api import seen_calendars
+from mika.app.domains.agenda.reach import seen_calendars
 from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AGENDA_GRANTS_KEY, AGENDA_KEY
 from mika.app.domains.domain import LivePart
 from mika.app.me.touches import Touch
@@ -20,7 +20,7 @@ from mika.plugins import agenda as agenda_p
 from mika.ports.agenda import split_calendar_key
 from mika.ports.changes import AGENDA, ME, SETTINGS, Change
 
-#: à qui va une touche de l'agenda : à qui le voit (son compte, ses partages : ``api.seen_calendars``)
+#: à qui va une touche de l'agenda : à qui le voit (son compte, ses partages : ``reach.seen_calendars``)
 CALENDARS = "calendars"
 
 
@@ -64,7 +64,7 @@ def from_change(change: Change) -> list[Touch]:
 def judge(reader: Any, t: Touch) -> tuple[bool, tuple[str, ...]]:
     """Un agenda est à elle par son compte, ou par un partage encore ouvert ; un compte, s'il est à elle ou si un
     de ses agendas lui est partagé. Sans clé ni compte : tout le domaine (elle a toujours son agenda). Ce qu'elle a
-    — les agendas qu'on lui partage, ses comptes d'agenda (``api.seen_calendars``) — se lit une fois par personne
+    — les agendas qu'on lui partage, ses comptes d'agenda (``reach.seen_calendars``) — se lit une fois par personne
     et par envoi."""
     shared, accounts = reader.once(CALENDARS, lambda: seen_calendars(reader.call), (frozenset(), frozenset()))
     if t.keys:
