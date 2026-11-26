@@ -43,7 +43,7 @@ moins vite.
 Toute panne → rien (le tour part sans mémoire, jamais avec trop).
 
 Ce module cherche ; ce qu'il a trouvé se dit en mots, section par section, dans ``recall_sections.py`` (qui lit
-d'ici ``when_words``, ``knowledge_label``, ``_today`` : les outils et l'enrichisseur les lisent aussi). La règle des
+d'ici ``when_words``, ``knowledge_label``, ``happens_today`` : les outils et l'enrichisseur les lisent aussi). La règle des
 sujets délicats — ce qui en devient une confidence (ADR 0099) — est dans ``delicate.py``.
 """
 
@@ -1157,7 +1157,7 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
             keep = followed_lately(ev, now) and now <= ev.when + round(p.event_recent_days * DAY)
         elif ev.yearly and not ev.festive:
             # « comment ça s'est passé ? » n'a pas de sens pour la date d'un deuil : bientôt, ou ce jour-là
-            keep = now <= ev.when <= now + round(p.event_ahead_days * DAY) or _today(ev, frame)
+            keep = now <= ev.when <= now + round(p.event_ahead_days * DAY) or happens_today(ev, frame)
         elif ev.vague:
             # une période (« en novembre ») : quand elle approche, tant qu'elle dure (un mois au plus — une année
             # entière ne se redemande pas chaque jour), puis tout juste finie (ADR 0084)
@@ -1259,5 +1259,5 @@ def _ahead_moments(frame: Frame, store: Any, person: str | None, aud: Audience, 
     return out
 
 
-def _today(ev: c.LifeEvent, frame: Frame) -> bool:
+def happens_today(ev: c.LifeEvent, frame: Frame) -> bool:
     return frame.local(ev.when).date() == frame.local().date()

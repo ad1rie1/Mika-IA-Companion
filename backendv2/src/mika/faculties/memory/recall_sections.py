@@ -5,7 +5,7 @@ qu'elle sait (``memories``, ``shared_memories``), les gens qu'on nomme (``acquai
 promesses, la vie de la personne en face (``life``), ce qui vient (``ahead``), ce qu'elle a déjà dit d'elle
 (``self_said``). L'ordre où elle les lit est déclaré ailleurs (``READING``, ``app/composition.py``, ADR 0151).
 
-Ce que l'enrichisseur ou les outils lisent aussi (``when_words``, ``knowledge_label``, ``_today``…) reste dans
+Ce que l'enrichisseur ou les outils lisent aussi (``when_words``, ``knowledge_label``, ``happens_today``…) reste dans
 ``recall.py`` : ce module l'importe de là, jamais l'inverse.
 """
 
@@ -24,8 +24,8 @@ from mika.faculties.memory.recall import (
     Moment,
     Recall,
     Recalled,
-    _today,
     followed_lately,
+    happens_today,
     knowledge_label,
     names_of,
     when_words,
@@ -189,7 +189,7 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         return None
     aud = frame.audience
     lines = []
-    heavy = any(c.heavy_date(m.event) and _today(m.event, frame) for m in recall.moments)
+    heavy = any(c.heavy_date(m.event) and happens_today(m.event, frame) for m in recall.moments)
     if recall.hard and aud is not None and aud.private_ok and not heavy:
         # en privé seulement : un salon n'a pas à deviner ce qui pèse (ADR 0054) ; le jour d'une date lourde, sa
         # ligne le dit
@@ -266,7 +266,7 @@ def _moment_line(m: Moment, frame: Frame, close: bool) -> str:
     if ev.followed_at:
         return f"- {when} : {m.label}" + (phrase("memory.life.talked_again") if ev.when > frame.now
                                            else phrase("memory.life.past_talked"))
-    if ev.yearly and _today(ev, frame):
+    if ev.yearly and happens_today(ev, frame):
         if c.heavy_date(ev):
             return phrase("memory.life.heavy_today", label=m.label)
         return phrase("memory.life.yearly_today", label=m.label)

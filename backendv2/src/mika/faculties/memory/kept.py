@@ -40,7 +40,7 @@ from mika.faculties.memory.retelling import veiled_refusal
 from mika.faculties.memory.shown import Forecast, Shown
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import batches, handle_key, keys_of
-from mika.faculties.memory.testimonies import _former_twin, _head_of, target_of, testimonies_of, twin_of
+from mika.faculties.memory.testimonies import former_twin, head_of, target_of, testimonies_of, twin_of
 from mika.kernel.clock import DAY, MINUTE, instant
 from mika.kernel.events import Content, Draft
 from mika.kernel.frame import Frame
@@ -400,9 +400,9 @@ def _beliefs(k: KeepContext, known: Mapping[int, str], p: MemoryParams, call_id:
         former = None
         if twin is None and target is None:
             # ce qu'elle a cru, puis cessé de croire, et qu'on lui redit : elle y revient (ou elle doute)
-            former = _former_twin(store, b.texte, about, nature, holder)
+            former = former_twin(store, b.texte, about, nature, holder)
         if former is not None:
-            head = _head_of(store, former)
+            head = head_of(store, former)
             again = judge(testimonies_of(store, head), said) if head is not None else None
             drafts.append(c.ATTESTED.draft(
                 item=former, told_by=told_by, heard_by=k.heard, source=source, origin=origin,
@@ -635,7 +635,7 @@ def _about_self(b: x.XSouvenir | x.XCroyance, store: Any, provenance: Provenance
         replaces = None  # changer d'avis ne vaut que sur ce qu'elle a dit d'elle-même
     twin = _self_twin(store, b.texte, status="active")
     former = None if twin is not None else _self_twin(store, b.texte, status="superseded")
-    head = _head_of(store, former) if former is not None else None  # ce qu'elle en pense maintenant
+    head = head_of(store, former) if former is not None else None  # ce qu'elle en pense maintenant
     if (twin is not None and twin != replaces) or head is not None:
         # ce qu'elle redit d'elle-même : son propre témoignage, redit
         return [c.ATTESTED.draft(item=twin if head is None else former, sources=sources, sensitivity=sens,

@@ -5,7 +5,7 @@ correction désigne.
   croyance : la même proposition, quel qu'en soit le témoin (ADR 0080) ;
 - ``target_of`` : la croyance qu'une correction désigne, si elle peut l'être (ADR 0081) ;
 - ``testimonies_of`` : ses témoignages, dans l'ordre où ils sont venus ;
-- ``_former_twin`` et ``_head_of`` : la croyance qu'elle a cessé de croire, aux mêmes mots, et ce qui l'a remplacée
+- ``former_twin`` et ``head_of`` : la croyance qu'elle a cessé de croire, aux mêmes mots, et ce qui l'a remplacée
   jusqu'à ce qu'elle croit maintenant.
 
 Ce que le code garde d'une relecture (``kept.py``) et la relecture de la nuit (``reread.py``) les lisent (ADR 0153).
@@ -85,7 +85,7 @@ def testimonies_of(store: Any, item: int | None) -> list[Testimony]:
         select(*testimony_columns()).where(tt.c.item == item).order_by(tt.c.seq))]
 
 
-def _former_twin(store: Any, text: str, about: tuple[str, ...], nature: str, holder: str | None) -> int | None:
+def former_twin(store: Any, text: str, about: tuple[str, ...], nature: str, holder: str | None) -> int | None:
     """Une croyance qu'elle a cessé de croire (remplacée), aux mêmes mots : redite, elle revient."""
     t = tb.items()
     rows = store.query_mind(
@@ -99,7 +99,7 @@ def _former_twin(store: Any, text: str, about: tuple[str, ...], nature: str, hol
     return None
 
 
-def _head_of(store: Any, item: int) -> int | None:
+def head_of(store: Any, item: int) -> int | None:
     """Ce qui l'a remplacée, de remplacement en remplacement, jusqu'à ce qu'elle croit maintenant."""
     seen: set[int] = set()
     current: int | None = item
