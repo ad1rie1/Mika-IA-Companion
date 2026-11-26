@@ -260,9 +260,11 @@ def test_only_the_gesture_of_a_person_merges(tmp_path):
         return named(kernel)
 
     names, processes, emitting, effects = live(tmp_path, scenario)
-    # ni outil, ni capacité, ni processus ne porte de quoi fusionner : une seule action, et l'effet de son fait
+    # ni outil, ni capacité, ni processus ne porte de quoi fusionner : une seule action, et l'effet de son fait —
+    # ``merge.py`` porte aussi celui d'une écriture sur une pull request (ADR 0290), qui ne fusionne pas : seul
+    # ``_merge`` appelle ``merge_pull`` (plus bas)
     assert names and processes and not [n for n in (*names, *processes) if "merge" in n or "fusion" in n]
-    assert emitting == [inspect_merge.ACTION] and effects == [MERGE_ASKED.name]
+    assert emitting == [inspect_merge.ACTION] and effects == [MERGE_ASKED.name, merge.PULL_WRITE_ASKED.name]
     # le fait n'est écrit que par ``merge.asking``, que seule l'action d'une personne appelle (un décorateur compte
     # pour sa fonction : le réducteur du fait, l'action qui le déclare, l'effet qu'il déclenche)
     assert _mentions("MERGE_ASKED") == {

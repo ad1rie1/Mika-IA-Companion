@@ -30,6 +30,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.projects import merge as blocks
 from mika.faculties.projects import tracker
+from mika.faculties.projects.actions import NOT_KEEPER
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
     OBJECTIVE_CHANGED,
@@ -39,7 +40,6 @@ from mika.faculties.projects.faculty import (
     STEER_ASKED,
     STEER_CAPABILITY,
 )
-from mika.faculties.projects.inspect_manage import NOT_KEEPER
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS
 from mika.kernel.events import Content
 from mika.vocab.access import PERSON

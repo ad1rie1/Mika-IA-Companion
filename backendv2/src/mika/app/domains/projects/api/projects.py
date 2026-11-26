@@ -94,6 +94,7 @@ from mika.faculties.projects import (
     triggers,
     work,
 )
+from mika.faculties.projects.actions import NOT_KEEPER
 from mika.faculties.projects.faculty import (
     AMENDED,
     ISSUE_CAPABILITIES,
@@ -119,7 +120,6 @@ from mika.faculties.projects.faculty import (
     written_on,
 )
 from mika.faculties.projects.inspect import CHECKS_FR, OBJ_FR, PULL_FR, STATUS_FR, pull_words, window_words
-from mika.faculties.projects.inspect_manage import NOT_KEEPER
 from mika.faculties.projects.inspect_milestones import CHECK_WORDS
 from mika.faculties.projects.inspect_milestones import STATE_FR as MILESTONE_FR
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS

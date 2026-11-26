@@ -40,7 +40,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.faculties.projects import access, links, managing, merge, todo, tracker
+from mika.faculties.projects import access, links, merge, milestones, todo, tracker
 from mika.faculties.projects.faculty import (
     Objective,
     Project,
@@ -49,8 +49,8 @@ from mika.faculties.projects.faculty import (
     milestones_of,
     written,
 )
-from mika.faculties.projects.inspect_manage import HELD_WORDS
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS
+from mika.faculties.projects.inspect_milestones import HELD_WORDS
 from mika.kernel.frame import Audience
 from mika.vocab.access import CHANGES, STEER_EDIT, STEER_NO, STEER_RANK, tighten
 from mika.vocab.episodes import Kind
@@ -195,7 +195,7 @@ def edit_refusal(r: Reach) -> str:
 def frame_refusal(r: Reach) -> str:
     """Pourquoi elle ne change pas le cadre de ce projet — ses réglages, ses outils, son dépôt, l'archiver (vide :
     elle le peut ; ADR 0290) : le piloter en modification, et en être le propriétaire ou s'occuper d'elle
-    (``managing.frames``, que ``Reader.settles`` lit déjà)."""
+    (``tracker.frames``, que ``Reader.settles`` lit déjà)."""
     return edit_refusal(r) or ("" if r.reader.settles else NOT_FRAMER)
 
 
@@ -213,7 +213,7 @@ def milestone_can(r: Reach, m: Any) -> dict[str, Any]:
     """Ce qu'elle peut faire d'un jalon ici : le modifier, le retirer — et sinon pourquoi (atteint ou retiré, il ne
     bouge plus ; un point d'arrêt et un jalon tenu restent à qui tranche, ADR 0278)."""
     why = edit_refusal(r)
-    held = "" if why else managing.undoing(m, r.reader.settles)
+    held = "" if why else milestones.undoing(m, r.reader.settles)
     why = why or (HELD_WORDS.get(held, HELD_WORDS["other"]) if held else "")
     return {"modify": not why, "drop": not why, "why": why}
 

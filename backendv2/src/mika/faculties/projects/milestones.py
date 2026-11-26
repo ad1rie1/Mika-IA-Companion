@@ -7,6 +7,9 @@ agisse :
 - **ce qu'on demande** (``Spec``) et ce qui lui manque (``problem``) : un jalon se vérifie par une commande que
   l'outil lancera dans l'atelier, par un point d'arrêt que le propriétaire tranche, par un élément du registre dans
   un statut donné, ou par ce qu'elle en dit ;
+- **ce qu'une personne n'en défait pas** (``undoing``, la règle de l'ADR 0278 dite pour une personne) : un jalon
+  atteint ou retiré ne bouge plus ; un jalon tenu ne se défait que par qui tranche — les actions ``jalon_modifier``
+  et ``jalon_retirer`` (``inspect_milestones.py``) et l'API par personne la lisent ;
 - **les seuls endroits qui en font un brouillon** (``adding``, ``changing``) : chacun porte le niveau et les sujets
   qu'on lui donne — ceux de l'objectif, donc du ticket dont il est né (ADR 0272), et ceux que le projet a hérités de
   ses lectures (``read_about``, ADR 0262) ;
@@ -36,6 +39,7 @@ from mika.faculties.projects.faculty import (
     Objective,
     Project,
     awaiting,
+    milestone_held,
     milestones_of,
     next_milestone,
 )
@@ -124,6 +128,21 @@ def routine_text(rows: Iterable[str]) -> str:
     """La liste de passage d'un constant telle qu'elle se garde : une ligne par chose, ``ROUTINE_LINES`` au plus."""
     kept = [" ".join(x.split())[:ROUTINE_LINE_MAX] for x in rows if x.strip()]
     return "\n".join(kept[:ROUTINE_LINES])
+
+
+#: pourquoi une personne ne défait pas un jalon (``undoing``) : il n'est plus ouvert (atteint ou retiré, il ne bouge
+#: plus) ; sinon les codes de ``faculty.milestone_held``
+SETTLED = "settled"
+
+
+def undoing(m: Milestone, settles: bool) -> str:
+    """Pourquoi cette personne ne modifie ni ne retire ce jalon (``SETTLED``, ou un code ``HELD_…``) ; vide : elle le
+    peut. Un jalon atteint ou retiré ne bouge plus, pour personne. Un point d'arrêt, un jalon posé par une personne,
+    fixé par un plan validé ou refusé par le propriétaire (``milestone_held``, ADR 0278) ne se défait que par qui
+    tranche : le propriétaire du projet, ou qui s'occupe d'elle."""
+    if m.status != c.OPEN:
+        return SETTLED
+    return "" if settles else milestone_held(m)
 
 
 # ── Écrire : les seuls endroits qui font un brouillon ─────────────────────

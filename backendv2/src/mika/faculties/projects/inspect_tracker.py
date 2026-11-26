@@ -1,7 +1,7 @@
 """Les onglets « Tickets » et « Suivi » de la fiche d'un projet (ADR 0268), et leurs actions : le registre lu dans sa
 projection (``tracker.py``) — un tableau, un filtre par statut, le fil d'un élément ouvert —, et ce que l'opérateur y
-fait : créer ou régler une liste, ajouter un élément, ouvrir un ticket, changer un statut, noter, accepter, écarter,
-fermer ou rouvrir un ticket. Le parcours d'un ticket (ADR 0270) y ajoute le nécessaire : son étape et à qui est la
+fait : créer ou régler une liste, ajouter un élément, ouvrir un ticket, le modifier (son titre, son détail, sa sorte,
+sa priorité — ADR 0290), changer un statut, noter, accepter, écarter, fermer ou rouvrir un ticket. Le parcours d'un ticket (ADR 0270) y ajoute le nécessaire : son étape et à qui est la
 main sur sa ligne, valider ou refuser son plan, confirmer qu'elle l'écarte, et le réglage de la validation et de la
 borne des petits tickets. Le reflet en issues (ADR 0275) y ajoute, lui aussi, le nécessaire : sur un ticket, son issue
 et son lien, « Publier » et « Publier cette note » — une demande, dont l'aperçu attend dans « À valider » — ; et le
@@ -494,6 +494,43 @@ def _ticket_open(s: ProjectsState, frame: Frame, args: TicketArgs, ctx: ActionCo
                            proposed=proposed, author=c.BY_OPERATOR, by=acting_person(frame, ctx))
     return Done(drafts=(draft,), message="Ticket proposé : le propriétaire du projet l'accepte ou l'écarte."
                 if proposed else "Ticket ouvert.", guard=unchanged(p.id, LIVE))
+
+
+class TicketEditArgs(BaseModel):
+    item: Annotated[str, Knob(label="Ticket", widget="hidden")] = Field(min_length=1, max_length=tracker.KEY_MAX + 1)
+    title: Annotated[str, Knob(label="Titre", advanced=False, order=1)] = Field(min_length=1,
+                                                                               max_length=tracker.TITLE_MAX)
+    text: Annotated[str, Knob(label="Détail", widget="textarea", advanced=False, order=2)
+                    ] = Field(default="", max_length=tracker.TEXT_MAX)
+    kind: Annotated[str, Knob(label="Sorte", choices=KIND_CHOICES, advanced=False, order=3)] = c.TASK
+    priority: Annotated[str, Knob(label="Priorité", choices=PRIORITY_CHOICES, advanced=False, order=4)] = c.NORMAL
+
+
+@PROJECTS.action("ticket_modifier", title="Modifier un ticket", args=TicketEditArgs, emits=[tracker.ITEM_CHANGED],
+                 subject="project", order=68, available=can_edit, inline=True,
+                 description="Le titre, le détail, la sorte et la priorité d'un ticket. Son étape ne change pas.")
+def _ticket_edit(s: ProjectsState, frame: Frame, args: TicketEditArgs, ctx: ActionContext) -> Done:
+    p = target_project(s, ctx)
+    e = target_entry(p, ctx, tracker.TICKET_LIST, args.item)
+    item = e.item
+    title, text = args.title.strip(), args.text.strip()
+    if not title:
+        raise Refused("Le titre est vide.", {"title": "valeur requise"})
+    if args.kind not in c.TICKET_KINDS or args.priority not in c.PRIORITIES:
+        raise Refused("Sorte ou priorité inconnue.")
+    changes: dict[str, Any] = {}
+    if title != e.title.strip():
+        changes["title"] = title
+    if text and text != e.body.strip():
+        changes["text"] = text
+    if args.kind != item.kind:
+        changes["kind"] = args.kind
+    if args.priority != item.priority:
+        changes["priority"] = args.priority
+    if not changes:
+        raise Refused("Rien n'a changé.")
+    draft = tracker.changing(p, item, author=c.BY_OPERATOR, by=acting_person(frame, ctx), **changes)
+    return Done(drafts=(draft,), message=f"Ticket #{item.number} modifié.", guard=unchanged(p.id, LIVE))
 
 
 class ItemStatusArgs(BaseModel):

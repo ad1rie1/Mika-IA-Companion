@@ -6,15 +6,15 @@ titre, son texte, un commentaire), ses décisions techniques.
 de la personne, journalisée, dédoublonnée, auditée ``moi.projects.<action>``), après une garde du moteur :
 
 - **le cadre** — le modifier, ses outils, son dépôt, l'archiver, le restaurer : qui le pilote en modification **et**
-  en est le propriétaire, ou s'occupe d'elle (``managing.frames``, la règle de qui tranche). Le confier : qui s'occupe
+  en est le propriétaire, ou s'occupe d'elle (``tracker.frames``, la règle de qui tranche). Le confier : qui s'occupe
   d'elle, comme ``create_project`` en conversation. **Ce qui ouvre autre chose que le projet** — le courrier, la
   caméra, ses flux, la Forge, un service, l'accord de ce qui sort, le dépôt distant, la publication en issues — est
   réservé à qui s'occupe d'elle (ADR 0292) : la garde est dans les actions (``actions.reserved_field``), et chaque
   champ servi dit d'avance si la personne peut le changer (``can``, ``why``) ;
 - **ses objectifs, ses jalons, ses tickets, ses décisions** : qui le pilote en modification ; un point d'arrêt et un
-  jalon tenu ne se défont que par qui tranche (``managing.undoing``, ADR 0278) ;
+  jalon tenu ne se défont que par qui tranche (``milestones.undoing``, ADR 0278) ;
 - **écrire chez l'hôte sur une pull request** : qui tranche — le geste d'une personne, qui pose un fait ; l'effet part
-  après le commit du journal (``faculties/projects/managing.py``) ;
+  après le commit du journal (``faculties/projects/merge.py``) ;
 - sur l'accord du propriétaire, rien de tout cela d'ici : la demande se fait dans le chat.
 
 Les réglages d'un projet se servent en sections, tels que les actions de la console les décrivent (``kernel.forms`` :
@@ -50,10 +50,11 @@ from mika.app.domains.projects.api.reach import (
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing
 from mika.app.me.common import millis
 from mika.contracts import projects as c
-from mika.faculties.projects import managing, milestones, tracker
+from mika.faculties.projects import merge, milestones, tracker
 from mika.faculties.projects.actions import (
     KEEPER_FIELD,
     KEEPER_ONLY,
+    NOT_KEEPER,
     SERVICE_KNOB,
     TOOLS_ACTION,
     reserved_field,
@@ -68,7 +69,8 @@ from mika.faculties.projects.faculty import (
     objective_at,
 )
 from mika.faculties.projects.inspect import AUTHOR_FR, window_words
-from mika.faculties.projects.inspect_manage import HELD_WORDS, NOT_KEEPER, NOT_WRITABLE, NOT_WRITER
+from mika.faculties.projects.inspect_merge import NOT_WRITABLE, NOT_WRITER
+from mika.faculties.projects.inspect_milestones import HELD_WORDS
 from mika.kernel.clock import HOUR
 from mika.kernel.forms import describe
 from mika.runtime.operations import dynamic_fields, initial_values
@@ -397,9 +399,9 @@ def _milestone(call: Call, r: Reach) -> tuple[Objective, Any]:
     m = milestone_at(o, call.number("milestone", 0, 0))
     if m is None:
         raise missing()
-    held = managing.undoing(m, r.reader.settles)
+    held = milestones.undoing(m, r.reader.settles)
     if held:
-        raise Denied(409 if held == managing.SETTLED else 403, HELD_WORDS.get(held, HELD_WORDS["other"]))
+        raise Denied(409 if held == milestones.SETTLED else 403, HELD_WORDS.get(held, HELD_WORDS["other"]))
     return o, m
 
 
@@ -459,7 +461,7 @@ def _pull(call: Call, r: Reach) -> Objective:
     o = next((x for x in r.p.objectives if number and x.pull == number), None)
     if o is None:
         raise missing()
-    if not managing.writable(r.p, o):
+    if not merge.writable(r.p, o):
         raise Denied(409, NOT_WRITABLE)
     return o
 
@@ -469,8 +471,8 @@ async def edit_pull(call: Call) -> dict[str, Any]:
     sc, r = opened_project(call)
     o = _pull(call, r)
     got = done(await call.act("projects.pull_modifier", form(
-        fixed={"objective": str(o.id)}, title=call.arg("title", limit=managing.TITLE_MAX),
-        body=call.arg("body", limit=managing.BODY_MAX)), subject=subject_key(r)))
+        fixed={"objective": str(o.id)}, title=call.arg("title", limit=merge.TITLE_MAX),
+        body=call.arg("body", limit=merge.BODY_MAX)), subject=subject_key(r)))
     return {**got, "asked": True, "number": o.pull}
 
 
@@ -479,7 +481,7 @@ async def comment_pull(call: Call) -> dict[str, Any]:
     sc, r = opened_project(call)
     o = _pull(call, r)
     got = done(await call.act("projects.pull_commenter", form(
-        fixed={"objective": str(o.id)}, text=call.arg("text", limit=managing.COMMENT_MAX)), subject=subject_key(r)))
+        fixed={"objective": str(o.id)}, text=call.arg("text", limit=merge.COMMENT_MAX)), subject=subject_key(r)))
     return {**got, "asked": True, "number": o.pull}
 
 

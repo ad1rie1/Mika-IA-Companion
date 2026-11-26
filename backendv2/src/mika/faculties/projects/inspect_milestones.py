@@ -2,7 +2,12 @@
 (« jalons 2/4 », un point d'arrêt qui t'attend) ; dans son détail, ses jalons avec leur vérification, leur état et
 leur preuve, et ce que le propriétaire y fait : ajouter un jalon, valider ou refuser un point d'arrêt. Un constant y
 montre sa liste de passage (elle se règle par « Modifier l'objectif »). L'onglet Objectifs (``inspect.py``) appelle
-``progress`` et ``detail`` ; la refonte de l'interface des projets est un autre lot."""
+``progress`` et ``detail`` ; la refonte de l'interface des projets est un autre lot.
+
+Ses actions : ``projects.jalon_ajouter``, ``projects.jalon_trancher``, et (ADR 0290) ``projects.jalon_modifier``,
+``projects.jalon_retirer`` — un jalon encore ouvert ; un point d'arrêt et un jalon tenu (ADR 0278) seulement par qui
+tranche (``milestones.undoing``, ``tracker.frames`` ; leurs mots : ``HELD_WORDS``). La fiche dessinée et l'API par
+personne passent par elles."""
 
 from __future__ import annotations
 
@@ -13,7 +18,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field
 
 from mika.contracts import projects as c
-from mika.faculties.projects import milestones, reaching
+from mika.faculties.projects import milestones, reaching, tracker
 from mika.faculties.projects.actions import can_edit
 from mika.faculties.projects.faculty import (
     MILESTONE_ADDED,
@@ -61,6 +66,15 @@ TITLE, ROUTINE_TITLE = "Ses jalons", "À chaque passage"
 REFUSALS = {"no_text": "Un jalon a un texte.", "bad_check": "Vérification inconnue.",
             "no_command": "Une vérification par commande demande sa commande.",
             "no_item": "Une vérification par élément demande sa liste, l'élément et le statut attendu."}
+#: pourquoi un jalon ne se défait pas (``milestones.undoing``), en mots
+HELD_WORDS = {
+    milestones.SETTLED: "Ce jalon est atteint ou retiré : il ne bouge plus.",
+    "breakpoint": "C'est un point d'arrêt : seul le propriétaire du projet, ou qui s'occupe d'elle, le défait.",
+    "other": "Ce jalon a été posé par une personne : seul le propriétaire du projet, ou qui s'occupe d'elle, le "
+             "défait.",
+    "agreed": "Ce jalon vient d'un plan validé : seul le propriétaire du projet, ou qui s'occupe d'elle, le défait.",
+    "refused": "Le propriétaire a refusé ce jalon : lui seul, ou qui s'occupe d'elle, le défait.",
+}
 
 
 def refs(objectives: Iterable[Objective]) -> list[str]:
@@ -205,3 +219,75 @@ def _settle(s: ProjectsState, frame: Frame, args: SettleArgs, ctx: ActionContext
     said = "validé : elle reprend" if args.verdict == reaching.VALIDATE else "refusé : il lui revient"
     return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} {said}.",
                 guard=unchanged(p.id, LIVE))
+
+
+# ── Le modifier, le retirer ───────────────────────────────────────────────
+
+
+class MilestoneEditArgs(BaseModel):
+    objective: Annotated[str, Knob(label="Objectif", widget="hidden")] = Field(min_length=1, max_length=12)
+    milestone: Annotated[str, Knob(label="Jalon", widget="hidden")] = Field(min_length=1, max_length=12)
+    text: Annotated[str, Knob(label="Jalon", widget="textarea", advanced=False, order=1)
+                    ] = Field(min_length=1, max_length=milestones.TEXT_MAX)
+    check: Annotated[str, Knob(label="Vérifié par", advanced=False, order=2)] = c.CHECK_PROSE
+    command: Annotated[str, Knob(label="Sa commande", advanced=False, order=3)] = Field(default="", max_length=2000)
+    item_list: Annotated[str, Knob(label="Liste de l'élément", advanced=False, order=4)] = Field(default="",
+                                                                                               max_length=40)
+    item: Annotated[str, Knob(label="Élément", advanced=False, order=5)] = Field(default="", max_length=61)
+    item_status: Annotated[str, Knob(label="Statut attendu", advanced=False, order=6)] = Field(default="",
+                                                                                               max_length=24)
+    reason: Annotated[str, Knob(label="Pourquoi", widget="textarea", advanced=False, order=7,
+                                help="Facultatif : gardé avec le jalon, elle le lira.")
+                      ] = Field(default="", max_length=milestones.REASON_MAX)
+
+
+def _milestone(s: ProjectsState, frame: Frame, ctx: ActionContext, objective: str, milestone: str) -> tuple[Any, ...]:
+    """Le jalon visé, s'il peut encore être défait par qui agit (``milestones.undoing``)."""
+    p = target_project(s, ctx)
+    o = target_objective(p, objective)
+    m = milestone_at(o, milestone)
+    if m is None:
+        raise Refused(f"Aucun jalon n° {milestone[:12]} sur cet objectif.")
+    person = acting_person(frame, ctx)
+    if why := milestones.undoing(m, tracker.frames(frame, p, person)):
+        raise Refused(HELD_WORDS.get(why, HELD_WORDS["other"]))
+    return p, o, m, person
+
+
+@PROJECTS.action("jalon_modifier", title="Modifier un jalon", args=MilestoneEditArgs, emits=[MILESTONE_CHANGED],
+                 subject="project", order=35, available=can_edit, inline=True,
+                 description="Le texte d'un jalon encore ouvert, et comment on le vérifie.")
+def _milestone_edit(s: ProjectsState, frame: Frame, args: MilestoneEditArgs, ctx: ActionContext) -> Done:
+    p, o, m, person = _milestone(s, frame, ctx, args.objective, args.milestone)
+    try:
+        argv = tuple(shlex.split(args.command))
+    except ValueError as exc:
+        raise Refused("Cette commande ne se lit pas (un guillemet n'est pas fermé).",
+                      {"command": "commande illisible"}) from exc
+    spec = milestones.Spec(args.text, args.check, argv, args.item_list, args.item, args.item_status)
+    if why := milestones.problem(spec):
+        field = {"no_command": "command", "no_item": "item", "bad_check": "check"}.get(why, "text")
+        raise Refused(REFUSALS[why], {field: "valeur requise"})
+    draft = milestones.changing(p, o.id, m, level=written_for(p, o), inherited=inherited_for(p, o),
+                                author="operator", by=person, spec=spec, reason=args.reason)
+    return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} modifié.",
+                guard=unchanged(p.id, LIVE))
+
+
+class MilestoneDropArgs(BaseModel):
+    objective: Annotated[str, Knob(label="Objectif", widget="hidden")] = Field(min_length=1, max_length=12)
+    milestone: Annotated[str, Knob(label="Jalon", widget="hidden")] = Field(min_length=1, max_length=12)
+    reason: Annotated[str, Knob(label="Pourquoi", widget="textarea", advanced=False, order=1,
+                                help="Facultatif : gardé avec le jalon retiré.")
+                      ] = Field(default="", max_length=milestones.REASON_MAX)
+
+
+@PROJECTS.action("jalon_retirer", title="Retirer un jalon", args=MilestoneDropArgs, emits=[MILESTONE_CHANGED],
+                 subject="project", order=36, available=can_edit, inline=True, danger=True,
+                 description="Un jalon encore ouvert n'a plus lieu d'être : « fait » ne l'attendra plus. Il reste "
+                             "lisible, retiré.")
+def _milestone_drop(s: ProjectsState, frame: Frame, args: MilestoneDropArgs, ctx: ActionContext) -> Done:
+    p, o, m, person = _milestone(s, frame, ctx, args.objective, args.milestone)
+    draft = milestones.changing(p, o.id, m, level=written_for(p, o), inherited=inherited_for(p, o),
+                                author="operator", by=person, status=c.DROPPED, reason=args.reason)
+    return Done(drafts=(draft,), message=f"Jalon n° {m.id} de l'objectif n° {o.id} retiré.", guard=unchanged(p.id, LIVE))

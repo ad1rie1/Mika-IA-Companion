@@ -1,16 +1,18 @@
-"""Fusionner une pull request depuis la console ou l'espace d'une personne (ADR 0288) : l'action
-``projects.fusionner``, et ce qu'elle dit. Des textes de console et d'écran, lus par qui décide — pas des phrases
-qu'elle lit. La règle, le fait et l'effet qui part chez l'hôte sont dans ``merge.py``.
+"""Ce qu'une personne fait d'une pull request chez l'hôte, depuis la console ou son espace : la fusionner (l'action
+``projects.fusionner``, ADR 0288), la modifier ou y répondre (``projects.pull_modifier``, ``projects.pull_commenter``,
+ADR 0290), et ce que ces actions disent. Des textes de console et d'écran, lus par qui décide — pas des phrases
+qu'elle lit. Les règles, les faits et les effets qui partent chez l'hôte sont dans ``merge.py``.
 
-**Qui** : le propriétaire du projet, ou qui s'occupe d'elle (``tracker.settles``) — un opérateur qui n'est ni l'un ni
-l'autre ne fusionne pas. **Quoi** : la pull request ouverte d'un objectif, au commit que la personne a vu
-(``head``) ; si sa branche a bougé depuis, dans l'atelier ou chez l'hôte, la fusion se refuse.
+**Qui** : le propriétaire du projet, ou qui s'occupe d'elle (``tracker.settles`` ; ``tracker.frames`` pour écrire) —
+un opérateur qui n'est ni l'un ni l'autre ne fusionne pas, n'écrit pas. **Quoi** : la pull request ouverte d'un
+objectif — pour la fusionner, au commit que la personne a vu (``head``) ; si sa branche a bougé depuis, dans l'atelier
+ou chez l'hôte, la fusion se refuse ; pour y écrire, numéro connu (``merge.writable``).
 """
 
 from __future__ import annotations
 
 import re
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -84,6 +86,19 @@ CHECKS_SILENT = "L'hôte ne dit pas où en sont les vérifications de ce commit 
 ASKED = "Fusion demandée chez l'hôte, à ton nom : la pull request se relit dans un instant."
 CONFIRM = ("Fusionner cette pull request dans la branche de base du dépôt distant ? C'est ton geste, chez l'hôte : "
            "il ne se défait pas d'ici.")
+NOT_WRITER = ("Seul le propriétaire du projet, ou qui s'occupe d'elle, écrit chez l'hôte sur une pull request : elle, "
+              "jamais.")
+NOT_WRITABLE = "Cet objectif n'a pas de pull request ouverte chez l'hôte."
+#: pourquoi ce qu'une personne a écrit sur une pull request n'est pas parti (``PullWriteAnswered.why``)
+WRITE_WORDS = {
+    merge.STALE: "la pull request avait changé entre-temps",
+    merge.NO_HOST: "aucun hôte ne sait l'écrire sur ce dépôt",
+    merge.FORGOTTEN: "son texte ne se lit plus",
+    merge.REFUSED: "l'hôte a refusé, ou n'a pas répondu",
+    merge.CUT: "la demande a été interrompue — relis la pull request chez l'hôte",
+}
+EDIT_ASKED = "Modification demandée chez l'hôte, à ton nom : la pull request se relit dans un instant."
+COMMENT_ASKED = "Commentaire demandé chez l'hôte : il part du compte du jeton, et dit qu'il est de toi."
 
 
 class MergeArgs(BaseModel):
@@ -139,3 +154,57 @@ async def _fuse(s: ProjectsState, frame: Frame, args: MergeArgs, ctx: ActionCont
             raise Refused(BLOCK_WORDS[held])
     return Done(drafts=(merge.asking(p, o, args.head, person),), message=ASKED,
                 guard=unchanged(p.id, LIVE) & merge.alone(p.id, o.id))
+
+
+# ── Écrire chez l'hôte sur une pull request ───────────────────────────────
+
+
+def _pull(s: ProjectsState, frame: Frame, ctx: ActionContext, objective: str) -> tuple[Any, ...]:
+    """La pull request ouverte d'un objectif, pour qui a le droit d'y écrire : le propriétaire du projet, ou qui
+    s'occupe d'elle."""
+    p = target_project(s, ctx)
+    o = target_objective(p, objective)
+    person = acting_person(frame, ctx)
+    if not tracker.frames(frame, p, person):
+        raise Refused(NOT_WRITER)
+    if not merge.writable(p, o):
+        raise Refused(NOT_WRITABLE)
+    return p, o, person
+
+
+class PullEditArgs(BaseModel):
+    objective: Annotated[str, Knob(label="Objectif", widget="hidden")] = Field(min_length=1, max_length=12)
+    title: Annotated[str, Knob(label="Son titre", advanced=False, order=1)
+                     ] = Field(default="", max_length=merge.TITLE_MAX)
+    body: Annotated[str, Knob(label="Son texte", widget="textarea", advanced=False, order=2)
+                    ] = Field(default="", max_length=merge.BODY_MAX)
+
+
+@PROJECTS.action("pull_modifier", title="Modifier la pull request", args=PullEditArgs,
+                 emits=[merge.PULL_WRITE_ASKED], subject="project", order=69, available=can_edit, inline=True,
+                 description="Le titre et le texte d'une pull request, chez l'hôte. Ton geste : elle n'y écrit pas "
+                             "ainsi. Un champ laissé vide ne change pas.")
+def _pull_edit(s: ProjectsState, frame: Frame, args: PullEditArgs, ctx: ActionContext) -> Done:
+    p, o, person = _pull(s, frame, ctx, args.objective)
+    if not args.title.strip() and not args.body.strip():
+        raise Refused("Dis ce qui change : son titre, son texte, ou les deux.", {"title": "valeur requise"})
+    draft = merge.writing(p, o, person, title=args.title, body=args.body)
+    return Done(drafts=(draft,), message=EDIT_ASKED, guard=unchanged(p.id, LIVE))
+
+
+class PullCommentArgs(BaseModel):
+    objective: Annotated[str, Knob(label="Objectif", widget="hidden")] = Field(min_length=1, max_length=12)
+    text: Annotated[str, Knob(label="Ton commentaire", widget="textarea", advanced=False, order=1)
+                    ] = Field(min_length=1, max_length=merge.COMMENT_MAX)
+
+
+@PROJECTS.action("pull_commenter", title="Répondre dans la pull request", args=PullCommentArgs,
+                 emits=[merge.PULL_WRITE_ASKED], subject="project", order=70, available=can_edit, inline=True,
+                 description="Un commentaire sur une pull request, chez l'hôte : il part du compte du jeton, et son "
+                             "texte dit qu'il est de toi.")
+def _pull_comment(s: ProjectsState, frame: Frame, args: PullCommentArgs, ctx: ActionContext) -> Done:
+    p, o, person = _pull(s, frame, ctx, args.objective)
+    if not args.text.strip():
+        raise Refused("Le commentaire est vide.", {"text": "valeur requise"})
+    draft = merge.writing(p, o, person, comment=args.text)
+    return Done(drafts=(draft,), message=COMMENT_ASKED, guard=unchanged(p.id, LIVE))

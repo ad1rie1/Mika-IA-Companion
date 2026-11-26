@@ -18,10 +18,10 @@ from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from mika.contracts import projects as c
+from mika.faculties.projects import decisions, merge, tracker
 from mika.faculties.projects import faculty as f
-from mika.faculties.projects import managing, tracker
 from mika.faculties.projects.inspect import CHECKS_FR, PULL_FR, VERDICT_FR
-from mika.faculties.projects.inspect_manage import WRITE_WORDS
+from mika.faculties.projects.inspect_merge import WRITE_WORDS
 from mika.ports.workshop import CHECKS_FAILED, CHECKS_PASSED
 
 # ── Les sortes du fil ─────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ PULLS = (f.PULL_SEEN, f.CHECKS_SEEN, "projects.merge_asked", "projects.merge_ans
 TICKETS = tracker.MOVES
 GESTURES = (f.REFRAMED, f.PAUSED, f.RESUMED, f.ARCHIVED, f.RESTORED, f.NUDGED, f.OBJECTIVE_ADDED,
             f.OBJECTIVE_CHANGED, f.MILESTONE_ADDED, f.MILESTONE_CHANGED, f.DECIDED, f.DECISION_CHANGED,
-            managing.DECISION_REVISED, f.AMENDED, f.PLAN_ANSWERED, f.LINKS_SET, f.DEPOSITED)
+            decisions.DECISION_REVISED, f.AMENDED, f.PLAN_ANSWERED, f.LINKS_SET, f.DEPOSITED)
 ALL = (*RUNS, *PULLS, *TICKETS, *GESTURES)
 #: ce qu'un filtre par sorte lit du journal : un geste peut porter sur tout sauf une exécution
 READS = {RUN: RUNS, COMMIT: RUNS, PULL: PULLS, TICKET: TICKETS, GESTURE: (*PULLS, *TICKETS, *GESTURES)}
@@ -56,7 +56,7 @@ TICKET_MOVES = (("accepted", "accepté"), ("validated", "son plan validé"), ("r
                 ("taken", "pris"), ("dismissal", "elle propose de l'écarter"))
 CLOSED_WORDS = {c.DONE: "fermé comme traité", c.DROPPED: "écarté", "": "rouvert"}
 NOTE_WORDS = {c.NOTE_QUESTION: "sa question", c.NOTE_PLAN: "son plan"}
-WRITE_KINDS = {managing.EDIT: "Titre et texte de la pull request n° {n}", managing.COMMENT: "Commentaire sur la "
+WRITE_KINDS = {merge.EDIT: "Titre et texte de la pull request n° {n}", merge.COMMENT: "Commentaire sur la "
                "pull request n° {n}"}
 #: les gestes qui portent sur une décision : leur numéro se lit dans leur fait (la console y mène)
 DECISION_FACTS = ("decided", "decision_changed", "decision_revised")

@@ -19,8 +19,8 @@ dans le journal, pas dans un fichier qu'elle penserait à relire :
   second changement parti du même statut le trouve alors changé).
 - **Qui le lit** : ce que chacun en lit (``Reader``, ``veiled``), devant qui ses outils de conversation sont offerts
   (``may_read``), si le détail d'un projet s'entend ici (``hears``), ce que la personne en face peut en lire
-  (``reader_of``) et qui tranche ses tickets (``settles``) — des règles de droits, que la console, l'API, le prompt et
-  les jalons lisent aussi.
+  (``reader_of``), qui tranche ses tickets (``settles``) et qui change le cadre d'un projet (``frames``, la même
+  règle) — des règles de droits, que la console, l'API, le prompt et les jalons lisent aussi.
 - **Ses outils** (en exécution ``items_add``, ``items_change``, ``items_note``, ``items_list`` ; en conversation
   ``project_items`` et ``project_item``) sont dans ``tracker_tools.py``.
 
@@ -1167,6 +1167,13 @@ def settles(frame: Frame, p: Project, person: str) -> bool:
     """Qui accepte ou écarte un ticket, valide ou refuse son plan : le propriétaire du projet, ou qui s'occupe
     d'elle."""
     return bool(person) and (person == p.owner or bool(frame.get(identity_c.IS_OWNER(person))))
+
+
+def frames(frame: Frame, p: Project, person: str) -> bool:
+    """Qui change le cadre d'un projet — son titre, son mode, son rythme, ce qui sort, ses outils, son dépôt,
+    l'archiver, le restaurer : son propriétaire (la personne pour qui il est fait), ou qui s'occupe d'elle. La règle de
+    qui tranche (``tracker.settles``) : piloter un projet ne suffit pas."""
+    return settles(frame, p, person)
 
 
 def veiled(reader: Reader, item: Item) -> str:

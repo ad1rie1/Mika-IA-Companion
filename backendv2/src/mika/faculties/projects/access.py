@@ -5,6 +5,11 @@ plafond de qui est en face (``vocab.rights.project_allowance``).
 ``allowance`` : ce qu'il laisse à qui est en face, à ce moment — le voir, le piloter, ses fichiers ; pour un outil
 d'une de ses apps, la première ligne qui le concerne aussi (sa colonne « Outils »). Sa fiche (l'onglet « Accès »,
 l'action ``projects.acces``) et la page « Droits » : ``inspect_access``.
+
+**Ce que le cadre d'un projet réserve à qui s'occupe d'elle** (ADR 0292) : ``keeps`` dit si une personne est l'une de
+ses propriétaires, ``beyond`` si un lot ouvre autre chose que le projet lui-même (tout lot hors du socle et de
+``OWN_BUNDLES``). Les actions (``actions.reserved_field``) et l'API par personne s'en gardent. Qui change ce cadre :
+``tracker.frames``, la règle de qui tranche.
 """
 
 from __future__ import annotations
@@ -14,13 +19,13 @@ from typing import Any
 
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
-from mika.faculties.projects.faculty import Project, access_of
+from mika.faculties.projects.faculty import BASE_BUNDLES, WEB, Project, access_of
 from mika.kernel.frame import Frame
 from mika.vocab.access import AT_OWNER, STEER_WORDS, situation, who_words
 from mika.vocab.rights import ProjectAllowance, Rights, closeness_of, project_allowance, rights_of
 
-__all__ = ["STEER_WORDS", "allowance", "lines", "of_frame", "reads", "sees", "shares_docs", "shares_files", "steering",
-           "who_named"]
+__all__ = ["OWN_BUNDLES", "STEER_WORDS", "allowance", "beyond", "keeps", "lines", "of_frame", "reads", "sees",
+           "shares_docs", "shares_files", "steering", "who_named"]
 
 
 def lines(p: Project | c.ProjectView) -> tuple[tuple[c.ProjectAccess, ...], c.ProjectAccess]:
@@ -93,3 +98,23 @@ def who_named(frame: Frame | None, who: str | Sequence[str]) -> str:
         return (identity_c.person_name(frame, person) if frame is not None else "") or person
 
     return who_words(who, name)
+
+
+# ── Ce que le cadre d'un projet réserve à qui s'occupe d'elle (ADR 0292) ───
+
+#: les lots que le propriétaire d'un projet lui donne lui-même : sa mémoire et le web. Tout autre — le courrier, la
+#: caméra, ses flux, la Forge, ses apps, un service branché — ouvre autre chose que le projet : ce que le code réserve
+#: à sa propriétaire (ADR 0104, 0133), et qu'un projet n'a en main que s'il a pris le lot
+OWN_BUNDLES = ("memory", WEB)
+
+
+def keeps(frame: Frame, person: str) -> bool:
+    """Cette personne s'occupe-t-elle d'elle (l'une de ses propriétaires) ? Être le propriétaire d'un projet n'y
+    suffit pas."""
+    return bool(person) and bool(frame.get(identity_c.IS_OWNER(person)))
+
+
+def beyond(bundle: str) -> bool:
+    """Ce lot ouvre-t-il autre chose que le projet lui-même ? Seul qui s'occupe d'elle le donne ou le retire : le
+    propriétaire d'un projet qui ne s'occupe pas d'elle ne se donne ni son courrier, ni sa caméra, ni ses services."""
+    return bundle not in BASE_BUNDLES and bundle not in OWN_BUNDLES

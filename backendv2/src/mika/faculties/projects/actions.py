@@ -13,6 +13,14 @@ ressent : un objectif coché par l'opérateur ne la rend pas fière.
 
 Sur un projet qu'elle a ouvert d'elle-même, on pilote sans réécrire : ni son
 titre, ni sa description.
+
+Depuis l'espace d'une personne (ADR 0290), deux gestes de plus : **confier** un
+projet (``projects.projet_confier`` : il naît à cadrer, avec les mots de qui le
+demande, comme ``create_project`` en conversation — pour qui s'occupe d'elle
+seulement), et **modifier** les textes d'une décision technique qui n'est pas
+remplacée (``projects.decision_modifier`` ; le fait et son réducteur sont dans
+``decisions.py``). Ce que le cadre réserve à qui s'occupe d'elle
+(``reserved_field``, ADR 0292) lit ``access.keeps`` et ``access.beyond``.
 """
 
 from __future__ import annotations
@@ -28,7 +36,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import mcp as mcp_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import asks, links, managing, triggers
+from mika.faculties.projects import access, asks, decisions, links, triggers
 from mika.faculties.projects.faculty import (
     AMENDED,
     APPROVE,
@@ -75,6 +83,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_common import (
     LIVE,
+    acting_person,
     operator_person,
     target_objective,
     target_project,
@@ -236,7 +245,7 @@ def services_here(frame: Frame) -> dict[str, str]:
 
 #: les champs du cadre d'un projet qui ouvrent autre chose que le projet lui-même, par action : pour qui il est et
 #: l'accord de ce qui sort ; son dépôt distant en entier (son adresse, sa branche, l'envoi automatique, son flux) ; la
-#: publication de ses tickets en issues. Les cases de ses outils se jugent lot par lot (``managing.beyond``)
+#: publication de ses tickets en issues. Les cases de ses outils se jugent lot par lot (``access.beyond``)
 RESERVED_FIELDS: Mapping[str, tuple[str, ...]] = {
     "projects.modifier": ("owner", "approval"),
     "projects.depot_distant": ("remote", "branch", "auto_push", "flow"),
@@ -252,13 +261,13 @@ def reserved_field(action: str, name: str) -> bool:
     """Ce champ du cadre d'un projet est-il réservé à qui s'occupe d'elle ? La règle que les actions appliquent, et
     que l'API de la personne lit pour dire d'avance, champ par champ, ce qu'elle peut changer."""
     if action == TOOLS_ACTION:
-        return name.startswith(SERVICE_KNOB) or name in {knob_of(b) for b in EXTRA_BUNDLES if managing.beyond(b)}
+        return name.startswith(SERVICE_KNOB) or name in {knob_of(b) for b in EXTRA_BUNDLES if access.beyond(b)}
     return name in RESERVED_FIELDS.get(action, ())
 
 
 def keeper_acts(frame: Frame, ctx: ActionContext) -> bool:
     """La personne qui agit s'occupe-t-elle d'elle ?"""
-    return managing.keeps(frame, operator_person(frame, ctx))
+    return access.keeps(frame, operator_person(frame, ctx))
 
 
 def refuse_reserved(frame: Frame, ctx: ActionContext, action: str, changed: Iterable[str]) -> None:
@@ -437,6 +446,58 @@ def _create(s: ProjectsState, frame: Frame, args: CreateArgs, ctx: ActionContext
 
     return Done(drafts=(draft,), then=objectives, go_created="project",
                 message="Projet créé : elle y travaillera par exécutions, objectif par objectif.")
+
+
+# ── Confier un projet ─────────────────────────────────────────────────────
+
+NOT_KEEPER = "Seul qui s'occupe d'elle lui confie un projet d'ici."
+ENTRUSTED = "Projet confié : elle relit ta demande, pose ses questions, puis te propose un plan."
+
+
+class EntrustArgs(BaseModel):
+    title: Annotated[str, Knob(label="Son nom", advanced=False, order=1)] = Field(min_length=1, max_length=200)
+    request: Annotated[str, Knob(label="Ce que tu veux", widget="textarea", advanced=False, order=2,
+                                 help="Dis-le comme tu le dirais à quelqu'un : elle garde tes mots tels quels.")
+                       ] = Field(default="", max_length=2000)
+    mode: Annotated[str, Knob(label="Mode de travail", choices=MODE_CHOICES, advanced=False, order=3)] = c.PERSONA
+    schedule: Annotated[str, Knob(label="Agenda", choices=SCHEDULE_CHOICES, advanced=False, order=4)
+                        ] = Field(default=ASAP, max_length=120)
+    schedule_rule: Annotated[str, Knob(label="Sa règle", advanced=False, order=5,
+                                       only=(("schedule", (OTHER_RULE,)),))] = Field(default="", max_length=120)
+
+
+@PROJECTS.action("projet_confier", title="Confier un projet", args=EntrustArgs,
+                 emits=[c.PROJECT_CREATED, OBJECTIVE_ADDED], order=11,
+                 description="Un projet demandé en quelques mots : il naît à cadrer — elle relit la demande, pose ses "
+                             "questions et propose un plan avant de s'y mettre.")
+def _entrust(s: ProjectsState, frame: Frame, args: EntrustArgs, ctx: ActionContext) -> Done:
+    person = acting_person(frame, ctx)
+    if not person or not frame.get(identity_c.IS_OWNER(person)):
+        raise Refused(NOT_KEEPER)
+    errors: dict[str, str] = {}
+    title = args.title.strip()
+    if not title:
+        errors["title"] = "valeur requise"
+    if args.mode not in c.MODES:
+        errors["mode"] = "mode inconnu"
+    other = args.schedule.strip() == OTHER_RULE
+    where, rule = ("schedule_rule", args.schedule_rule.strip()) if other else ("schedule", args.schedule.strip())
+    try:
+        rule = check_schedule(rule or ASAP)
+    except ValueError as exc:
+        errors[where] = f"règle refusée : {exc}"
+    if errors:
+        raise Refused("Le projet n'a pas été confié : vérifie le formulaire.", errors)
+    level, about = int(Sensitivity.PERSONAL), (person,)
+    draft = opened(title=title, description="", authority=c.USER, mode=args.mode, owner=person, address=ctx.by or None,
+                   about=about, level=level, source="space", schedule_rule=rule, request=args.request.strip() or title,
+                   asked_by=person, framing=True)
+
+    def objectives(seqs: tuple[int, ...]) -> list[Any]:
+        """Une idée de départ, que son plan gardera, réécrira ou retirera (ADR 0145)."""
+        return objectives_of(seqs[0], [title], [], author="owner", by=ctx.by, owner=person, about=about, level=level)
+
+    return Done(drafts=(draft,), then=objectives, message=ENTRUSTED)
 
 
 # ── Modifier ──────────────────────────────────────────────────────────────
@@ -1329,6 +1390,54 @@ def _decision_status(s: ProjectsState, frame: Frame, args: DecisionStatusArgs, c
     return Done(drafts=(DECISION_CHANGED.draft(project=p.id, decision=d.id, status=args.status, by=ctx.by,
                                                owner=p.owner, about=p.about),),
                 message=f"Décision n° {d.id} {DECISION_STATUS_FR[args.status]}.", guard=unchanged(p.id, LIVE))
+
+
+class DecisionEditArgs(BaseModel):
+    decision: Annotated[str, Knob(label="Décision", widget="hidden")] = Field(min_length=1, max_length=12)
+    title: Annotated[str, Knob(label="La question tranchée", advanced=False, order=1)
+                     ] = Field(min_length=1, max_length=200)
+    choice: Annotated[str, Knob(label="Ce qui est choisi", widget="textarea", advanced=False, order=2)
+                      ] = Field(min_length=1, max_length=1500)
+    reason: Annotated[str, Knob(label="Pourquoi", widget="textarea", advanced=False, order=3)
+                      ] = Field(default="", max_length=1500)
+    context: Annotated[str, Knob(label="Le contexte", widget="textarea", order=4)] = Field(default="",
+                                                                                         max_length=2000)
+    options: Annotated[str, Knob(label="Les options envisagées", widget="textarea", order=5)
+                       ] = Field(default="", max_length=2000)
+
+
+@PROJECTS.action("decision_modifier", title="Modifier une décision", args=DecisionEditArgs,
+                 emits=[decisions.DECISION_REVISED], subject="project", order=42, available=can_edit, inline=True,
+                 description="Les textes d'une décision technique. Pour revenir sur ce qu'elle choisit, remplace-la "
+                             "plutôt : l'ancienne reste lisible.")
+def _decision_edit(s: ProjectsState, frame: Frame, args: DecisionEditArgs, ctx: ActionContext) -> Done:
+    p = target_project(s, ctx)
+    d = decision_at(p, args.decision)
+    if d is None:
+        raise Refused(f"Aucune décision n° {args.decision[:12]}.")
+    if d.status == c.SUPERSEDED:
+        raise Refused(f"La décision n° {d.id} a été remplacée (par D{d.replaced_by}) : c'est celle-là qu'on change.")
+    store = (ctx.ports or {}).get("store")
+    refs = {"title": d.title_ref, "choice": d.choice_ref, "context": d.context_ref, "options": d.options_ref,
+            "reason": d.reason_ref}
+    texts = store.content([r for r in refs.values() if r]) if store is not None else {}
+    level = p.sensitivity
+    changes: dict[str, Any] = {}
+    cleared: list[str] = []
+    for name, ref in refs.items():
+        new, old = getattr(args, name).strip(), texts.get(ref, "").strip()
+        if new == old:
+            continue
+        if new:
+            changes[name] = Content.of(new, level=level)
+        elif name in decisions.OPTIONAL and ref:
+            cleared.append(name)
+    if not changes and not cleared:
+        raise Refused("Rien n'a changé.")
+    draft = decisions.DECISION_REVISED.draft(project=p.id, decision=d.id, cleared=tuple(cleared),
+                                             by=acting_person(frame, ctx), owner=p.owner, about=p.about,
+                                             read_about=p.read_about, **changes)
+    return Done(drafts=(draft,), message=f"Décision n° {d.id} modifiée.", guard=unchanged(p.id, LIVE))
 
 
 # ── Déposer un fichier ────────────────────────────────────────────────────

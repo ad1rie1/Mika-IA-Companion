@@ -62,7 +62,7 @@ from mika.faculties.projects.inspect_common import FORGOTTEN
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS, MOVED_THERE, REFUSED_WORDS
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
 from mika.faculties.projects.issues import issue_ticket
-from mika.faculties.projects.managing import writable
+from mika.faculties.projects.merge import writable
 from mika.faculties.projects.pulls import pull_named, pull_order, pull_stage
 from mika.faculties.projects.tracker import status_words
 from mika.inspector import render

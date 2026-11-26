@@ -16,7 +16,7 @@ import pytest
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects import inspect_code, inspect_merge, managing, merge, tracker
+from mika.faculties.projects import inspect_code, inspect_merge, merge, tracker
 from mika.faculties.projects.faculty import CHECKS_SEEN, MERGE_ASKED, PULL_REQUEST_CAPABILITY
 from mika.kernel.events import Content
 from mika.ports.workshop import (
@@ -188,7 +188,7 @@ def test_a_pull_request_is_edited_and_answered_from_its_page(repo):
     assert _post(r, form, "projects.pull_modifier", title="Un meilleur titre", body="").status_code == 303
     reply = form_of(page, "projects.pull_commenter")
     assert _post(r, reply, "projects.pull_commenter", text="Merci, je regarde.").status_code == 303
-    written = journal(r.live, managing.PULL_WRITE_ASKED)
+    written = journal(r.live, merge.PULL_WRITE_ASKED)
     assert len(written) == 2 and {e.data.number for e in written} == {12}
 
 

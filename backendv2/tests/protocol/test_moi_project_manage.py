@@ -23,7 +23,7 @@ from pathlib import Path
 from mika.app.domains.projects.api import manage, reach
 from mika.app.me.api import form as api_form
 from mika.contracts import projects as c
-from mika.faculties.projects import actions, inspect_manage, managing
+from mika.faculties.projects import access, actions, inspect_merge, inspect_milestones, merge, milestones
 from mika.faculties.projects.faculty import ACCESS_SET, EXTRA_BUNDLES, MILESTONE_CHANGED, REFRAMED, Milestone
 from mika.ports.workshop import Pull, Remark
 from mika.runtime.operations import perform
@@ -89,9 +89,9 @@ def test_the_keeper_entrusts_a_project_that_is_born_to_frame(world):  # noqa: F8
     # une personne qui ne s'occupe pas d'elle ne lui confie rien d'ici, et l'écran le sait d'avance
     _lea(client, live)
     login(client, "lea")
-    assert _get(client, "/nouveau")["can"] is False and _get(client, "/nouveau")["why"] == inspect_manage.NOT_KEEPER
+    assert _get(client, "/nouveau")["can"] is False and _get(client, "/nouveau")["why"] == actions.NOT_KEEPER
     refused = post(client, "/projets/nouveau/creer", {"title": "Le mien"})
-    assert refused.status_code == 403 and refused.json()["error"] == inspect_manage.NOT_KEEPER
+    assert refused.status_code == 403 and refused.json()["error"] == actions.NOT_KEEPER
 
 
 def test_its_settings_come_in_sections_with_their_words_and_are_changed_field_by_field(world):  # noqa: F811
@@ -224,7 +224,7 @@ def test_the_owner_of_a_project_who_does_not_keep_her_gets_nothing_beyond_the_pr
     live.kernel.registry.bundles["mcp.meteo"] = "Le temps qu'il fait, par ville"  # un service branché sur l'instance
     _hers(client, live, pid, lea)
     before, reframed = _frame_of(live, pid), len(journal(live, REFRAMED))
-    assert before[0] == lea and not managing.keeps(live.kernel.mind.frame(), lea)
+    assert before[0] == lea and not access.keeps(live.kernel.mind.frame(), lea)
     login(client, "lea")
     rights = _get(client, f"/{pid}")["rights"]
     assert rights["frame"] and rights["settle"] and _get(client, f"/{pid}")["project"]["mine"]
@@ -273,7 +273,7 @@ def test_the_owner_of_a_project_who_does_not_keep_her_gets_nothing_beyond_the_pr
     _ok(client, pid, "reglages/enregistrer", {"section": "outils", "values": {"tool_web": False}})
     p = _project(live, pid)
     assert (p.owner, p.runs_per_day, p.reread, p.approval) == (lea, 3, c.REREAD_EACH, True)
-    assert "mcp.web" not in p.bundles and not [b for b in p.bundles if managing.beyond(b)]
+    assert "mcp.web" not in p.bundles and not [b for b in p.bundles if access.beyond(b)]
     # qui s'occupe d'elle, lui, donne ce qui est réservé — et voit le service branché
     login(client, "adrien")
     theirs = {f["name"]: f for sec in _get(client, f"/{pid}/reglages")["sections"] for f in sec["fields"]}
@@ -292,8 +292,8 @@ def test_the_owner_of_a_project_who_does_not_keep_her_gets_nothing_beyond_the_pr
 
 
 def test_the_rule_of_what_a_frame_reserves_is_pure():
-    assert [b for b in EXTRA_BUNDLES if not managing.beyond(b)] == list(managing.OWN_BUNDLES) == ["memory", "mcp.web"]
-    assert managing.beyond("mcp.meteo") and not managing.beyond("projects") and not managing.beyond("workshop")
+    assert [b for b in EXTRA_BUNDLES if not access.beyond(b)] == list(access.OWN_BUNDLES) == ["memory", "mcp.web"]
+    assert access.beyond("mcp.meteo") and not access.beyond("projects") and not access.beyond("workshop")
     held = {"projects.outils": ["tool_email", "tool_rss", "tool_forge", "tool_forge_apps", "tool_camera",
                                 "service_meteo"],
             "projects.modifier": ["owner", "approval"], "projects.depot_distant": ["remote", "branch", "auto_push",
@@ -430,8 +430,8 @@ def test_milestones_are_added_changed_and_dropped_and_a_checkpoint_is_not_undone
     # **un point d'arrêt et un jalon posé par le propriétaire ne se défont pas** par qui pilote sans l'être
     login(client, "lea")
     seen = _objective(client, pid, oid)["milestones"]
-    assert not seen[1]["can"]["drop"] and seen[1]["can"]["why"] == inspect_manage.HELD_WORDS["breakpoint"]
-    assert not seen[0]["can"]["modify"] and seen[0]["can"]["why"] == inspect_manage.HELD_WORDS["other"]
+    assert not seen[1]["can"]["drop"] and seen[1]["can"]["why"] == inspect_milestones.HELD_WORDS["breakpoint"]
+    assert not seen[0]["can"]["modify"] and seen[0]["can"]["why"] == inspect_milestones.HELD_WORDS["other"]
     for route, body in (("jalon/retirer", {"milestone": stop["id"]}),
                         ("jalon/modifier", {"milestone": stop["id"], "check": "prose"}),
                         ("jalon/retirer", {"milestone": first["id"]})):
@@ -448,7 +448,7 @@ def test_milestones_are_added_changed_and_dropped_and_a_checkpoint_is_not_undone
                                                   about=p.about)], "projects")
     reached = _objective(client, pid, oid)["milestones"][0]
     assert reached["status"] == "reached" and not reached["can"]["modify"]
-    assert reached["can"]["why"] == inspect_manage.HELD_WORDS[managing.SETTLED]
+    assert reached["can"]["why"] == inspect_milestones.HELD_WORDS[milestones.SETTLED]
     assert _post(client, pid, "jalon/retirer", {"objective": oid, "milestone": first["id"]}).status_code == 409
     # le propriétaire retire le point d'arrêt : il reste lisible, retiré
     _ok(client, pid, "jalon/retirer", {"objective": oid, "milestone": stop["id"], "reason": "Plus besoin."})
@@ -458,12 +458,12 @@ def test_milestones_are_added_changed_and_dropped_and_a_checkpoint_is_not_undone
 
 def test_the_rule_of_a_held_milestone_is_pure():
     hers = Milestone(1, "t")
-    assert managing.undoing(hers, False) == "" == managing.undoing(hers, True)
+    assert milestones.undoing(hers, False) == "" == milestones.undoing(hers, True)
     for held in (replace(hers, check=c.CHECK_OWNER), replace(hers, author="operator"), replace(hers, agreed=True),
                  replace(hers, refused_at=5)):
-        assert managing.undoing(held, False) and managing.undoing(held, True) == ""
+        assert milestones.undoing(held, False) and milestones.undoing(held, True) == ""
     for status in (c.REACHED, c.DROPPED):
-        assert managing.undoing(replace(hers, status=status), True) == managing.SETTLED
+        assert milestones.undoing(replace(hers, status=status), True) == milestones.SETTLED
 
 
 # ── Un ticket, une décision ──
@@ -658,12 +658,12 @@ def test_a_person_edits_a_pull_request_and_comments_it_signed(world):  # noqa: F
     assert host.edits == [(12, "Journaliser chaque refus", "Une ligne par refus.")]
     [(number, body, mark)] = host.remarks
     assert number == 12 and body.endswith("Vu, ça me va.") and "adrien" in body.lower() and body != "Vu, ça me va."
-    asked = journal(live, managing.PULL_WRITE_ASKED)
-    assert [e.data.what for e in asked] == [managing.EDIT, managing.COMMENT] and all(e.data.by for e in asked)
-    assert mark == managing.reply_mark(pid, asked[1].seq)
-    answers = journal(live, managing.PULL_WRITE_ANSWERED)
+    asked = journal(live, merge.PULL_WRITE_ASKED)
+    assert [e.data.what for e in asked] == [merge.EDIT, merge.COMMENT] and all(e.data.by for e in asked)
+    assert mark == merge.reply_mark(pid, asked[1].seq)
+    answers = journal(live, merge.PULL_WRITE_ANSWERED)
     assert [(e.data.what, e.data.ok, e.data.asked) for e in answers] == [
-        (managing.EDIT, True, asked[0].seq), (managing.COMMENT, True, asked[1].seq)]
+        (merge.EDIT, True, asked[0].seq), (merge.COMMENT, True, asked[1].seq)]
     # rien à changer, un commentaire vide, une pull request inconnue
     assert _post(client, pid, "code/pull/modifier", {"number": 12}).status_code == 400
     assert _post(client, pid, "code/pull/commenter", {"number": 12, "text": "  "}).status_code == 400
@@ -677,16 +677,16 @@ def test_a_person_edits_a_pull_request_and_comments_it_signed(world):  # noqa: F
     host.remark = no
     _ok(client, pid, "code/pull/commenter", {"number": 12, "text": "Encore un mot."})
     _settled(client, live)
-    last = journal(live, managing.PULL_WRITE_ANSWERED)[-1].data
-    assert (last.ok, last.why) == (False, managing.REFUSED)
+    last = journal(live, merge.PULL_WRITE_ANSWERED)[-1].data
+    assert (last.ok, last.why) == (False, merge.REFUSED)
     # une personne seulement : qui pilote sans être le propriétaire n'écrit pas chez l'hôte
     lea = _lea(client, live)
     _share(client, live, pid, lea, "modification")
     login(client, "lea")
     for route, body in (("code/pull/modifier", {"title": "Autre"}), ("code/pull/commenter", {"text": "Moi aussi."})):
         refused = _post(client, pid, route, {"number": 12, **body})
-        assert refused.status_code == 403 and refused.json()["error"] == inspect_manage.NOT_WRITER, route
-    assert len(journal(live, managing.PULL_WRITE_ASKED)) == 3 and len(host.edits) == 1
+        assert refused.status_code == 403 and refused.json()["error"] == inspect_merge.NOT_WRITER, route
+    assert len(journal(live, merge.PULL_WRITE_ASKED)) == 3 and len(host.edits) == 1
 
 
 def test_only_the_gesture_of_a_person_writes_on_a_pull_request():
@@ -709,10 +709,10 @@ def test_only_the_gesture_of_a_person_writes_on_a_pull_request():
 
     assert mentions("edit_pull") == {
         "adapters/workshop/github.py": {"edit_pull"}, "app/domains/projects/demo_git.py": {"edit_pull"},
-        "ports/workshop.py": {"edit_pull"}, "faculties/projects/managing.py": {"_write"},
+        "ports/workshop.py": {"edit_pull"}, "faculties/projects/merge.py": {"_write"},
         "app/domains/projects/api/manage.py": {"edit_pull", "routes"}}  # la route de ce nom : elle passe par l'action
     assert mentions("PULL_WRITE_ASKED") == {
-        "faculties/projects/managing.py": {"writing", "_write"},  # le fait, et l'effet qui l'attend
-        "faculties/projects/inspect_manage.py": {"_pull_edit", "_pull_comment"}}  # les deux actions qui l'émettent
+        "faculties/projects/merge.py": {"writing", "_write"},  # le fait, et l'effet qui l'attend
+        "faculties/projects/inspect_merge.py": {"_pull_edit", "_pull_comment"}}  # les deux actions qui l'émettent
     # le commentaire d'une personne est signé à son départ : son nom quand il se sait, sinon sans nom
-    assert managing.signed(None, "", "Vu.").endswith("Vu.") and managing.signed(None, "", "Vu.") != "Vu."
+    assert merge.signed(None, "", "Vu.").endswith("Vu.") and merge.signed(None, "", "Vu.") != "Vu."
