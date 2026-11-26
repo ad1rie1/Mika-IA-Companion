@@ -33,7 +33,8 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.plugins.agenda import AGENDA, AgendaState, Reminded, params_of
 from mika.plugins.agenda.rights import audience_at, here, here_all
-from mika.plugins.agenda.tools import NAME_SHOWN, PEOPLE_SHOWN, PLACE_SHOWN, TITLE_SHOWN, when_words
+from mika.plugins.agenda.tools import NAME_SHOWN, PEOPLE_SHOWN, PLACE_SHOWN, TITLE_SHOWN
+from mika.plugins.agenda.when import when_words
 from mika.ports.agenda import Event, instance, masked
 from mika.ports.preprocess import inert
 from mika.vocab.access import KEEP_FLOORS

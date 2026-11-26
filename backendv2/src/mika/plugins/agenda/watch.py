@@ -68,6 +68,7 @@ from mika.plugins.agenda import (
     reminder,
 )
 from mika.plugins.agenda.rights import at_work
+from mika.plugins.agenda.when import midnight
 from mika.ports.agenda import (
     CANCELLED,
     DAY_US,
@@ -130,7 +131,7 @@ def starts_at(span: Span, tz: Any) -> int:
     """L'instant où commence une occurrence, dans ce fuseau (une journée entière : à minuit de son premier jour)."""
     if not span.all_day:
         return span.start
-    return instant(datetime.combine(date.fromisoformat(day_of(span.start)), time(), tzinfo=tz))
+    return midnight(date.fromisoformat(day_of(span.start)), tz)
 
 
 def delay_of(store: AgendaPort, o: Occurrence, fallback: str) -> str:

@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -32,8 +32,9 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
+from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.frame import Frame
+from mika.plugins.agenda.when import midnight
 from mika.vocab.circadian import day_fr
 from mika.vocab.knowledge import Known, knowns
 from mika.vocab.lineage import admits
@@ -127,8 +128,7 @@ def _day(frame: Frame, t: int) -> tuple[int, int]:
     """La journée de cet instant, ici : de minuit à minuit."""
     tz = frame.env.tz_of(frame.root)
     d = local(t, tz).date()
-    return instant(datetime.combine(d, time(), tzinfo=tz)), \
-        instant(datetime.combine(d + timedelta(days=1), time(), tzinfo=tz))
+    return midnight(d, tz), midnight(d + timedelta(days=1), tz)
 
 
 def _canon(frame: Frame, keys: Iterable[str]) -> tuple[str, ...]:

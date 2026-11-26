@@ -75,6 +75,7 @@ from mika.plugins.agenda import (
 )
 from mika.plugins.agenda.actions import account_level, level_of, operator, person_of
 from mika.plugins.agenda.rights import table_of
+from mika.plugins.agenda.when import midnight
 from mika.ports.agenda import (
     BY_HER,
     CALDAV,
@@ -417,8 +418,7 @@ def period_of(ctx: InspectContext, frame: Frame) -> tuple[date, date]:
 
 def bounds(frame: Frame, first: date, last: date) -> tuple[int, int]:
     tz = frame.env.tz_of(frame.root)
-    return (instant(datetime.combine(first, time(), tzinfo=tz)),
-            instant(datetime.combine(last + timedelta(days=1), time(), tzinfo=tz)))
+    return midnight(first, tz), midnight(last + timedelta(days=1), tz)
 
 
 def occurrences_of(ports: Mapping[str, Any], frame: Frame, calendars: Sequence[Shown], start: int,

@@ -17,13 +17,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
-from mika.kernel.clock import HOUR, instant, local
+from mika.kernel.clock import HOUR, local
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
@@ -42,7 +42,7 @@ from mika.plugins.agenda import (
     Written,
 )
 from mika.plugins.agenda.rights import here_all
-from mika.plugins.agenda.tools import hm, local_span
+from mika.plugins.agenda.when import hm, local_span, midnight
 from mika.ports.agenda import Occurrence, masked
 from mika.ports.preprocess import cite, inert
 from mika.vocab.access import KEEP_FLOORS
@@ -63,10 +63,6 @@ WHY_CHARS = 300
 #: ce qu'on lit des facts pour savoir qui est en face et à qui le dire
 READS = [identity_c.PERSON, identity_c.HANDLES, identity_c.IDENTITY, identity_c.OWNERS, identity_c.REACHABLE,
          presence_c.PRESENT, social_c.CLOSENESS]
-
-
-def _midnight(d: date, tz: Any) -> int:
-    return instant(datetime.combine(d, time(), tzinfo=tz))
 
 
 def _line(o: Occurrence, owned: bool, tz: Any, now: int) -> str:
@@ -109,14 +105,14 @@ async def _gather(s: AgendaState, frame: Frame, ports: Mapping[str, Any]) -> dic
             tz = frame.env.tz_of(frame.root)
             today = frame.local().date()
             days = [today, today + timedelta(days=1)]
-            found = store.period(list(mine), _midnight(today, tz), _midnight(today + timedelta(days=2), tz))
+            found = store.period(list(mine), midnight(today, tz), midnight(today + timedelta(days=2), tz))
             by_day: dict[date, list[str]] = {d: [] for d in days}
             for o in found:
                 lo, hi = local_span(o.span, tz)
                 if hi <= frame.now and not o.span.all_day:
                     continue  # déjà passé
                 for d in days:
-                    if lo < _midnight(d + timedelta(days=1), tz) and hi > _midnight(d, tz):
+                    if lo < midnight(d + timedelta(days=1), tz) and hi > midnight(d, tz):
                         by_day[d].append(_line(o, True, tz, frame.now))
             keeps = [h.keep for h in mine.values()]
             out["day"] = {"days": [(d, by_day[d]) for d in days],

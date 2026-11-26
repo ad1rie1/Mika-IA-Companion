@@ -51,7 +51,7 @@ from mika.contracts import agenda as agenda_c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
-from mika.kernel.clock import US, instant, local
+from mika.kernel.clock import US, instant
 from mika.kernel.codec import canonical_json
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
@@ -80,6 +80,15 @@ from mika.plugins.agenda.actions import level_of, person_of
 from mika.plugins.agenda.rights import Here, approval, here_all
 from mika.plugins.agenda.rights import offered as offered_here
 from mika.plugins.agenda.sync import reread
+from mika.plugins.agenda.when import (
+    LONGEST_DAYS,
+    local_span,
+    midnight,
+    period,
+    period_words,
+    span_of,
+    when_words,
+)
 from mika.ports.agenda import (
     ALL,
     BY_HER,
@@ -102,12 +111,10 @@ from mika.ports.agenda import (
     Participant,
     Span,
     instance,
-    local_days,
     masked,
     occurrences,
     split_calendar_key,
     system_account,
-    whole_days,
     zone_of,
 )
 from mika.ports.errors import describe_error
@@ -126,7 +133,6 @@ from mika.vocab.access import (
     situation,
 )
 from mika.vocab.access import NO as CLOSED
-from mika.vocab.circadian import day_fr
 from mika.vocab.episodes import Kind, is_work_target, task_of
 from mika.vocab.ownership import OWNED, best_handle, shared_with
 from mika.vocab.phrasebook import phrase
@@ -140,14 +146,12 @@ log = logging.getLogger("mika.agenda")
 EPISODES = [Kind.REPLY]
 READING = [Kind.REPLY, Kind.INITIATIVE, Kind.TASK]
 ANSWERING = [Kind.REPLY, Kind.TASK]
-#: au plus tant d'événements montrés d'une lecture, de jours lus d'un coup, de créneaux proposés
-EVENTS_SHOWN, DAYS_MAX, FREE_SHOWN = 40, 62, 8
+#: au plus tant d'événements montrés d'une lecture, de créneaux proposés
+EVENTS_SHOWN, FREE_SHOWN = 40, 8
 #: ce qu'elle lit au plus d'un titre, d'un lieu, d'une description, d'un nom, de participantes nommées
 TITLE_SHOWN, PLACE_SHOWN, TEXT_SHOWN, NAME_SHOWN, PEOPLE_SHOWN = 160, 160, 600, 80, 6
 #: ses appels par épisode : lire, écrire
 READ_CALLS, WRITE_CALLS = 6, 3
-#: un rendez-vous d'au plus tant de jours ; une durée par défaut (min)
-LONGEST_DAYS, DEFAULT_MINUTES = 14, 60
 #: seule, elle attend que ce soit écrit au plus tant de secondes avant de rendre la main
 WAIT_S = 20.0
 #: la référence d'un événement qu'elle a lu : son numéro, et l'occurrence d'une série
@@ -325,130 +329,6 @@ def _event(desk: _Desk, ref: str) -> tuple[Event, str] | ToolResult:
     return event, got.group(2) or event.original
 
 
-# ── le temps, en mots et en dates ─────────────────────────────────────────
-
-
-def hm(dt: datetime) -> str:
-    """« 9 h », « 14 h 30 »."""
-    return phrase("agenda.words.hour", h=dt.hour) if not dt.minute else \
-        phrase("agenda.words.hour_minute", h=dt.hour, m=f"{dt.minute:02d}")
-
-
-def _midnight(d: date, tz: ZoneInfo) -> int:
-    return instant(datetime.combine(d, time(), tzinfo=tz))
-
-
-def local_span(span: Span, tz: ZoneInfo) -> tuple[int, int]:
-    """Quand il occupe, en instants : une journée entière, de minuit à minuit dans ce fuseau (ses instants sont à
-    minuit UTC de ses dates)."""
-    return local_days(span, tz)
-
-
-def when_words(span: Span, tz: ZoneInfo) -> str:
-    """Quand, en mots : « mardi 24 novembre, 9 h 30 – 10 h 30 », « samedi 28 novembre, toute la journée », « du
-    samedi 28 au lundi 30 novembre »."""
-    if span.all_day:
-        first, last = date.fromisoformat(span.first_day), date.fromisoformat(span.last_day)
-        if first == last:
-            return phrase("agenda.words.all_day", day=day_fr(first))
-        return phrase("agenda.words.days", first=day_fr(first), last=day_fr(last))
-    start, end = local(span.start, tz), local(max(span.start, span.end), tz)
-    if start.date() == end.date() or (end - start <= timedelta(hours=24) and end.time() == time()):
-        return phrase("agenda.words.timed", day=day_fr(start.date()), start=hm(start), end=hm(end))
-    return phrase("agenda.words.timed_days", first=day_fr(start.date()), start=hm(start), last=day_fr(end.date()),
-                  end=hm(end))
-
-
-def period(when: str, start: str, end: str, today: date) -> tuple[date, date] | None:
-    """Une période, du premier jour au lendemain du dernier : en mots (``Period``) ou en dates (``AAAA-MM-JJ``, la
-    dernière comprise ; une seule, ce jour-là) ; rien : les sept jours qui viennent. ``None`` : une date illisible, ou
-    une fin avant le début. Jamais plus de ``DAYS_MAX`` jours."""
-    if start.strip() or end.strip():
-        try:
-            first = date.fromisoformat((start or end).strip())
-            last = date.fromisoformat((end or start).strip())
-        except ValueError:
-            return None
-        if last < first:
-            return None
-        return first, min(last + timedelta(days=1), first + timedelta(days=DAYS_MAX))
-    monday = today - timedelta(days=today.weekday())
-    month = today.replace(day=1)
-    following = (month + timedelta(days=32)).replace(day=1)
-    spans = {
-        "aujourdhui": (today, today + timedelta(days=1)),
-        "demain": (today + timedelta(days=1), today + timedelta(days=2)),
-        "apres_demain": (today + timedelta(days=2), today + timedelta(days=3)),
-        "cette_semaine": (today, monday + timedelta(days=7)),
-        "semaine_prochaine": (monday + timedelta(days=7), monday + timedelta(days=14)),
-        "ce_weekend": (max(today, monday + timedelta(days=5)), monday + timedelta(days=7)),
-        "ce_mois": (today, following),
-        "mois_prochain": (following, (following + timedelta(days=32)).replace(day=1)),
-    }
-    return spans.get(when, (today, today + timedelta(days=7)))
-
-
-def period_words(first: date, after: date) -> str:
-    last = after - timedelta(days=1)
-    return day_fr(first) if first == last else phrase("agenda.words.period", first=day_fr(first), last=day_fr(last))
-
-
-def _moment(text: str, tz: ZoneInfo) -> datetime | date | None:
-    """Une date (``AAAA-MM-JJ``) ou une heure (``AAAA-MM-JJTHH:MM``, dans ce fuseau) ; ``None`` : illisible."""
-    text = text.strip().replace(" ", "T")
-    if not text:
-        return None
-    try:
-        if "T" not in text:
-            return date.fromisoformat(text)
-        got = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    return got.replace(tzinfo=tz) if got.tzinfo is None else got.astimezone(tz)
-
-
-def span_of(start: str, end: str, minutes: int | None, all_day: bool, tz: ZoneInfo, *,
-            current: Span | None = None) -> Span | str | None:
-    """La période qu'un outil demande : une journée entière (une date, ou ``all_day``), ou de telle heure à telle
-    heure (la fin, sinon une durée, sinon celle de l'événement changé ``current``, sinon une heure). ``None`` : rien
-    de demandé ; un texte : pourquoi c'est illisible."""
-    if not start.strip() and not end.strip() and minutes is None and current is None:
-        return None
-    if not start.strip() and current is None:
-        return phrase("agenda.tools.bad_time")
-    begin = _moment(start, tz) if start.strip() else None
-    if begin is None and start.strip():
-        return phrase("agenda.tools.bad_time")
-    if begin is None:  # on ne change que la fin, ou la durée : depuis le début d'aujourd'hui
-        assert current is not None
-        begin = date.fromisoformat(current.first_day) if current.all_day else local(current.start, tz)
-    finish = _moment(end, tz) if end.strip() else None
-    if end.strip() and finish is None:
-        return phrase("agenda.tools.bad_time")
-    if all_day or (isinstance(begin, date) and not isinstance(begin, datetime)):
-        first = begin.date() if isinstance(begin, datetime) else begin
-        last = (finish.date() if isinstance(finish, datetime) else finish) if finish is not None else first
-        if current is not None and current.all_day and finish is None and not start.strip():
-            last = date.fromisoformat(current.last_day)
-        if last < first or (last - first).days > LONGEST_DAYS:
-            return phrase("agenda.tools.bad_time")
-        return whole_days(first.isoformat(), last.isoformat())
-    assert isinstance(begin, datetime)
-    if isinstance(finish, datetime):
-        stop = finish
-    elif isinstance(finish, date):
-        return phrase("agenda.tools.bad_time")
-    elif minutes is not None:
-        stop = begin + timedelta(minutes=minutes)
-    elif current is not None and not current.all_day:
-        stop = begin + timedelta(microseconds=current.end - current.start)
-    else:
-        stop = begin + timedelta(minutes=DEFAULT_MINUTES)
-    if stop <= begin or stop - begin > timedelta(days=LONGEST_DAYS):
-        return phrase("agenda.tools.bad_time")
-    return Span(instant(begin), instant(stop), getattr(tz, "key", ""), False)
-
-
 # ── lire ──────────────────────────────────────────────────────────────────
 
 
@@ -591,7 +471,7 @@ async def agenda_events(args: EventsArgs, ctx: Any) -> Any:
     if days is None:
         return _refused(phrase("agenda.tools.bad_period"))
     first, after = days
-    found = desk.store.period(chosen, _midnight(first, desk.tz), _midnight(after, desk.tz), zone=desk.tz)
+    found = desk.store.period(chosen, midnight(first, desk.tz), midnight(after, desk.tz), zone=desk.tz)
     if args.text.strip():
         found = [o for o in found if _matches(_shown(desk, o), args.text.strip())]
     head = phrase("agenda.tools.events.head", period=period_words(first, after))
@@ -653,12 +533,12 @@ async def agenda_free(args: FreeArgs, ctx: Any) -> Any:
     d = first
     while d < after:
         lo = max(now, instant(datetime.combine(d, time(args.from_hour), tzinfo=tz)))
-        hi = _midnight(d + timedelta(days=1), tz) if args.to_hour == 24 else \
+        hi = midnight(d + timedelta(days=1), tz) if args.to_hour == 24 else \
             instant(datetime.combine(d, time(args.to_hour), tzinfo=tz))
         if hi > lo:
             windows.append((lo, hi))
         d += timedelta(days=1)
-    found = desk.store.period(chosen, _midnight(first, tz), _midnight(after, tz), zone=tz)
+    found = desk.store.period(chosen, midnight(first, tz), midnight(after, tz), zone=tz)
     busy = [local_span(o.span, tz) for o in found if o.event.busy and o.event.status != "annule"]
     slots = free_slots(busy, windows, args.minutes * 60 * US)
     head = phrase("agenda.tools.free.head", period=period_words(first, after), minutes=args.minutes)
@@ -1316,4 +1196,4 @@ async def _settle(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
 
 
 __all__ = ["ANSWERING", "ANSWERS", "EPISODES", "PINNED", "READING", "REF", "event_line", "free_slots", "invitation_of",
-           "local_span", "offered", "period", "preview", "propose", "span_of", "task_decider", "when_words", "write"]
+           "offered", "preview", "propose", "task_decider", "write"]

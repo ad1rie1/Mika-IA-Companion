@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from pydantic import ValidationError
@@ -49,12 +49,13 @@ from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, refused
 from mika.app.me.common import millis, settings_of
 from mika.contracts import runtime as rt
-from mika.kernel.clock import instant, local
+from mika.kernel.clock import local
 from mika.plugins.agenda import CREATE, RESPOND, WAITING, AgendaState, params_of
 from mika.plugins.agenda.actions import KEEP, handles_of, level_of
 from mika.plugins.agenda.rights import table_of
 from mika.plugins.agenda.tools import busy_summary
 from mika.plugins.agenda.watch import invitation_key
+from mika.plugins.agenda.when import midnight
 from mika.ports.agenda import (
     ALERT_METHODS,
     ALERTS_MAX,
@@ -155,8 +156,8 @@ def _bounds(call: Call, days: int = PERIOD_DAYS) -> tuple[date, date, int, int]:
         raise Denied(400, "« end » vient avant « start ».", {"end": "après start"})
     if (last - first).days >= days:
         raise Denied(400, f"Une période de {days} jours au plus.", {"end": f"{days} jours au plus"})
-    lo = instant(datetime.combine(first, time(), tzinfo=tz))
-    hi = instant(datetime.combine(last + timedelta(days=1), time(), tzinfo=tz))
+    lo = midnight(first, tz)
+    hi = midnight(last + timedelta(days=1), tz)
     return first, last, lo, hi
 
 

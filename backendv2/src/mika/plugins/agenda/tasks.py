@@ -38,9 +38,8 @@ from mika.plugins.agenda.tools import (
     TEXT_SHOWN,
     TITLE_SHOWN,
     invitation_of,
-    local_span,
-    when_words,
 )
+from mika.plugins.agenda.when import local_span, when_words
 from mika.ports.agenda import CANCELLED, Event, Occurrence, masked, occurrences, split_calendar_key
 from mika.ports.preprocess import inert
 from mika.vocab.access import NO as CLOSED
