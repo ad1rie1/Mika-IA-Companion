@@ -5,7 +5,7 @@ audience, la fiche de la personne derrière chaque adresse ; et le vital « Pré
 from __future__ import annotations
 
 from mika.contracts import identity as identity_c
-from mika.faculties.presence import PRESENCE, Link, PresenceState, _handles
+from mika.faculties.presence import PRESENCE, Link, PresenceState, linked_handles
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -63,7 +63,7 @@ def _inspect(s: PresenceState, frame: Frame, ctx: InspectContext) -> list[Block]
                          link.channel or "—", Text(connection, "mono"), When(since) if since else "—",
                          _audience(link, view.trust)), href=person))
     return [
-        Stats((Stat("connexions vivantes", len(s.links)), Stat("moyens de communication présents", len(_handles(s))))),
+        Stats((Stat("connexions vivantes", len(s.links)), Stat("moyens de communication présents", len(linked_handles(s))))),
         Table(("personne", "moyen de communication", "nom", "canal", "connexion", "présente depuis", "audience"),
               tuple(rows),
               title="Présents", pager=pager, empty="personne n'est connecté"),
@@ -72,7 +72,7 @@ def _inspect(s: PresenceState, frame: Frame, ctx: InspectContext) -> list[Block]
 
 @PRESENCE.vital("presents", label="Présents", order=40)
 def _present_vital(s: PresenceState, frame: Frame) -> Vital:
-    handles = sorted(_handles(s), key=lambda h: (-s.since.get(h, 0), h))
+    handles = sorted(linked_handles(s), key=lambda h: (-s.since.get(h, 0), h))
     names = [_who(frame, h)[0] or h for h in handles]
     hint = ", ".join(names[:VITAL_NAMES]) + (f" et {plural(len(names) - VITAL_NAMES, 'autre', 'autres')}"
                                             if len(names) > VITAL_NAMES else "")

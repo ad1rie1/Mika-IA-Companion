@@ -15,9 +15,9 @@ from mika.faculties.needs.faculty import (
     WORK_STALE,
     NeedsState,
     Occupation,
-    _relieve,
-    _shared,
-    _touch,
+    relieved,
+    shared_factor,
+    with_anchors,
 )
 from mika.faculties.needs.params import NeedsParams, params
 
@@ -65,10 +65,10 @@ def _stop(s: NeedsState, t: int, p: NeedsParams) -> NeedsState:
         return s
     end = max(o.since, min(t, occupation_end(o)))
     share = min(1.0, (end - o.since) / max(1, p.occupied_full_us))
-    s = _touch(s, t, p)
+    s = with_anchors(s, t, p)
     for kind, factor in ((c.EXPRESSION, p.occupied_expression), (c.CURIOSITY, p.occupied_curiosity)):
         if kind in o.nourishes:
-            s = _relieve(s, kind, _shared(factor, share), t, p)
+            s = relieved(s, kind, shared_factor(factor, share), t, p)
     return replace(s, occupied=None, nourished=replace(o, until=end), idle_since=_void_after(o, s.idle_since, end, p))
 
 
@@ -83,7 +83,7 @@ def _occupy(s: NeedsState, a: w.Activity | None, t: int, p: NeedsParams) -> Need
         return s
     o = Occupation(a.name, a.since, a.until, tuple(str(k) for k in a.nourishes), void_from=s.idle_since or t,
                    noted=t)
-    return replace(_touch(s, t, p), occupied=o, idle_since=t)
+    return replace(with_anchors(s, t, p), occupied=o, idle_since=t)
 
 
 @NEEDS.reducer(w.ENDED, w.CHANGED)

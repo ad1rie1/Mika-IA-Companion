@@ -25,8 +25,8 @@ from mika.faculties.needs.faculty import (
     NEEDS,
     URGES,
     NeedsState,
-    _company,
-    _concerned,
+    company_share,
+    concerned_people,
 )
 from mika.faculties.needs.params import NeedsParams, params
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
@@ -130,13 +130,13 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
     for g in goals:
         if g.status == goals_c.ACTIVE and g.steps >= 1 and g.kind != goals_c.REMINDER and g.title_ref \
                 and not g.musing and g.title_ref not in used \
-                and _for(person, _concerned(g.owner, g.about), g.sensitivity):
-            return c.Matter(c.WORKING_MATTER, g.title_ref, g.opened_at, _concerned(g.owner, g.about), g.sensitivity)
+                and _for(person, concerned_people(g.owner, g.about), g.sensitivity):
+            return c.Matter(c.WORKING_MATTER, g.title_ref, g.opened_at, concerned_people(g.owner, g.about), g.sensitivity)
     for pr in projects:
         if pr.mode == projects_c.PERSONA and pr.status == projects_c.ACTIVE and pr.title_ref \
                 and pr.title_ref not in used and pr.last_run_at and now - pr.last_run_at <= p.matter_done_us \
-                and _for(person, _concerned(pr.owner, pr.about), pr.sensitivity):
-            return c.Matter(c.WORKING_MATTER, pr.title_ref, pr.last_run_at, _concerned(pr.owner, pr.about),
+                and _for(person, concerned_people(pr.owner, pr.about), pr.sensitivity):
+            return c.Matter(c.WORKING_MATTER, pr.title_ref, pr.last_run_at, concerned_people(pr.owner, pr.about),
                             pr.sensitivity)
     return None
 
@@ -184,7 +184,7 @@ def _urges(s: NeedsState, frame: Frame) -> list[Candidate]:
 @NEEDS.modulate(kinds=[Kind.INITIATIVE], reads=[c.NEEDS, presence_c.PRESENT, identity_c.PERSON, social_c.CLOSENESS,
                                                 social_c.WEIGHT, affect_c.HOSTILITY])
 def _toward(s: NeedsState, frame: Frame, row: RowView) -> Modulation:
-    """L'envie de compagnie penche vers qui la comblerait (``_company``) : entre ceux qui sont là, vers sa
+    """L'envie de compagnie penche vers qui la comblerait (``company_share``) : entre ceux qui sont là, vers sa
     propriétaire plutôt qu'une amie, vers une amie plutôt qu'une inconnue — une envie « vers n'importe qui » ne se
     partageait qu'à égalité. Une tendance, jamais un interdit : la part retranchée se mesure à la meilleure compagnie
     présente (seule avec une inconnue silencieuse, elle finit quand même par lui parler), et sa propriétaire, comblant
@@ -193,8 +193,8 @@ def _toward(s: NeedsState, frame: Frame, row: RowView) -> Modulation:
         return Modulation()
     p = params(frame.env.params_of("needs", frame.root))
     social, _expression = urges(frame.get(c.NEEDS), p)
-    share = _company(frame.get, row.target, p)
-    best = max([share, *(_company(frame.get, h, p) for h in frame.get(presence_c.PRESENT) if is_identifiable(h))])
+    share = company_share(frame.get, row.target, p)
+    best = max([share, *(company_share(frame.get, h, p) for h in frame.get(presence_c.PRESENT) if is_identifiable(h))])
     shift = social * (share - min(1.0, best))
     return Modulation(shift=shift) if abs(shift) > 1e-9 else Modulation()
 

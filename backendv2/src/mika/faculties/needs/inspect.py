@@ -9,7 +9,7 @@ viennent des séries mesurées toutes les dix minutes (``needs.social``,
 from __future__ import annotations
 
 from mika.contracts import needs as c
-from mika.faculties.needs.faculty import NEEDS, PRESSING, NeedsState, _tau, describe
+from mika.faculties.needs.faculty import NEEDS, PRESSING, NeedsState, describe, tau_hours
 from mika.faculties.needs.occupation import busy, occupied
 from mika.faculties.needs.params import NeedsParams, params
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -129,7 +129,7 @@ def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     rows = tuple((
         NAMES[k],
         Meter(values[k], pct_fr(values[k]), tone=_tone(values[k])),
-        f"{num_fr(_tau(k, p))} h",
+        f"{num_fr(tau_hours(k, p))} h",
         RELIEF[k],
         When(s.levels[k].at) if k in s.levels and s.levels[k].at else Text("—", kind="muted"),
     ) for k in c.KINDS)

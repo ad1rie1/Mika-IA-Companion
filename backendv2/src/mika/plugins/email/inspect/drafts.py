@@ -72,7 +72,7 @@ from mika.plugins.email.inspect.common import (
     whose,
     workspace,
 )
-from mika.plugins.email.inspect.mail import _document
+from mika.plugins.email.inspect.mail import document_blocks
 from mika.ports.drafts import to_fill
 from mika.ports.paging import page_slice
 from mika.vocab.privacy import Sensitivity
@@ -194,7 +194,7 @@ def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                               ("objet", Text(shown.subject)),
                               ("en réponse à", Ref.subject("mail", mail_key(answered.ref), clip(answered.subject, 80))
                                if answered is not None else "—")), title="Ce qui partira", columns=2))
-        blocks.extend(_document(ctx, got.id, shown.text, title="Le texte, tel qu'il partira (signature et citation comprises)", kind="brouillon"))
+        blocks.extend(document_blocks(ctx, got.id, shown.text, title="Le texte, tel qu'il partira (signature et citation comprises)", kind="brouillon"))
         if shown.blocked:
             blocks.append(Note(f"Il ne peut pas partir tel quel : {shown.blocked}. Retouche-le.", tone="warn"))
     if seen is not None and seen.state == WAITING and got.state == "brouillon":

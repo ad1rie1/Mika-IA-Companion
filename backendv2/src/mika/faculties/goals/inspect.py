@@ -26,10 +26,10 @@ from mika.contracts import runtime as rt
 from mika.faculties.goals.actions import (
     PRIORITY_CHOICES,
     TASK_STATUS_FR,
-    _plannable,
-    _prioritizable,
-    _reopenable,
-    _reschedulable,
+    can_plan,
+    can_prioritize,
+    can_reopen,
+    can_reschedule,
 )
 from mika.faculties.goals.faculty import (
     GOAL_AMENDED,
@@ -568,7 +568,7 @@ def _state_notes(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, text
     if g.status in c.CLOSED_STATUSES:
         how = _text(texts, g.result_ref, "") if g.result_ref else ""
         why = how or "sans résultat écrit"
-        more = " « Rouvrir » (en haut) le remet en route, avec quelques séances de plus." if _reopenable(s, frame, key) \
+        more = " « Rouvrir » (en haut) le remet en route, avec quelques séances de plus." if can_reopen(s, frame, key) \
             else ""
         return [Note(f"{STATUS_FR.get(g.status, g.status).capitalize()} le {ctx.when(g.closed_at)} — {why}.{more}",
                      tone=STATUS_TONE.get(g.status, ""))]
@@ -616,7 +616,7 @@ def _gauge(n: int, limit: int, then: str) -> Any:
 
 def _plan_blocks(g: Goal, s: GoalsState, frame: Frame, texts: Mapping[str, str]) -> list[Block]:
     key = str(g.id)
-    editable = _plannable(s, frame, key)
+    editable = can_plan(s, frame, key)
     rows = []
     for t in sorted(g.tasks, key=lambda t: (TASK_ORDER.get(t.status, 9), t.id)):
         text, note = _text(texts, t.text_ref), _text(texts, t.note_ref, "") if t.note_ref else ""
@@ -666,14 +666,14 @@ def _policy_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]
 def _edit_blocks(g: Goal, s: GoalsState, frame: Frame) -> list[Block]:
     """Le formulaire qui change ce but, pré-rempli de ce qu'il est (selon sa sorte)."""
     key = str(g.id)
-    if _reschedulable(s, frame, key):
+    if can_reschedule(s, frame, key):
         return [ActionSlot("goals.reprogrammer", title="Reprogrammer le rappel")]
-    if g.kind == c.EXPLORATION and _prioritizable(s, frame, key):
+    if g.kind == c.EXPLORATION and can_prioritize(s, frame, key):
         return [Note("Une exploration qu'elle a entreprise d'elle-même se pilote (pause, consigne, priorité, "
                      "avancer, clore) mais ne se réécrit pas : ni son titre, ni son envie.", "muted"),
                 ActionSlot("goals.priorite", title="Sa priorité", compact=True)]
     if g.status in c.CLOSED_STATUSES:
-        return [Note("Un but clos ne se modifie plus" + (" : rouvre-le d'abord (en haut)." if _reopenable(
+        return [Note("Un but clos ne se modifie plus" + (" : rouvre-le d'abord (en haut)." if can_reopen(
             s, frame, key) else "."), "muted")]
     return []
 

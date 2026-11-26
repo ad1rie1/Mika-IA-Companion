@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from mika.faculties.expression.tags import _plain
+from mika.faculties.expression.tags import bare_speech
 from mika.kernel.prompt import CONTEXT_FOOTER, unlabel
 from mika.vocab import flows
 from mika.vocab.phrasebook import phrase
@@ -21,7 +21,7 @@ _BUBBLES = re.compile(r"\n\s*\n")
 
 def _bubbles(text: str) -> str:
     """Sa parole sans balise ni jeton de voix, ses bulles gardées (séparées par une ligne vide)."""
-    return "\n\n".join(p for p in (_plain(b) for b in _BUBBLES.split(text or "")) if p)
+    return "\n\n".join(p for p in (bare_speech(b) for b in _BUBBLES.split(text or "")) if p)
 
 
 # ── Sa réponse écrite par une autrice (ADR 0114) ──────────────────────────
@@ -43,7 +43,7 @@ _POLISH_THREAD = 16
 def _thread_lines(role: str, content: str, name: str) -> list[str]:
     """Un message du fil en lignes de SMS : une par bulle pour elle, une pour l'autre."""
     if role != "assistant":
-        said = _plain(content)
+        said = bare_speech(content)
         return [phrase("expression.polish.them", text=said)] if said else []
     return [phrase("expression.polish.her", name=name, text=b) for b in _bubbles(content).split("\n\n") if b]
 
@@ -153,8 +153,8 @@ def polish(draft: str, messages: Sequence[Any], heard: str = "", persona: Any = 
     if now:
         lines.append(phrase("expression.polish.mark", mark=now))
     # ce que la personne vient d'écrire — jamais le cadrage d'un épisode (« personne ne vient de t'écrire… »)
-    if _plain(heard):
-        lines.append(phrase("expression.polish.them", text=_plain(heard)))
+    if bare_speech(heard):
+        lines.append(phrase("expression.polish.them", text=bare_speech(heard)))
     system = phrase("expression.polish.system", name=name, portrait=(getattr(persona, "text", "") or "").strip())
     # qui est l'autre, d'après ce qu'elle a vécu avec lui (sa fiche, déjà filtrée pour cette audience) : l'autrice
     # écrit aussi ses réponses à venir (banc du 2026-10-16 : avec sa fiche, il plaisante comme lui)

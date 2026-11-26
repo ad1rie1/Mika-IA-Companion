@@ -241,7 +241,7 @@ HESITATIONS_KEPT = 64
 DRAWS_KEPT = 64
 
 
-def _params(p: AgencyParams | None) -> AgencyParams:
+def params(p: AgencyParams | None) -> AgencyParams:
     return p if p is not None else AgencyParams()
 
 
@@ -323,7 +323,7 @@ def _said(s: AgencyState, e, cx) -> AgencyState:
         return s
     if d.target and d.target in s.hesitations:
         s = replace(s, hesitations=s.hesitations.delete(d.target))  # elle a fini par lui écrire : tout repart
-    p = _params(cx.params)
+    p = params(cx.params)
     kept = tuple(t for t in s.initiatives if e.at - t < DAY)
     jittered = round(p.refractory_us * (1.0 + p.jitter * (2.0 * cx.rng.random() - 1.0)))
     s = replace(s, initiatives=(*kept, e.at)[-KEEP:], refractory_us=jittered)
@@ -384,7 +384,7 @@ def reading(s: AgencyState, now: int, p: AgencyParams, tz: Any, ignored: int = 0
 
 @AGENCY.fact(c.AGENCY, reads=[attention_c.IGNORED])
 def _agency(s: AgencyState, cx) -> c.AgencyReading:
-    return reading(s, cx.now, _params(cx.params), cx.tz, cx.facts.get(attention_c.IGNORED))
+    return reading(s, cx.now, params(cx.params), cx.tz, cx.facts.get(attention_c.IGNORED))
 
 
 @AGENCY.fact(c.RENOUNCED)
@@ -513,7 +513,7 @@ def restraint(frame: Frame, target: str | None = None, reasons: Any = ()) -> Mod
     plafond du jour, la retenue envers quelqu'un qui ne répond pas, la période
     réfractaire, une hésitation, et — envers cette personne — les initiatives
     restées sans réponse."""
-    p = _params(frame.env.params_of("agency", frame.root))
+    p = params(frame.env.params_of("agency", frame.root))
     r = frame.get(c.AGENCY)
     if r.initiatives_today >= p.daily_cap:
         return Modulation(veto=c.DAILY_CAP)

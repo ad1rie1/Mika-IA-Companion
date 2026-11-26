@@ -2,7 +2,7 @@
 ``[EMOTION: sad 0.6, love 0.3]`` (ADR 0093 ; l'ancienne forme ``[EMOTION:sad:0.6]`` est encore lue), sa lecture de la
 personne ``[EN_FACE: …]`` et sa marque de mensonge ``[MENSONGE: …]`` (ADR 0108). ``parse`` les retire du texte et les
 garde en annotations de l'énoncé, avec le fait qu'elle ait posé une question ; ``reannotate`` recalcule ce qui décrit
-la forme sur le message récrit par l'autrice ; ``_plain`` : sa parole sans balise ni jeton de voix."""
+la forme sur le message récrit par l'autrice ; ``bare_speech`` : sa parole sans balise ni jeton de voix."""
 
 from __future__ import annotations
 
@@ -100,6 +100,6 @@ def reannotate(draft: str, annotations: Mapping[str, str], text: str) -> dict[st
     return out
 
 
-def _plain(text: str) -> str:
+def bare_speech(text: str) -> str:
     """Sa parole sans balise ni jeton de voix."""
     return " ".join(strip_prosody(_BRACKETS.sub(" ", text or "")).split())

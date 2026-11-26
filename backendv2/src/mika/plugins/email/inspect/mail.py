@@ -208,7 +208,7 @@ async def _download(s: EmailState, frame: Frame, ctx: InspectContext, key: str, 
     return Download(file.name, file.data)
 
 
-def _document(ctx: InspectContext, ref: str, text: str, title: str = "", html: str = "", *, kind: str = "mail",
+def document_blocks(ctx: InspectContext, ref: str, text: str, title: str = "", html: str = "", *, kind: str = "mail",
               images: tuple[tuple[str, str, bytes], ...] = (), remote: bool = False) -> list[Block]:
     size = 50_000
     parts, start = [], 0
@@ -265,7 +265,7 @@ def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         info = port.account(sent.account)
         actions = [Toolbar((ActionSlot("email.transferer", (("original", sent.ref),
                             ("subject", forward_subject(sent.subject)[:200])), title="Transférer", presentation="button"),))] if info and info.can_send else []
-        return [*actions, *_document(ctx, sent.ref, sent.body, "Message envoyé"), *_files(sent.ref, sent.attachments),
+        return [*actions, *document_blocks(ctx, sent.ref, sent.body, "Message envoyé"), *_files(sent.ref, sent.attachments),
                 Disclosure("Détails de l'envoi", (Fields((("À", Text(sent.to)), ("Copie", Text(sent.cc or "—")),
                     ("Compte", sent.account or "—"), ("Écrit par", author(frame, sent.by)),
                     ("Date", When(sent.date, relative=False) if sent.date else None),
@@ -315,7 +315,7 @@ def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
                        ActionSlot("email.completer", title="Récupérer ses pièces", presentation="button")))
     remote, said = _images(s, ctx, port, m)
     blocks.extend(said)
-    blocks.extend(_document(ctx, m.ref, m.body, html=m.html, images=port.inline_images(m.ref) if cids else (),
+    blocks.extend(document_blocks(ctx, m.ref, m.body, html=m.html, images=port.inline_images(m.ref) if cids else (),
                             remote=remote))
     blocks.extend(_files(m.ref, m.attachments))
     blocks.append(Disclosure("Détails du message", (Fields((*pairs,
@@ -465,7 +465,7 @@ def _port(ctx: Any) -> Any:
     return port
 
 
-def _read_draft(s: EmailState, ref: str, by: str, how: str) -> tuple[Any, ...]:
+def read_draft(s: EmailState, ref: str, by: str, how: str) -> tuple[Any, ...]:
     """Elle n'en parlera plus : l'opérateur l'a lu, rangé ou jeté."""
     seen = s.mails.get(ref)
     return (READ.draft(mail=ref, by=by, how=how),) if seen is not None and not seen.read else ()
@@ -477,7 +477,7 @@ async def apply(port: Any, s: EmailState, m: Any, verb: str, by: str) -> tuple[t
     inconnu."""
     if verb == "lu":
         await port.set_flags(m.ref, seen=True)
-        return _read_draft(s, m.ref, by, "lu"), "Marqué comme lu : elle n'en parlera plus."
+        return read_draft(s, m.ref, by, "lu"), "Marqué comme lu : elle n'en parlera plus."
     if verb == "non_lu":
         await port.set_flags(m.ref, seen=False)
         return (), "Marqué non lu."
@@ -486,13 +486,13 @@ async def apply(port: Any, s: EmailState, m: Any, verb: str, by: str) -> tuple[t
         return (), "Suivi." if verb == "suivre" else "Plus suivi."
     if verb == "archiver":
         where = await port.archive(m.ref)
-        return _read_draft(s, m.ref, by, "archivé"), f"Archivé dans « {where} »."
+        return read_draft(s, m.ref, by, "archivé"), f"Archivé dans « {where} »."
     if verb == "corbeille":
         where = await port.trash(m.ref)
-        return _read_draft(s, m.ref, by, "corbeille"), f"Mis dans « {where} »."
+        return read_draft(s, m.ref, by, "corbeille"), f"Mis dans « {where} »."
     if verb == "supprimer":
         await port.delete(m.ref)
-        return _read_draft(s, m.ref, by, "supprimé"), "Supprimé définitivement."
+        return read_draft(s, m.ref, by, "supprimé"), "Supprimé définitivement."
     raise ValueError("geste inconnu")
 
 
@@ -502,7 +502,7 @@ async def _server(ctx: Any, s: EmailState, verb: str) -> Done:
     if m is None:
         ref = resolve_state(s, ctx.subject)
         if ref is not None and verb in ("lu",):  # plus dans le cache : elle seule en sait quelque chose
-            return Done(drafts=_read_draft(s, ref, ctx.by, "lu"), message="Classé comme lu.")
+            return Done(drafts=read_draft(s, ref, ctx.by, "lu"), message="Classé comme lu.")
         raise Refused("Ce mail n'est plus dans la boîte.")
     try:
         drafts, message = await apply(port, s, m, verb, ctx.by)
@@ -574,7 +574,7 @@ async def _move(s: EmailState, frame: Frame, args: Any, ctx: Any) -> Done:
         where = await port.move(m.ref, folder)
     except (OSError, RuntimeError, ValueError) as exc:
         raise Refused(f"Le serveur a refusé : {exc}"[:300]) from None
-    return Done(drafts=_read_draft(s, m.ref, ctx.by, "déplacé"), message=f"Déplacé dans « {where} ».")
+    return Done(drafts=read_draft(s, m.ref, ctx.by, "déplacé"), message=f"Déplacé dans « {where} ».")
 
 
 def _in_trash(s: EmailState, m: Any, ports: Any) -> bool:

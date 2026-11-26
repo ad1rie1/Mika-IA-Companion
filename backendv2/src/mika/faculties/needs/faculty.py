@@ -139,7 +139,7 @@ CONTENTLESS = frozenset({*URGES, social_c.PRESENT_PERSON, social_c.CHAT, agency_
 MATTER_PROVENANCE = "matter:"
 
 
-def _tau(kind: str, p: NeedsParams) -> float:
+def tau_hours(kind: str, p: NeedsParams) -> float:
     return {c.SOCIAL: p.tau_social_h, c.EXPRESSION: p.tau_expression_h, c.CURIOSITY: p.tau_curiosity_h}[kind]
 
 
@@ -147,14 +147,14 @@ def tension(s: NeedsState, kind: str, t: int, p: NeedsParams) -> float:
     level = s.levels.get(kind) or Level()
     if not level.at or t <= level.at:
         return level.value
-    return 1.0 - (1.0 - level.value) * math.exp(-(t - level.at) / HOUR / _tau(kind, p))
+    return 1.0 - (1.0 - level.value) * math.exp(-(t - level.at) / HOUR / tau_hours(kind, p))
 
 
-def _relieve(s: NeedsState, kind: str, factor: float, t: int, p: NeedsParams) -> NeedsState:
+def relieved(s: NeedsState, kind: str, factor: float, t: int, p: NeedsParams) -> NeedsState:
     return replace(s, levels=s.levels.set(kind, Level(tension(s, kind, t, p) * factor, t)))
 
 
-def _touch(s: NeedsState, t: int, p: NeedsParams) -> NeedsState:
+def with_anchors(s: NeedsState, t: int, p: NeedsParams) -> NeedsState:
     """Ancre les besoins encore sans ancre (le temps commence à compter)."""
     levels = s.levels
     for kind in c.KINDS:
@@ -163,11 +163,11 @@ def _touch(s: NeedsState, t: int, p: NeedsParams) -> NeedsState:
     return replace(s, levels=levels, idle_since=s.idle_since or t)
 
 
-def _concerned(owner: str | None, about: Any) -> tuple[str, ...]:
+def concerned_people(owner: str | None, about: Any) -> tuple[str, ...]:
     return tuple(sorted({*(about or ()), *((owner,) if owner else ())}))
 
 
-def _company(get: Any, handle: str, p: NeedsParams) -> float:
+def company_share(get: Any, handle: str, p: NeedsParams) -> float:
     """La part de compagnie qu'apporte un échange avec cette adresse : pleine avec une amie ou une proche, une
     part avec une connaissance, peu avec une inconnue (une adresse jetable en est une), presque rien avec qui
     elle garde une hostilité installée — un après-midi à se faire chahuter par un inconnu ne remplace pas une
@@ -183,7 +183,7 @@ def _company(get: Any, handle: str, p: NeedsParams) -> float:
     return share * get(social_c.WEIGHT(person))  # sa propriétaire la comble davantage
 
 
-def _shared(factor: float, share: float) -> float:
+def shared_factor(factor: float, share: float) -> float:
     """Le facteur d'un échange qui ne comble qu'une part : ``1`` ne comble rien, ``factor`` comble tout (au-delà,
     sa propriétaire : un peu plus, jamais au-delà de tout)."""
     return max(0.0, 1.0 - (1.0 - factor) * share)
@@ -197,9 +197,9 @@ def _received(s: NeedsState, e, cx) -> NeedsState:
     if not e.data.addressed or not is_identifiable(e.data.handle):
         return s
     p = params(cx.params)
-    s = _touch(s, e.at, p)
-    social = _shared(p.received_social, _company(cx.facts.get, e.data.handle, p))
-    s = _relieve(_relieve(s, c.SOCIAL, social, e.at, p), c.CURIOSITY, p.received_curiosity, e.at, p)
+    s = with_anchors(s, e.at, p)
+    social = shared_factor(p.received_social, company_share(cx.facts.get, e.data.handle, p))
+    s = relieved(relieved(s, c.SOCIAL, social, e.at, p), c.CURIOSITY, p.received_curiosity, e.at, p)
     return replace(s, idle_since=e.at, heard_at=e.at, heard_before=s.heard_at, lonely_since=e.at)
 
 
@@ -210,7 +210,7 @@ def _learned_on_a_step(s: NeedsState, e, cx) -> NeedsState:
     if e.data.kind != goals_c.EXPLORATION or not e.data.tools:
         return s
     p = params(cx.params)
-    return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
+    return relieved(with_anchors(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
 
 
 @NEEDS.reducer(goals_c.GOAL_CLOSED)
@@ -223,12 +223,12 @@ def _goal_closed(s: NeedsState, e, cx) -> NeedsState:
         return s
     # une rêverie n'est pas « ce qu'elle a fini » : rien de neuf n'est arrivé, il n'y a rien à raconter (HUM-3)
     if d.title.ref and d.reason not in goals_c.MUSINGS:
-        done = Done(d.title.ref, e.at, _concerned(d.owner, d.about), d.sensitivity)
+        done = Done(d.title.ref, e.at, concerned_people(d.owner, d.about), d.sensitivity)
         s = replace(s, done=(*s.done, done)[-DONE_KEPT:])
     if d.kind != goals_c.EXPLORATION:
         return s
     p = params(cx.params)
-    return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.explored_curiosity, e.at, p)
+    return relieved(with_anchors(s, e.at, p), c.CURIOSITY, p.explored_curiosity, e.at, p)
 
 
 @NEEDS.reducer(projects_c.OBJECTIVE_CLOSED)
@@ -238,7 +238,7 @@ def _objective_done(s: NeedsState, e, cx) -> NeedsState:
     d = e.data
     if d.mode != projects_c.PERSONA or d.status != projects_c.DONE or not d.title.ref:
         return s
-    done = Done(d.title.ref, e.at, _concerned(d.owner, d.about), d.sensitivity)
+    done = Done(d.title.ref, e.at, concerned_people(d.owner, d.about), d.sensitivity)
     return replace(s, done=(*s.done, done)[-DONE_KEPT:])
 
 
@@ -264,7 +264,7 @@ def _learned_a_belief(s: NeedsState, e, cx) -> NeedsState:
         # mangé des pâtes »
         kept = tuple(sorted(kept, key=lambda t: (-t.importance, -t.at, t.ref))[:TOLD_KEPT])
         s = replace(s, told=s.told.set(person, kept))
-    return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
+    return relieved(with_anchors(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
 
 
 def _unlearned(s: NeedsState, item: int) -> NeedsState:
@@ -300,7 +300,7 @@ def _said(s: NeedsState, e, cx) -> NeedsState:
     p = params(cx.params)
     if d.kind in ABSORBING_KINDS:
         # ce qu'elle a fait pendant une séance l'occupe et la dit un peu : pas de vide
-        s = _relieve(_touch(s, e.at, p), c.EXPRESSION, p.worked_expression, e.at, p)
+        s = relieved(with_anchors(s, e.at, p), c.EXPRESSION, p.worked_expression, e.at, p)
         return replace(s, idle_since=e.at, lonely_since=e.at)
     if not d.visible or not d.target:
         return s
@@ -314,9 +314,9 @@ def _said(s: NeedsState, e, cx) -> NeedsState:
             if len(used) > USED_KEPT:
                 used = FrozenDict(sorted(used.items(), key=lambda kv: (kv[1], kv[0]))[-USED_KEPT:])
             s = replace(s, used=used)
-    s = _touch(s, e.at, p)
-    s = _relieve(s, c.SOCIAL, _shared(p.said_social, _company(cx.facts.get, d.target, p)), e.at, p)
-    s = _relieve(s, c.EXPRESSION, p.initiative_expression if d.kind == Kind.INITIATIVE else p.reply_expression,
+    s = with_anchors(s, e.at, p)
+    s = relieved(s, c.SOCIAL, shared_factor(p.said_social, company_share(cx.facts.get, d.target, p)), e.at, p)
+    s = relieved(s, c.EXPRESSION, p.initiative_expression if d.kind == Kind.INITIATIVE else p.reply_expression,
                  e.at, p)
     return replace(s, idle_since=e.at, lonely_since=e.at)
 
@@ -326,7 +326,7 @@ def _working(s: NeedsState, e, cx) -> NeedsState:
     """Le temps de ses besoins commence à compter dès qu'elle vit quelque chose
     (même une initiative à laquelle elle renonce) ; une séance de travail
     l'occupe (pas de vide)."""
-    s = _touch(s, e.at, params(cx.params))
+    s = with_anchors(s, e.at, params(cx.params))
     if e.data.kind not in ABSORBING_KINDS:
         return s
     kept = FrozenDict({k: t for k, t in s.working.items() if e.at - t < WORK_STALE})

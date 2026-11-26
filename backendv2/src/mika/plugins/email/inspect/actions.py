@@ -33,7 +33,7 @@ from mika.plugins.email.inspect.common import (
     unread,
     view_link,
 )
-from mika.plugins.email.inspect.mail import _read_draft, apply
+from mika.plugins.email.inspect.mail import apply, read_draft
 from mika.ports.mail import PIECE_MAX, PIECES_MAX, PIECES_TOTAL_MAX, File, Moved, addresses
 from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase
@@ -295,7 +295,7 @@ async def _tidy(s: EmailState, frame: Frame, args: TidyArgs, ctx: Any) -> Done:
             failed = await port.mark_seen([m.ref for m in todo]) if todo else 0
         except (OSError, RuntimeError, ValueError):
             failed = len(todo)
-        drafts = tuple(d for m in todo for d in _read_draft(s, m.ref, ctx.by, "lu"))
+        drafts = tuple(d for m in todo for d in read_draft(s, m.ref, ctx.by, "lu"))
         done = len(todo) - failed
         note = f" ({plural(failed, 'refusé', 'refusés')} par le serveur)" if failed else ""
         said = f"{plural(done, 'mail marqué comme lu', 'mails marqués comme lus')}{note}." if todo else "Déjà lus."
@@ -331,7 +331,7 @@ async def _tidy_away(s: EmailState, port: Any, found: list[Any], args: TidyArgs,
     except (OSError, RuntimeError, ValueError) as exc:  # un port qui lève malgré tout : rien n'est parti
         moved = Moved(done={}, refused={m.ref: str(exc) for m in found})
     done = moved.done
-    drafts = tuple(d for m in found if m.ref in done for d in _read_draft(s, m.ref, by, how))
+    drafts = tuple(d for m in found if m.ref in done for d in read_draft(s, m.ref, by, how))
     refused = len(found) - len(done)
     if role:
         label = dict(GESTURES)[args.geste].lower()

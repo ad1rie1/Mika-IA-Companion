@@ -34,7 +34,7 @@ from mika.kernel.inspect import (
     walk_blocks,
 )
 from mika.plugins.email.inspect import mail_key
-from mika.plugins.email.inspect.mail import _document
+from mika.plugins.email.inspect.mail import document_blocks
 from mika.ports.mail import Mail
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
@@ -50,7 +50,7 @@ def test_long_reading_parts_preserve_every_character_and_use_line_boundaries():
     pieces = []
     for number in (1, 2, 3):
         ctx = InspectContext(store=None, ports={}, params={"page_texte": str(number)})
-        pieces.append(next(b.text for b in _document(ctx, "<long@x>", text) if isinstance(b, Prose)))
+        pieces.append(next(b.text for b in document_blocks(ctx, "<long@x>", text) if isinstance(b, Prose)))
     assert "".join(pieces) == text
     assert all(p.startswith("Une ligne") for p in pieces)
 

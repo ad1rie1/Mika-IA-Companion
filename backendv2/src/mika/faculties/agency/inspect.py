@@ -13,7 +13,7 @@ from mika.contracts import agency as c
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.agency import AGENCY, AgencyParams, AgencyState, _params, length, restraint
+from mika.faculties.agency import AGENCY, AgencyParams, AgencyState, length, params, restraint
 from mika.kernel.clock import HOUR, MINUTE, local
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -130,7 +130,7 @@ def _stretch(s: AgencyState, p: AgencyParams, ignored: int) -> float:
 @AGENCY.inspect("initiatives", title="Initiatives", section="decisions", order=50,
                 description="Combien elle prend la parole d'elle-même, ce qui la retient, et si on lui répond.")
 def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _params(frame.env.params_of("agency", frame.root))
+    p = params(frame.env.params_of("agency", frame.root))
     r = frame.get(c.AGENCY)
     ignored = frame.get(attention_c.IGNORED)
     now = frame.now

@@ -18,8 +18,8 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.affect import (
     AFFECT,
     AffectState,
-    _params,
     hostility,
+    params,
     prose,
     regard,
     stance_reading,
@@ -124,7 +124,7 @@ def _clockwork(frame: Frame) -> ph.Clockwork:
 
 
 def _p(frame: Frame) -> AffectParams:
-    return _params(frame.env.params_of("affect", frame.root))
+    return params(frame.env.params_of("affect", frame.root))
 
 
 def _at_rest(m: c.MoodReading, p: AffectParams) -> bool:

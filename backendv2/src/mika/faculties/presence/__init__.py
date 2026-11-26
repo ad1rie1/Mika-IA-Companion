@@ -39,7 +39,7 @@ PRESENCE = Faculty("presence", state=PresenceState, init=lambda p: PresenceState
 PRESENCE.declare(*c.ALL)
 
 
-def _handles(s: PresenceState) -> set[str]:
+def linked_handles(s: PresenceState) -> set[str]:
     return {link.handle for link in s.links.values()}
 
 
@@ -67,7 +67,7 @@ def _disconnected(s: PresenceState, e, cx) -> PresenceState:
     if link is None:
         return s
     s = replace(s, links=s.links.delete(e.data.connection))
-    if link.handle not in _handles(s):
+    if link.handle not in linked_handles(s):
         s = replace(s, since=s.since.delete(link.handle))
     return _stop_typing(s, link.handle, e.data.connection)
 
@@ -100,7 +100,7 @@ def _sent(s: PresenceState, e, cx) -> PresenceState:
 
 @PRESENCE.fact(c.PRESENT)
 def _present(s: PresenceState, cx) -> tuple[str, ...]:
-    return tuple(sorted(_handles(s)))
+    return tuple(sorted(linked_handles(s)))
 
 
 @PRESENCE.fact(c.SINCE)

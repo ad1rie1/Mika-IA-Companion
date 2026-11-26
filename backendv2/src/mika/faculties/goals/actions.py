@@ -290,7 +290,7 @@ class RescheduleArgs(BaseModel):
     urgent: Annotated[bool, URGENT_KNOB] = False
 
 
-def _reschedulable(s: GoalsState, frame: Frame, key: str) -> bool:
+def can_reschedule(s: GoalsState, frame: Frame, key: str) -> bool:
     g = goal_at(s, key)
     return g is not None and g.kind == c.REMINDER and live(g, frame.now) and not g.delivered
 
@@ -304,7 +304,7 @@ def _reschedule_initial(s: GoalsState, frame: Frame, key: str, ports: Mapping[st
 
 
 @GOALS.action("reprogrammer", title="Reprogrammer le rappel", args=RescheduleArgs, emits=[GOAL_REFRAMED],
-              subject="goal", order=5, available=_reschedulable, initial=_reschedule_initial,
+              subject="goal", order=5, available=can_reschedule, initial=_reschedule_initial,
               description="Son texte, son heure, s'il est urgent. Ses tentatives repartent de zéro.")
 def _reschedule(s: GoalsState, frame: Frame, args: RescheduleArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
@@ -339,7 +339,7 @@ class PriorityArgs(BaseModel):
                         ] = c.NORMAL
 
 
-def _prioritizable(s: GoalsState, frame: Frame, key: str) -> bool:
+def can_prioritize(s: GoalsState, frame: Frame, key: str) -> bool:
     g = goal_at(s, key)
     return g is not None and live(g, frame.now) and g.kind == c.EXPLORATION
 
@@ -350,7 +350,7 @@ def _priority_initial(s: GoalsState, frame: Frame, key: str) -> dict[str, Any]:
 
 
 @GOALS.action("priorite", title="Priorité", args=PriorityArgs, emits=[GOAL_REFRAMED], subject="goal", order=25,
-              available=_prioritizable, initial=_priority_initial,
+              available=can_prioritize, initial=_priority_initial,
               description="Entre deux buts qui peuvent avancer, le plus prioritaire passe devant.")
 def _prioritize(s: GoalsState, frame: Frame, args: PriorityArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
@@ -394,13 +394,13 @@ class ReopenArgs(BaseModel):
                            ] = Field(default="", max_length=2000)
 
 
-def _reopenable(s: GoalsState, frame: Frame, key: str) -> bool:
+def can_reopen(s: GoalsState, frame: Frame, key: str) -> bool:
     g = goal_at(s, key)
     return g is not None and g.kind == c.EXPLORATION and g.status in c.CLOSED_STATUSES and g.status != c.ACHIEVED
 
 
 @GOALS.action("rouvrir", title="Rouvrir", args=ReopenArgs, emits=[GOAL_REOPENED, GOAL_AMENDED], subject="goal",
-              order=12, available=_reopenable,
+              order=12, available=can_reopen,
               description="Il reprend là où il s'était arrêté, avec quelques séances de plus. Elle n'en ressent rien : ni "
                           "fierté, ni frustration.")
 def _reopen(s: GoalsState, frame: Frame, args: ReopenArgs, ctx: ActionContext) -> Done:
@@ -439,7 +439,7 @@ class TaskArgs(BaseModel):
     task: Annotated[str, Knob(label="Tâche", widget="hidden")] = Field(min_length=1, max_length=12)
 
 
-def _plannable(s: GoalsState, frame: Frame, key: str) -> bool:
+def can_plan(s: GoalsState, frame: Frame, key: str) -> bool:
     g = goal_at(s, key)
     return g is not None and live(g, frame.now) and g.kind == c.EXPLORATION
 
@@ -456,7 +456,7 @@ def _task_common(g: Goal, ctx: ActionContext) -> dict[str, Any]:
 
 
 @GOALS.action("tache_ajouter", title="Ajouter une tâche", args=TaskAddArgs, emits=[TASK_ADDED], subject="goal",
-              order=40, available=_plannable,
+              order=40, available=can_plan,
               description="Une étape de son plan de travail : elle la voit à chaque séance, marquée « demandée ».")
 def _task_add(s: GoalsState, frame: Frame, args: TaskAddArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
@@ -468,7 +468,7 @@ def _task_add(s: GoalsState, frame: Frame, args: TaskAddArgs, ctx: ActionContext
 
 
 @GOALS.action("tache_statut", title="Changer le statut", args=TaskStatusArgs, emits=[TASK_CHANGED],
-              subject="goal", order=41, available=_plannable)
+              subject="goal", order=41, available=can_plan)
 def _task_status(s: GoalsState, frame: Frame, args: TaskStatusArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
     t = _task_of(g, args.task)
@@ -482,7 +482,7 @@ def _task_status(s: GoalsState, frame: Frame, args: TaskStatusArgs, ctx: ActionC
 
 
 @GOALS.action("tache_modifier", title="Modifier la tâche", args=TaskEditArgs, emits=[TASK_CHANGED],
-              subject="goal", order=42, available=_plannable)
+              subject="goal", order=42, available=can_plan)
 def _task_edit(s: GoalsState, frame: Frame, args: TaskEditArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
     t = _task_of(g, args.task)
@@ -503,7 +503,7 @@ def _task_edit(s: GoalsState, frame: Frame, args: TaskEditArgs, ctx: ActionConte
 
 
 @GOALS.action("tache_retirer", title="Retirer la tâche", args=TaskArgs, emits=[TASK_REMOVED], subject="goal",
-              order=43, available=_plannable, danger=True, confirm="Retirer cette tâche de son plan ?")
+              order=43, available=can_plan, danger=True, confirm="Retirer cette tâche de son plan ?")
 def _task_remove(s: GoalsState, frame: Frame, args: TaskArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
     t = _task_of(g, args.task)
