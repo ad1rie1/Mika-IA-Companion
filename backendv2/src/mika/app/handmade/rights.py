@@ -146,20 +146,19 @@ def audience_for(who: Who, canal: str) -> tuple[Audience, str]:
                     person="" if who.unknown else who.person), who.kind
 
 
-def _tool_of(ui: UI, spec: Any, g: Grant) -> str:
-    """Le nom chez elle de l'outil qu'un droit désigne : ses familles (« Mémoire · memory_search »), un service
-    (« « meteo » · echo » : ``mcp_<serveur>_<outil>``), une app (le nom même)."""
-    kind = spec.key.rsplit(".", 1)[-1]
-    if kind == "familles":
+def _tool_of(ui: UI, sort: str, g: Grant, seen: dict[str, Any]) -> str:
+    """Le nom chez elle de l'outil qu'un droit désigne : ses familles (« Mémoire · memory_search ») ; ce qui vient
+    d'ailleurs, tel que sa part le dit (``OutsidePart.tool`` : un service, le nom que son service a donné à l'outil —
+    une empreinte comprise, pour un nom trop long ou qu'un autre a déjà ; une app, le nom même ; vide : il n'est pas
+    offert), lu une fois par lecture (``seen``, ``OutsidePart.seen``) ; sinon, le titre même du droit."""
+    if sort == "familles":
         return g.title.rsplit(" · ", 1)[-1]
-    if kind == "services":
-        server, remote = g.resource.partition(":")[2], g.title.rsplit(" · ", 1)[-1]
-        base = f"mcp_{server}_{_UNSAFE.sub('_', remote)}"
-        if base in ui.kernel.registry.tools:
-            return base
-        return next((n for n in ui.kernel.registry.tools if n.startswith(f"mcp_{server}_")
-                     and n.endswith(_UNSAFE.sub("_", remote)[-20:])), base)
-    return g.title
+    found = outside_me.parts().get(sort)
+    if found is None:
+        return g.title
+    if sort not in seen:
+        seen[sort] = found.seen(ui.kernel, ui.kernel.mind.frame())
+    return found.tool(seen[sort], g)[0]
 
 
 def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
@@ -171,6 +170,7 @@ def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
     # une ressource réglée par son tableau (un projet, un agenda, ADR 0309) : ce qu'elle en fait, pas un outil
     by_sort: dict[str, dict[str, Grant]] = {s.sort: {} for s in sorts()}
     through: Grant | None = None
+    seen: dict[str, Any] = {}
     for spec, found in rights.grants(ui, audience, kind):
         sort = spec.key.rsplit(".", 1)[-1]
         for g in found:
@@ -178,8 +178,8 @@ def exact(ui: UI, who: Who, canal: str) -> dict[str, Any]:
                 through = g
             elif sort in by_sort:
                 by_sort[sort][g.resource] = g
-            else:
-                tools[_tool_of(ui, spec, g)] = g
+            elif tool := _tool_of(ui, sort, g, seen):  # un outil qui n'est pas offert n'a pas de ligne
+                tools[tool] = g
     return {"tools": tools, "sorts": by_sort, "canal": through, "kind": kind}
 
 

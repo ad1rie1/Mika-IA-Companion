@@ -13,6 +13,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from mika.adapters.mail.config import MailAccount, MailConfig
+from mika.adapters.mcp.config import MAX_TOOL_NAME, tool_name
 from mika.adapters.teams.config import TeamsAccount, TeamsConfig
 from mika.app.domains.mail.settings import MailSettings
 from mika.app.domains.teams.settings import TeamsSettings
@@ -23,6 +24,8 @@ from mika.faculties.projects.faculty import opened
 from mika.inspector import ui as console_ui
 from mika.inspector.pages import families, rights_tables
 from mika.kernel.events import Origin
+from mika.plugins.mcp import specs_of
+from mika.ports.mcp import CLOSED, Access, OfferedTool, ServerStatus
 from mika.vocab.access import EVERYONE, INTERNAL, OWNER, PERSON, SELF, Table, ToolRule
 from mika.vocab.canals import CanalRule, CanalTable
 from tests.protocol.test_console_mcp import html_of, submit
@@ -312,3 +315,40 @@ def test_a_search_among_her_tools_unfolds_a_ligature(world, monkeypatch):  # noq
 
     monkeypatch.setattr(families, "entries", with_a_ligature)
     assert "Écrire à sa sœur" in html_of(client.get(FAMILIES, params={"q": "soeur"}))
+
+
+def test_the_exact_rights_of_a_service_name_its_tools_as_she_does_even_a_long_one(world, monkeypatch):  # noqa: F811
+    """Les droits exacts rangent l'outil d'un service sous son nom chez elle, celui que son service lui a donné
+    (``adapters/mcp/config.py::tool_name``) et que la part des services redit (``OutsidePart.tool``). Un nom trop
+    long y prend une empreinte, que rien ne recompose depuis le droit (« « meteo » · <son outil> ») : la page le
+    rangeait sous un autre nom, et un outil ouvert passait pour fermé dans Réglages › Droits. De même pour deux
+    outils que le nettoyage de leur nom rend égaux : le second prend une empreinte, et son droit, rangé sous le nom
+    du premier, écrasait celui du premier."""
+    client, live, _ = world
+    bootstrap(client)
+    port = live.kernel.ports["mcp"]
+    # « alerte_pluie » fermé, tout le reste ouvert (la première ligne qui le concerne décide)
+    lines = (Access(who=("tous",), read="non", tools=("alerte_pluie",)),
+             Access(who=("tous",), when=("conversation",), read="seule", act="carte", keep="public"))
+    remote = "lire_le_rapport_trimestriel_des_ventes_par_region_et_par_produit"
+    long = tool_name("meteo", remote)
+    assert len(f"mcp_meteo_{remote}") > MAX_TOOL_NAME and long != f"mcp_meteo_{remote}"  # il porte une empreinte
+    first = tool_name("meteo", "alerte.pluie")
+    second = tool_name("meteo", "alerte_pluie", {first})
+    assert first == "mcp_meteo_alerte_pluie" and second != first  # le second aussi
+    named = {"prevision": tool_name("meteo", "prevision"), remote: long, "alerte.pluie": first, "alerte_pluie": second}
+    offered = tuple(OfferedTool("meteo", r, name, f"L'outil {r}.", {}, "lecture", frozenset({"conversation"}), False,
+                                3, "La météo d'une ville.", "", False, access=lines, default=CLOSED)
+                    for r, name in named.items())
+    status = ServerStatus("meteo", "distant", True, True, "connecte", purpose="La météo d'une ville.", access=lines,
+                          default=CLOSED)
+    monkeypatch.setattr(port, "offered", lambda: offered)
+    monkeypatch.setattr(port, "statuses", lambda: (status,))
+    specs, bundles = specs_of(offered)
+    assert live.kernel.registry.set_dynamic("mcp", specs, bundles) == []
+    page = html_of(client.get(PAGE, params={"qui": "toi", "canal": "web:prive"}))
+    services = page.split('id="d-services" data-pane', 1)[1].split("data-pane", 1)[0]
+    # l'étiquette de chacun de ses outils sur la ligne du service (la légende de la page en a deux aussi)
+    chips = {name: state for state, name in re.findall(r'<span class="rights-chip (on|shut)">([^<]+)</span>', services)
+             if name.startswith("mcp_")}
+    assert chips == {"mcp_meteo_prevision": "on", long: "on", first: "on", second: "shut"}, chips

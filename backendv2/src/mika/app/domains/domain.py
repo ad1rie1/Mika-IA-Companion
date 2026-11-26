@@ -248,7 +248,9 @@ class OutsidePart:
     #: ce qu'il lit une fois par lecture de la matrice : ``seen(kernel, frame)`` (les outils qu'offrent ses services et
     #: leur état ; les apps forgées) — ce que ses autres lectures reçoivent (``seen``)
     seen: Callable[..., Any]
-    #: (l'outil chez elle, sa ressource) d'une de ses lignes : ``tool(seen, g)`` ; un outil vide : il n'est pas offert
+    #: (l'outil chez elle, sa ressource) d'une de ses lignes : ``tool(seen, g)`` ; un outil vide : il n'est pas offert.
+    #: Le nom même que sa source lui a donné (un service : empreinte comprise, pour un nom trop long ou déjà pris) :
+    #: l'écran Outils et les droits exacts de Réglages › Droits le lisent ici, et ne le recomposent jamais
     tool: Callable[..., tuple[str, str]]
     #: la lecture même de sa ligne, pour la redire à la personne : ``allowance(seen, frame, g, resource, tool, acts,
     #: audience, kind, rights, close)`` rend une ``vocab.rights.Allowance``, ou ``None``
