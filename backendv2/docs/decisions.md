@@ -25,7 +25,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 |---|---|
 | Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223, 0306, 0311 |
 | Le stockage | 0004, 0101, 0212 |
-| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224, 0263, 0264 |
+| Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224, 0263, 0264, 0315 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226, 0298, 0303, 0304 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227, 0283 |
 | Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260, 0262, 0265, 0268, 0270, 0271, 0272, 0273, 0274, 0275, 0276, 0277, 0278, 0279, 0280, 0289, 0313 |
@@ -588,6 +588,16 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Pourquoi :* un trait du portrait, redit par elle, était noté comme une note sur elle, repris par le récit de la nuit, et revenait dans son prompt par trois sections ; chaque redite le remettait en tête de la matière du récit.
 
 *Révise 0087 (en partie), 0090 (en partie).*
+
+### 0315 — Où va un sous-sujet de sa mémoire : ses événements au contrat, leur réduction dans `faculty.py`
+
+- **La mémoire a son modèle, qui n'est pas celui des projets** (ADR 0313). Ses événements sont tous publics : ils sont au contrat (`contracts/memory.py`), avec leurs charges utiles, même ceux qu'aucune autre faculté ne lit encore.
+- **Leur réduction est dans `faculty.py`, seul** : chaque réducteur (`@MEMORY.reducer`), chaque fait (`@MEMORY.fact`) et son appréciation (`@MEMORY.appraisal`). Ils sont courts et partagent une tranche plate, que l'oubli traverse d'un coup.
+- **Ses projections sont dans `projections.py`**, et dans `archive.py` pour l'archive de sa vie ; ses tables restent derrière sa porte (ADR 0078).
+- **Ce qu'un sous-sujet a de propre vit dans son module** : ses règles pures, son processus, son interprète, sa section (`consolidation.py`, `night.py`, `reread.py`, `life.py`, `veiled.py`…). Ses outils sont dans `tools.py`, ses vues dans `inspect.py`, ses actions dans `actions.py`. Un sous-sujet neuf suit ce modèle.
+- **La garde** (`tests/architecture/test_memory_reduces_in_one_place.py`) le lit par l'AST : aucun réducteur, aucun fait, aucune appréciation hors de `faculty.py` ; aucune projection hors de `projections.py` et d'`archive.py`.
+
+*Pourquoi :* l'audit d'organisation du 26 novembre a trouvé la mémoire bien rangée, sur un modèle que rien n'écrivait : le prochain sous-sujet n'aurait pas su s'il devait suivre l'ADR 0313, ses réducteurs à côté de ses règles, ou celui-ci. L'ADR 0313 soigne un `faculty.py` de 3 600 lignes dont quarante modules importaient les formes ; ici les réducteurs font dix lignes, et les couper par sous-sujet couperait aussi l'oubli.
 
 ## Identité et divulgation
 
