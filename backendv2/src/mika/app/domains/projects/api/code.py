@@ -90,7 +90,7 @@ from mika.faculties.projects.inspect_merge import REFUSED_WORDS
 from mika.faculties.projects.inspect_reviews import REVIEW_WORDS
 from mika.faculties.projects.inspect_words import OBJ_FR
 from mika.faculties.projects.issues import issue_ticket as _issue_ticket
-from mika.faculties.projects.pulls import PULL_ORDER, READY
+from mika.faculties.projects.pulls import READY, pull_order
 from mika.faculties.projects.pulls import pull_stage as _pull_state
 from mika.faculties.projects.pulls import pulled as _pulled
 from mika.ports.workshop import (
@@ -516,7 +516,7 @@ async def pull_list(call: Call) -> dict[str, Any]:
     fusionner."""
     sc, r = opened_project(call)
     p = r.p
-    found = sorted(_pulled(p), key=lambda o: (PULL_ORDER[_pull_state(p, o)], -o.pull_at, -o.id))
+    found = pull_order(p)
     page, size = _paged(call)
     shown = found[(page - 1) * size: page * size]
     texts = texts_of(call, _linked_refs(p, shown))
