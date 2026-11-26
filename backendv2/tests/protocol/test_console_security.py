@@ -14,6 +14,8 @@ from mika.runtime.inspection import Inspection
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
 INSPECTOR = Path(__file__).resolve().parents[2] / "src" / "mika" / "inspector"
+#: les consoles des domaines (ADR 0310) : leurs gabarits vivent dans leur dossier, aux mêmes adresses
+DOMAINS = INSPECTOR.parent / "app" / "domains"
 TAG = re.compile(r"<([a-zA-Z][a-zA-Z0-9-]*)((?:[^>\"']|\"[^\"]*\"|'[^']*')*)>")
 PAYLOAD = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
 
@@ -68,5 +70,7 @@ def test_only_audited_renderers_make_markup():
                 if path.name not in {"svg.py", "document.py"}:
                     offenders.append(f"{path.name}:{node.lineno}")
     assert offenders == []
-    templates = [p for p in (INSPECTOR / "templates").rglob("*.html") if "|safe" in p.read_text(encoding="utf-8")]
+    read = [*(INSPECTOR / "templates").rglob("*.html"), *DOMAINS.glob("*/console/templates/**/*.html")]
+    assert len(read) > len(list((INSPECTOR / "templates").rglob("*.html")))  # ceux des domaines sont bien lus
+    templates = [p for p in read if "|safe" in p.read_text(encoding="utf-8")]
     assert templates == []

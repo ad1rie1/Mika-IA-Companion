@@ -481,12 +481,15 @@ def test_every_fiche_kind_is_registered_once():
 
 APP = Path(mika.__file__).parent / "app"
 HANDMADE = APP / "handmade"
-#: où vivent les fiches : celles du cadre (``subjects/``), et celle d'un projet et ses onglets, dans le dossier de
+#: où vivent les fiches : celles du cadre (``subjects/``), celle d'un projet et ses onglets, dans le dossier de
 #: leur domaine (ADR 0310)
 FICHES = (HANDMADE / "subjects", APP / "domains" / "projects" / "console")
+#: … et celles des autres domaines, chacune dans la console de son dossier (``<nom>/console/subject.py``)
+DOMAIN_FICHES = tuple(sorted((APP / "domains").glob("*/console/subject.py")))
 
 #: Ce qu'une fiche lit par les fonctions d'une faculté, à côté de sa vue (ADR 0218, décision Q05 de l'audit du
-#: 2026-11-05) : par module de ``subjects/`` et de la console des projets (``FICHES``), chaque nom importé d'une
+#: 2026-11-05) : par module de ``subjects/``, de la console des projets (``FICHES``) et par fiche d'un autre domaine
+#: (``DOMAIN_FICHES``), chaque nom importé d'une
 #: faculté hors de son ``inspect`` (ses mots et ses règles restent permis), et sa raison. Ce que sa vue montre déjà se lit dans ses blocs ou son en-tête : un nom
 #: qui n'est pas ici fait échouer ``test_a_fiche_reads_beside_its_view_only_what_it_declares``.
 READS: dict[str, dict[str, str]] = {
@@ -617,8 +620,9 @@ def _faculty_reads(path: Path) -> set[str]:
 def test_a_fiche_reads_beside_its_view_only_what_it_declares():
     """La fiche d'un but recalculait sa sorte, son statut et son envie à côté de sa vue (K11-08) : la vue n'était plus
     la source, et la prochaine séance avait déjà divergé."""
-    found = {path.relative_to(APP).as_posix(): _faculty_reads(path) for folder in FICHES
-             for path in sorted(folder.glob("*.py"))}
+    read = {*(path for folder in FICHES for path in folder.glob("*.py")), *DOMAIN_FICHES}
+    assert len(DOMAIN_FICHES) >= 6  # les fiches des domaines sont bien lues
+    found = {path.relative_to(APP).as_posix(): _faculty_reads(path) for path in sorted(read)}
     assert {name: reads for name, reads in found.items() if reads} == {name: set(r) for name, r in READS.items()}
 
 

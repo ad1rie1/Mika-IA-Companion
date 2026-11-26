@@ -166,7 +166,10 @@ def _strings(path: Path) -> list[tuple[int, str]]:
 
 
 def test_no_drawn_page_writes_the_address_of_a_fiche_by_hand():
-    written = [f"{path.relative_to(APP)}:{line}" for folder in ("handmade", "settings_sections")
-               for path in APP.joinpath(folder).rglob("*.py")
-               for line, s in _strings(path) if "/fiche/" in s]
+    """Les pages du cadre (``handmade/``, ``settings_sections/``), et celles que chaque domaine dessine dans sa console
+    (``domains/<nom>/console/``, ADR 0310)."""
+    read = [*(path for folder in ("handmade", "settings_sections") for path in APP.joinpath(folder).rglob("*.py")),
+            *APP.joinpath("domains").glob("*/console/**/*.py")]
+    assert any(path.name == "subject.py" for path in read)  # les consoles des domaines sont bien lues
+    written = [f"{path.relative_to(APP)}:{line}" for path in read for line, s in _strings(path) if "/fiche/" in s]
     assert not written, written

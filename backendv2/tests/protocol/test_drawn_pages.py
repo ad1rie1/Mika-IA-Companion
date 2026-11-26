@@ -14,6 +14,7 @@ import pytest
 import mika
 import mika.app.handmade as handmade
 from mika.app.console import NAVIGATION
+from mika.app.domains import DOMAINS
 from mika.app.handmade import blocks as drawn_blocks
 from mika.app.handmade import pages, plain
 from mika.app.handmade.lists import text as cell_text
@@ -95,26 +96,47 @@ def test_nothing_cites_a_tab_module_that_moved():
 NOT_A_DESTINATION = {"shared", "base", "home", "now", "person", "fiches", "projet-git", "droits", "recherche",
                      "evenement", "episode", "parole"}
 
+#: le dossier des domaines (ADR 0310) : la console d'un domaine (``<nom>/console/``) a ses modules, ses gabarits
+#: (``templates/handmade/``) et sa feuille (``static/handmade/``), sous les noms et aux adresses de l'inspecteur
+HOME = Path(mika.__file__).parent / "app" / "domains"
+
 
 def test_templates_and_sheets_are_named_after_their_destination():
     """K11-10 : un onglet dessine son gabarit ``handmade/<destination>/<onglet>.html`` et lit la feuille
     ``handmade/<destination>.css`` (ou ``<destination>_<partie>.css``), sous la clé de sa destination — pas sous un
     nom anglais à côté (``conversations/`` pour fil, ``mail.css`` pour courrier), ni dans un second dossier ou une
-    seconde feuille de même sens (``people/`` à côté de ``personnes/``, ``nights.css`` à côté de ``pensees.css``)."""
+    seconde feuille de même sens (``people/`` à côté de ``personnes/``, ``nights.css`` à côté de ``pensees.css``).
+    Ceux de l'inspecteur, et ceux de la console de chaque domaine."""
     named = set(destinations(NAVIGATION)) | NOT_A_DESTINATION
     inspector = Path(mika.__file__).parent / "inspector"
-    folders = {p.name for p in (inspector / "templates" / "handmade").iterdir() if p.is_dir()}
-    sheets = {p.stem.split("_")[0] for p in (inspector / "static" / "handmade").glob("*.css")}
+    folders = {p.name for p in [*(inspector / "templates" / "handmade").iterdir(),
+                                *HOME.glob("*/console/templates/handmade/*")] if p.is_dir()}
+    sheets = {p.stem.split("_")[0] for p in [*(inspector / "static" / "handmade").glob("*.css"),
+                                             *HOME.glob("*/console/static/handmade/*.css")]}
+    assert {"courrier", "projets", "reveils"} <= folders & sheets  # ceux des domaines sont bien lus
     assert sorted(folders - named) == []
     assert sorted(sheets - named) == []
 
 
 def test_a_destination_is_drawn_by_one_module():
-    """K0-10 : la page d'entrée d'une destination vit avec ses onglets, dans son module de ``tabs/`` ; aucun module de
-    ``app/handmade/`` ne porte le nom d'un module de ``tabs/`` (``people.py`` à côté de ``tabs/people.py``)."""
+    """K0-10 : la page d'entrée d'une destination vit avec ses onglets, dans son module — ``tabs/<destination>.py``
+    dans le cadre, ``console/tabs.py`` dans le dossier d'un domaine (ADR 0310). Aucun module ne porte le nom d'un
+    module de destination à côté de lui : ni dans ``app/handmade/`` (``people.py`` à côté de ``tabs/people.py``), ni
+    dans la console d'un domaine (``courrier.py`` ou ``mail.py`` à côté de son ``tabs.py``) ; et le cadre ne dessine pas
+    sous son nom la destination d'un domaine (``handmade/mail.py``, ``tabs/courrier.py``)."""
     root = Path(handmade.__file__).parent
-    beside = {p.stem for p in root.glob("*.py")} & {p.stem for p in (root / "tabs").glob("*.py")}
-    assert sorted(beside - {"__init__"}) == []
+    frame = {p.stem for p in root.glob("*.py")} - {"__init__"}
+    tabs = {p.stem for p in (root / "tabs").glob("*.py")} - {"__init__"}
+    assert sorted(frame & tabs) == []
+    # les domaines qui dessinent leur destination : leur nom et la clé de leur destination
+    drawing = {d.name: {d.name, d.destination.key} for d in DOMAINS
+               if d.destination is not None and (HOME / d.name / "console" / "tabs.py").is_file()}
+    assert {"mail", "projects", "wakeup"} <= set(drawing)  # la recherche trouve bien leurs modules
+    taken = {n for names in drawing.values() for n in names}
+    assert sorted((frame | tabs) & taken) == []
+    beside = {d: sorted({p.stem for p in (HOME / d / "console").glob("*.py")} & names)
+              for d, names in drawing.items()}
+    assert {d: found for d, found in beside.items() if found} == {}
 
 
 def test_every_drawn_tab_is_a_tab():
@@ -123,14 +145,18 @@ def test_every_drawn_tab_is_a_tab():
 
 
 def test_there_is_one_way_to_draw_a_tab():
-    """Un seul adaptateur d'onglet (``tabs.Tab``) : personne d'autre, dans ``app/handmade/``, ne dérive de ``Drawn``."""
+    """Un seul adaptateur d'onglet (``tabs.Tab``) : personne d'autre, dans ``app/handmade/`` ni dans la console d'un
+    domaine (ADR 0310), ne dérive de ``Drawn``."""
     root = Path(handmade.__file__).parent
+    read = [*sorted(root.rglob("*.py")), *sorted(HOME.glob("*/console/**/*.py"))]
+    assert any(path.name == "tabs.py" for path in read)  # les modules de console des domaines sont bien lus
     others = []
-    for path in sorted(root.rglob("*.py")):
+    for path in read:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ClassDef) and any(getattr(b, "id", "") == "Drawn" for b in node.bases):
-                others.append(f"{path.relative_to(root)}::{node.name}")
-    assert others == ["tabs/__init__.py::Tab"]
+            if isinstance(node, ast.ClassDef) and any(getattr(b, "id", getattr(b, "attr", "")) == "Drawn"
+                                                       for b in node.bases):  # ``Drawn`` comme ``ui.Drawn``
+                others.append(f"{path.relative_to(root.parent).as_posix()}::{node.name}")
+    assert others == ["handmade/tabs/__init__.py::Tab"]
 
 
 def test_the_text_of_a_cell_is_read_one_way():

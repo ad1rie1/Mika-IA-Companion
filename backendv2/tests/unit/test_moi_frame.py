@@ -25,8 +25,17 @@ from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
 from mika.vocab.ownership import OWNED
 
 PACKAGE = Path(me.__file__).parent
-MODULES = sorted(PACKAGE.glob("*.py"))
+#: les modules du paquet ``app/me``, le cadre de l'API par personne
+FRAME = sorted(PACKAGE.glob("*.py"))
+#: … et ceux des domaines, qui en ont quitté le paquet pour leur dossier (ADR 0310) : leur API par personne et ses
+#: parts (le direct, les partages, les comptes…) ; leur console a ses propres gardes
+DOMAINS = sorted(p for p in (PACKAGE.parent / "domains").rglob("*.py") if "console" not in p.parts)
+MODULES = [*FRAME, *DOMAINS]
 IMPORT = (ast.Import, ast.ImportFrom)
+
+
+def where(path: Path) -> str:
+    return path.relative_to(PACKAGE.parent).as_posix()
 
 
 def tree(path: Path) -> ast.Module:
@@ -57,20 +66,27 @@ def test_no_route_hides_another():
     assert not hidden, hidden
 
 
+def test_the_modules_read_are_the_frame_and_the_domains():
+    """Les gardes qui suivent lisent le paquet et les modules des domaines : la recherche les trouve bien."""
+    assert len(FRAME) >= 10 and {"api.py", "live.py", "wiring.py"} <= {p.name for p in DOMAINS}
+    assert PACKAGE.parent / "domains" / "projects" / "api" / "manage.py" in DOMAINS
+
+
 def test_the_modules_take_the_frame_from_its_own_module():
-    stems = {path.stem for path in MODULES}
+    stems = {path.stem for path in FRAME}  # les modules du paquet : ce qu'on y prend, sous son propre nom
     for path in MODULES:
         for node in ast.walk(tree(path)):
             if isinstance(node, ast.ImportFrom) and node.module == "mika.app.me":
-                assert {alias.name for alias in node.names} <= stems, f"{path.name}:{node.lineno}"
+                assert {alias.name for alias in node.names} <= stems, f"{where(path)}:{node.lineno}"
 
 
 def test_each_little_helper_is_written_once():
     once = {"millis", "snippet", "allows", "held_by", "opened", "only_owner", "_ms", "_snippet"}
     for path in MODULES:
-        if path.name != "common.py":
-            defined = {node.name for node in ast.walk(tree(path)) if isinstance(node, ast.FunctionDef)}
-            assert not defined & once, path.name
+        if path != PACKAGE / "common.py":
+            defined = {node.name for node in ast.walk(tree(path))
+                       if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)}
+            assert not defined & once, where(path)
 
 
 def test_the_names_follow_the_glossary():
@@ -79,7 +95,7 @@ def test_the_names_follow_the_glossary():
     paquet ``app/moi``."""
     assert "shares" not in {path.stem for path in MODULES}
     assert not hasattr(common_me, "OWN")
-    kept = [f"{path.name}:{node.lineno}" for path in MODULES for node in ast.walk(tree(path)) if isinstance(node, IMPORT)
+    kept = [f"{where(path)}:{node.lineno}" for path in MODULES for node in ast.walk(tree(path)) if isinstance(node, IMPORT)
             for alias in node.names if (alias.asname or "").endswith("_moi")]
     assert not kept
 

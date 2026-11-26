@@ -16,7 +16,9 @@ import mika
 
 SOURCE = Path(mika.__file__).parent
 STATIC = SOURCE / "inspector" / "static"
-SHEETS = sorted(STATIC.rglob("*.css"))
+#: les feuilles de la console : celles de l'inspecteur, puis celles que les domaines gardent dans leur dossier
+#: (``app/domains/<nom>/console/static/``, ADR 0310), servies aux mêmes adresses
+SHEETS = sorted(STATIC.rglob("*.css")) + sorted((SOURCE / "app" / "domains").glob("*/console/static/**/*.css"))
 
 # ce qu'un gabarit construit (``grid c{{ b.columns }}``, la légende d'un graphique) : aucune recherche ne le trouve
 BUILT_IN_TEMPLATE = {"c2", "s2", "s3"}
