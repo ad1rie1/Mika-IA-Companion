@@ -664,6 +664,13 @@ La part de console (`ConsolePart`) dit ce qu'il inscrit dans les pages que plusi
 
 tranche = *slice* · bail = *lease* · supplanté = *superseded* · divulgation = *disclosure* · posture = *stance* · adresse (dans la console : moyen de communication) = *handle* · revendication = *claim* · liaison = *binding* · proximité = *closeness* · salon = *room* · but = *goal* · pas = *step* · projet = *project* · objectif = *objective* · exécution = *run* · atelier = *workshop* · capacité = *capability* · fichiers envoyés = *shares* (la faculté) · partage = *share* (une ressource prêtée à une personne : une boîte, un compte Teams, un service, ADR 0184–0188) · citation = *untrusted section* · pensée = *thought* · souvenir = *episode memory* · croyance = *belief* · murmure = *murmur* · vue = *inspection view* · seconde passe = *polish* · autrice = *author*
 
+Dans les projets, une même chose a plusieurs noms :
+
+- mission = objectif constant (`c.CONSTANT` ; `glance.Mission`, les `missions` de l'API) ; l'autre sorte est l'objectif ponctuel (`c.ONCE`) ;
+- registre = `tracker` = `Project.board` (`Board`, ses éléments `Item`) : les tickets (la liste `tickets`) et les listes de suivi, dont l'onglet a pour clé `suivi` et pour titre « Listes » ;
+- lien de lecture = `Project.reads` (ses règles dans `links.py`, posé par `links_set`) ; ce qu'il garde (depuis quand, le mot de son propriétaire) = `Tie` (`Project.ties`) ; à l'écran, « Dépendances » (l'onglet `liens`) ;
+- demande d'un projet à un autre = un ticket qu'il ouvre chez le projet qu'il lit : ses règles pures dans `asks.py`, son outil (`project_ask`) dans `demands.py`, ce que le demandeur en suit dans `Project.asks` (`Ask`).
+
 ## Commandes
 
 ```bash

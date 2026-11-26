@@ -1,7 +1,10 @@
-"""L'onglet « Dépôt » de la fiche d'un projet (``git``, ADR 0183, 0281) : le dépôt de l'atelier face à son dépôt
-distant — l'écart entre les deux, l'historique de chacun, ce qui n'est pas encore enregistré, les issues et pull
-requests ouvertes (GitHub), les envois et récupérations passés. Lu du port de l'atelier et, pour le distant, du port
-``repo_host`` ; les aides communes de la fiche viennent de ``inspect.py``."""
+"""L'onglet « Code » de la fiche d'un projet (``git``, ADR 0183, 0281, 0297) : son entrée. Ses sous-vues — Fichiers,
+Commits, Pull requests, Branches, Issues, CI — sont dans ``inspect_code.py`` ; ici, « le dépôt distant »
+(``vue=distant``, ce que montrait l'onglet Dépôt d'avant) : le dépôt de l'atelier face à son dépôt distant — l'écart
+entre les deux, l'historique de chacun, ce qui n'est pas encore enregistré, ses branches de travail, les issues et
+pull requests ouvertes (GitHub), les envois et récupérations passés, ses réglages. Lu du port de l'atelier et, pour le
+distant, du port ``repo_host`` ; les aides communes de la fiche viennent de ``inspect_common.py``, ses mots de
+``inspect.py``."""
 
 from __future__ import annotations
 

@@ -3,17 +3,23 @@
 - **Projets** (menu) : la page d'ensemble — « À faire » pour tous les projets,
   la liste (mode, état, ce qui t'attend, objectifs, prochaine exécution), les
   liens entre projets ; toutes les exécutions ; toutes les décisions techniques.
-- **La fiche d'un projet** (type d'objet ``project``, clé = son numéro), rangée par
-  ce qu'on y fait (ADR 0281) : Où il en est (ce qui t'attend en tête —
-  ``todo.py``, ``inspect_todo.py`` —, ses missions et ses objectifs en une ligne),
-  Missions et objectifs, Tickets, Suivi, Liens (ce qu'il lit, qui le lit, les
-  demandes — ADR 0257, 0271), Dépôt, Exécutions, Cadre (ses réglages, ses outils,
-  la validation de ses tickets), Accès, Décisions techniques, Fichiers, Carnet.
+- **La fiche d'un projet** (type d'objet ``project``, clé = son numéro), ses
+  onglets dans l'ordre de l'écran Projets (ADR 0281, 0297) : Vue d'ensemble (ce
+  qui t'attend en tête — ``todo.py``, ``inspect_todo.py`` —, ses missions et ses
+  objectifs en cours, ce qui vient, ses dernières exécutions), Objectifs, Tickets,
+  Code, Documentation, Activité (ses exécutions), Dépendances (ce qu'il lit, qui
+  le lit, les demandes — ADR 0257, 0271), Listes (ses listes de suivi),
+  Administration (son mode, son rythme, ce qu'elle peut faire sortir, ses outils,
+  la validation de ses tickets). Quatre vues de plus, que la fiche dessinée range
+  sous un autre onglet : Fichiers (sous Code), Décisions techniques (sous
+  Documentation), Carnet (sous Activité), Accès (sous Administration).
   La fiche **gouverne** : chaque onglet porte les formulaires de ce qu'il montre
   (``ActionSlot``), les actions qui valent pour tout le projet sont en tête. Les
-  onglets Fichiers (avec le téléchargement), Dépôt, Tickets et Suivi vivent à
-  part (``inspect_files.py``, ``inspect_git.py``, ``inspect_tracker.py``) : ils
-  lisent les aides communes d'ici.
+  onglets Tickets et Listes, Code, Fichiers (avec le téléchargement),
+  Documentation et Accès vivent à part (``inspect_tracker.py``,
+  ``inspect_git.py`` et ``inspect_code.py``, ``inspect_files.py``,
+  ``inspect_docs.py``, ``inspect_access.py``) ; les aides que partagent les vues
+  sont dans ``inspect_common.py``, leurs mots ici.
 - **Sur la fiche d'une personne** : les projets qui la concernent.
 
 Lecture seule : les compteurs viennent de la tranche, l'histoire (exécutions,
