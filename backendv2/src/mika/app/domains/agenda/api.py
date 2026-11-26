@@ -1,6 +1,7 @@
 """Agenda, pour qui est connecté (ADR 0309, lot 4) : ses agendas — les siens, ceux qu'on lui partage, ses abonnements,
 « L'agenda de Mika » vu par elle —, une période, un événement, chercher, ses invitations et ce que Mika propose ;
-écrire, répondre, décider ; ses comptes d'agenda (Paramètres › Agendas), les partager, leur tableau de droits.
+écrire, répondre, décider ; le tableau de droits de ses agendas. Ses comptes d'agenda (Paramètres › Agendas) ont leurs
+routes dans ``account_settings.py``, qu'il ajoute aux siennes.
 
 Un agenda est à elle quand son compte l'est (son compte du système ``moi:<sa clé>`` ; un compte branché à son nom, ou
 « à toi » si elle est une de ses propriétaires : la règle de ``vocab.ownership``, ADR 0185) ; un agenda qu'on lui
@@ -9,44 +10,28 @@ compte décoché, il ne l'est plus. Un événement, une proposition sont à l'ag
 rien n'existe (404). Un événement privé d'une autre personne se lit « Occupé ».
 
 Ce qui s'écrit passe par les actions du plugin (``agenda.creer``, ``modifier``, ``supprimer``, ``dupliquer``,
-``repondre``, ``rappel``, ``nouvel_agenda``, ``synchroniser``, ``accepter``, ``refuser``, ``ajouter_modifie``), au nom
-de la personne, auditées ``moi.agenda.<action>`` ; ce qui se règle (un compte, un agenda, un partage, un tableau) dans
-les réglages, sous leur verrou, audité ``moi.<geste>``. Le contrat : ``docs/protocole-moi.md``, § 13.
+``repondre``, ``rappel``, ``accepter``, ``refuser``, ``ajouter_modifie``), au nom de la personne, auditées
+``moi.agenda.<action>`` ; le tableau d'un agenda se règle dans les réglages, audité ``moi.<geste>``. Le contrat :
+``docs/protocole-moi.md``, § 13.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
-from html import escape
 from typing import Any
 
 from pydantic import ValidationError
-from starlette.requests import Request
-from starlette.responses import HTMLResponse, Response
 from starlette.routing import Route
 
-from mika.adapters.agenda import SERVICES, AgendaAccount, AgendaConfig, server_host
-from mika.adapters.agenda.config import ACCOUNT_KEY, COLORS
-from mika.adapters.web.session import account_of
+from mika.adapters.agenda import AgendaConfig
+from mika.adapters.agenda.config import COLORS
+from mika.app.domains.agenda import account_settings
 from mika.app.domains.agenda.her import her_agenda, title_of
 from mika.app.domains.agenda.settings import AgendaSettings
-from mika.app.domains.mail.settings import MailSettings
-from mika.app.me.api import (
-    NO_STORE,
-    OWN_MAX,
-    Call,
-    Denied,
-    MeApiBase,
-    done,
-    form,
-    missing,
-    refused,
-)
-from mika.app.me.common import millis, own_room, settings_of
-from mika.app.me.hosts import public_only
+from mika.app.me.api import Call, Denied, MeApiBase, done, form, missing, refused
+from mika.app.me.common import millis, settings_of
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import instant, local
@@ -58,19 +43,14 @@ from mika.plugins.agenda.watch import invitation_key
 from mika.ports.agenda import (
     ALERT_METHODS,
     ALERTS_MAX,
-    CALDAV,
     DAY_US,
-    GOOGLE,
     ICAL,
     KIND_WORDS,
-    MICROSOFT,
     NEEDS,
     REMINDERS,
     SYSTEM,
-    AgendaError,
     Alert,
     Calendar,
-    Connection,
     Event,
     Occurrence,
     Participant,
@@ -82,7 +62,6 @@ from mika.ports.agenda import (
     system_account,
     system_person,
 )
-from mika.ports.mail import SIGNED_IN
 from mika.runtime import decisions
 from mika.runtime.operations import audit
 from mika.runtime.state import RUNTIME
@@ -107,21 +86,16 @@ from mika.vocab.words import fold
 HER = "mika"
 #: au plus tant de jours d'une période ; une recherche lit la fenêtre de la synchro (90 jours derrière, un an devant)
 PERIOD_DAYS, SEARCH_PAST, SEARCH_AHEAD, SEARCH_MAX = 100, 90, 366, 50
-#: ce qu'on dit d'une sorte qui se branche ici (le système existe sans rien faire)
-PLUGGABLE = (GOOGLE, MICROSOFT, CALDAV, ICAL)
-#: ce qu'une personne règle d'un compte
-ACCOUNT_FIELDS = ("label", "enabled", "url", "username", "password", "address", "oauth_client_id", "oauth_tenant")
 TOO_LOW = {"lire": "Cet agenda t'est partagé en lecture : tu le lis, sans y écrire.",
            "preparer": "Cet agenda t'est partagé en lecture et préparation : elle peut t'y préparer un ajout, que son "
                        "propriétaire approuve ; tu n'y écris pas toi-même."}
 ONLY_OWNER = "Seul son propriétaire règle cet agenda."
-NO_GOOGLE_APP = "L'application Google de ce serveur n'est pas réglée : demande-le à qui s'occupe d'elle."
 
 
 # ── à qui ──
 
 
-def _ports(call: Call) -> tuple[Any, Any]:
+def agenda_ports(call: Call) -> tuple[Any, Any]:
     store, providers = call.port("agenda"), call.port("agenda_providers")
     if store is None or providers is None:
         raise Denied(503, "L'agenda n'est pas branché sur ce serveur.")
@@ -131,7 +105,7 @@ def _ports(call: Call) -> tuple[Any, Any]:
 def mine(call: Call) -> dict[str, tuple[Calendar, str]]:
     """Ses agendas, par clé : l'agenda et son niveau — les siens (« Mon agenda » né au besoin), puis ceux qu'on lui
     partage."""
-    store, providers = _ports(call)
+    store, providers = agenda_ports(call)
     system = getattr(providers, "system", None)
     if system is not None:
         system.ensure(system_account(call.me.person))
@@ -151,7 +125,7 @@ def _one(call: Call, key: str) -> tuple[Calendar, str]:
     return found
 
 
-def _owned(call: Call, key: str) -> Calendar:
+def owned_calendar(call: Call, key: str) -> Calendar:
     cal, level = _one(call, key)
     if level != OWNED:
         raise Denied(403, ONLY_OWNER)
@@ -162,18 +136,18 @@ def _usable(level: str) -> bool:
     return level == OWNED or reaches(level, SHARE_USE)
 
 
-def _own(call: Call) -> AgendaSettings:
+def agenda_settings(call: Call) -> AgendaSettings:
     """Ses réglages (ses comptes, leurs connexions, l'application Google du serveur) ; 503 s'ils ne sont pas
     branchés."""
     found: AgendaSettings = settings_of(call).of(AgendaSettings)
     return found
 
 
-def _account_mine(call: Call, key: str) -> None:
+def must_own_account(call: Call, key: str) -> None:
     """Un compte à elle (son compte du système, ou un compte branché à elle) ; un compte d'une autre n'existe pas."""
     if account_level(params_of(call.frame), call.frame, call.me.person, key) != OWNED:
         raise missing()
-    if not system_person(key) and key not in _own(call).agenda().accounts:
+    if not system_person(key) and key not in agenda_settings(call).agenda().accounts:
         raise missing()
 
 
@@ -187,7 +161,7 @@ def _owner_name(call: Call, account: str) -> str:
     return _name(call, holder[len(PERSON):]) if holder.startswith(PERSON) else identity_c.keepers(call.frame)
 
 
-def _kind_of(call: Call, account: str) -> str:
+def account_kind(call: Call, account: str) -> str:
     if system_person(account):
         return SYSTEM
     p = params_of(call.frame)
@@ -202,7 +176,7 @@ def _writable(call: Call, cal: Calendar, level: str) -> bool:
     écrire, sous un compte actif."""
     if not _usable(level) or not cal.writable:
         return False
-    _store, providers = _ports(call)
+    _store, providers = agenda_ports(call)
     conn = providers.connection(cal.account)
     provider = providers.of(conn.kind) if conn is not None else None
     return bool(conn is not None and provider is not None and conn.enabled
@@ -221,7 +195,7 @@ NO_ANSWER_TOLD = "Son serveur ne transmet pas les réponses aux invitations (pas
 def _answers_reach(call: Call, calendar: str) -> bool:
     """Une réponse d'ici atteint-elle l'organisatrice : le fournisseur de cet agenda la transmet-il (un serveur CalDAV
     sans planification, RFC 6638, ne la transmet pas ; avant de l'avoir découvert, on ne le sait pas) ?"""
-    _store, providers = _ports(call)
+    _store, providers = agenda_ports(call)
     conn = providers.connection(split_calendar_key(calendar)[0])
     provider = providers.of(conn.kind) if conn is not None else None
     return bool(conn is not None and provider is not None and provider.abilities(conn).invite)
@@ -239,15 +213,15 @@ def alerts_json(alerts: Iterable[Alert]) -> list[dict[str, Any]]:
 
 
 def _abilities(call: Call, account: str) -> Any:
-    _store, providers = _ports(call)
+    _store, providers = agenda_ports(call)
     conn = providers.connection(account)
     provider = providers.of(conn.kind) if conn is not None else None
     return provider.abilities(conn) if provider is not None and conn is not None else None
 
 
-def _calendar_json(call: Call, cal: Calendar, level: str, cfg: AgendaConfig | None = None) -> dict[str, Any]:
+def calendar_json(call: Call, cal: Calendar, level: str, cfg: AgendaConfig | None = None) -> dict[str, Any]:
     p = params_of(call.frame)
-    kind = _kind_of(call, cal.account)
+    kind = account_kind(call, cal.account)
     owned = level == OWNED
     setting = _setting(cfg, cal.key) if cfg is not None else None
     state = call.port("agenda").account(cal.account)
@@ -294,7 +268,7 @@ async def calendars(call: Call) -> dict[str, Any]:
     cfg = settings.of(AgendaSettings).agenda() if settings is not None else None
     held = mine(call)
     rank = {"mine": 0, "subscriptions": 1, "shared": 2}
-    items = [_calendar_json(call, cal, level, cfg) for cal, level in held.values()]
+    items = [calendar_json(call, cal, level, cfg) for cal, level in held.values()]
     items.sort(key=lambda c: (rank.get(c["group"], 3), not c["primary"], fold(c["name"])))
     return {"plugged": True, "zone": _zone_name(call), "calendars": [*items, _her_json(call)],
             "colors": [{"code": c, "label": w} for c, w in COLORS],
@@ -414,7 +388,7 @@ def _args(call: Call, proposal: int) -> dict[str, Any]:
 
 async def period(call: Call) -> dict[str, Any]:
     """Les occurrences d'une période sur les agendas choisis, et ce que Mika propose d'y ajouter."""
-    store, _providers = _ports(call)
+    store, _providers = agenda_ports(call)
     held = mine(call)
     first, last, lo, hi = _bounds(call)
     keys, with_her = _chosen(call, held)
@@ -431,7 +405,7 @@ async def period(call: Call) -> dict[str, Any]:
 
 
 def _event_of(call: Call) -> tuple[Event, str, Calendar, str]:
-    store, _providers = _ports(call)
+    store, _providers = agenda_ports(call)
     raw = call.arg("event", limit=20)
     if not raw.isdigit():
         raise missing()
@@ -476,7 +450,7 @@ async def search(call: Call) -> dict[str, Any]:
     """Chercher dans ses agendas (un titre, un lieu, une description, une personne), sur la fenêtre de la synchro :
     les plus proches d'aujourd'hui d'abord, ``SEARCH_MAX`` au plus. Un événement privé d'une autre ne se cherche
     pas."""
-    store, _providers = _ports(call)
+    store, _providers = agenda_ports(call)
     q = call.arg("q", limit=120).strip()
     if len(q) < 2:
         raise Denied(400, "« q » : deux caractères au moins.", {"q": "deux caractères au moins"})
@@ -573,7 +547,7 @@ def _answerable(held: Mapping[str, tuple[Calendar, str]]) -> list[str]:
 async def invitations(call: Call) -> dict[str, Any]:
     """Les invitations qui attendent sa réponse, dans ses agendas (et ceux qu'on lui partage pour s'en servir), la
     plus proche d'abord, chacune avec la réponse que Mika a préparée (son accord à elle)."""
-    store, _providers = _ports(call)
+    store, _providers = agenda_ports(call)
     held = mine(call)
     s: AgendaState = call.frame.state("agenda")
     prepared = {x["invitation"]: x for x in await _proposals(call, held) if x["op"] == RESPOND and x["invitation"]}
@@ -652,7 +626,7 @@ def _alerts_in(raw: Any) -> list[str]:
     return out
 
 
-def _with_show(outcome: Any) -> dict[str, Any]:
+def done_with_made(outcome: Any) -> dict[str, Any]:
     made = next((x for x in outcome.show if isinstance(x, dict)), None) if outcome.ok else None
     return done(outcome, **({"made": made} if made else {}))
 
@@ -670,7 +644,7 @@ async def create(call: Call) -> dict[str, Any]:
     if not _usable(level):
         raise Denied(403, TOO_LOW.get(level, "Cet agenda ne t'est pas ouvert pour cela."))
     values = _fields(call, EVENT_FIELDS)
-    return _with_show(await call.act("agenda.creer", form(fixed={"calendar": key}, **values)))
+    return done_with_made(await call.act("agenda.creer", form(fixed={"calendar": key}, **values)))
 
 
 async def edit(call: Call) -> dict[str, Any]:
@@ -694,8 +668,8 @@ async def duplicate(call: Call) -> dict[str, Any]:
     to = call.arg("to", limit=200)
     if to:
         _one(call, to)
-    return _with_show(await call.act("agenda.dupliquer", form(fixed={"calendar": cal.key, "event": e.id,
-                                                                      "occurrence": key}, to=to)))
+    return done_with_made(await call.act("agenda.dupliquer", form(fixed={"calendar": cal.key, "event": e.id,
+                                                                          "occurrence": key}, to=to)))
 
 
 async def respond(call: Call) -> dict[str, Any]:
@@ -752,454 +726,8 @@ async def proposal_edit(call: Call) -> dict[str, Any]:
         raise Denied(403, TOO_LOW.get(level, "Cet agenda ne t'est pas ouvert pour cela."))
     values = _fields(call, EVENT_FIELDS)
     conversation = str(_args(call, w.proposal).get("ref") or "")
-    return _with_show(await call.act("agenda.ajouter_modifie", form(
+    return done_with_made(await call.act("agenda.ajouter_modifie", form(
         fixed={"calendar": key, "proposal": w.proposal, "conversation": conversation}, **values)))
-
-
-# ── ses comptes (Paramètres › Agendas) ──
-
-
-def _signin(call: Call, key: str, kind: str, conn: Connection | None) -> dict[str, Any] | None:
-    _store, providers = _ports(call)
-    provider = providers.of(kind)
-    signin = getattr(provider, "signin", None)
-    if signin is None:
-        return None
-    got = signin.state(key) if kind == GOOGLE else signin.state(key, conn) if conn is not None else None
-    if got is None:
-        return None
-    return {"state": got.state, "code": got.code, "url": got.url, "until": millis(got.until), "error": got.error}
-
-
-def _account_json(call: Call, key: str, a: AgendaAccount, held: Mapping[str, tuple[Calendar, str]],
-                  cfg: AgendaConfig) -> dict[str, Any]:
-    store, providers = _ports(call)
-    state = store.account(key)
-    conn = providers.connection(key)
-    provider = providers.of(a.kind)
-    abilities = provider.abilities(conn) if provider is not None and conn is not None else None
-    cals = [_calendar_json(call, cal, lv, cfg) for cal, lv in held.values() if cal.account == key]
-    cals.sort(key=lambda c: (not c["primary"], fold(c["name"])))
-    system = bool(system_person(key))
-    return {"key": key, "kind": a.kind, "kind_label": KIND_WORDS.get(a.kind, a.kind),
-            "label": a.label or ("Ce serveur" if system else key), "system": system, "address": a.address,
-            "enabled": a.enabled, "url": a.url if a.kind == CALDAV else "",
-            "url_set": bool(a.url) if a.kind == ICAL else False, "username": a.username,
-            "secrets": {"password": bool(a.password)}, "oauth_client_id": a.oauth_client_id,
-            "oauth_tenant": a.oauth_tenant if a.kind == MICROSOFT else "",
-            "synced_at": millis(state.synced_at) if state is not None else 0,
-            "tried_at": millis(state.tried_at) if state is not None else 0,
-            "failures": state.failures if state is not None else 0,
-            "error": state.error if state is not None and not system else "",
-            "signin": _signin(call, key, a.kind, conn) if a.kind in (GOOGLE, MICROSOFT) else None,
-            "abilities": {"write": bool(abilities and abilities.write),
-                          "calendars": bool(abilities and abilities.calendars)},
-            "calendars": cals}
-
-
-async def accounts(call: Call) -> dict[str, Any]:
-    """Ses comptes d'agenda : son compte du système d'abord, puis ceux qu'elle a branchés ; ce que le serveur sait
-    brancher (l'application Google, celle de Microsoft, les aides CalDAV) et les bornes."""
-    settings = settings_of(call)
-    cfg = settings.of(AgendaSettings).agenda()
-    held = mine(call)
-    p = params_of(call.frame)
-    own = system_account(call.me.person)
-    keys = [own, *sorted(k for k in cfg.accounts if not system_person(k)
-                         and account_level(p, call.frame, call.me.person, k) == OWNED)]
-    found = []
-    for key in keys:
-        a = cfg.account(key)
-        if a is not None:
-            found.append(_account_json(call, key, a, held, cfg))
-    _store, providers = _ports(call)
-    google = getattr(providers.of(GOOGLE), "signin", None)
-    return {"plugged": True, "accounts": found,
-            "google": {"app": settings.of(AgendaSettings).google_application() is not None,
-                       "direct": bool(google is not None and google.direct())},
-            "microsoft_app": bool(settings.of(MailSettings).mail_application()),
-            "kinds": [{"code": k, "label": KIND_WORDS[k]} for k in PLUGGABLE],
-            "services": [{"key": x.key, "name": x.name, "url": x.url, "help": x.help} for x in SERVICES],
-            "colors": [{"code": c, "label": w} for c, w in COLORS],
-            "reminders": [{"code": c, "label": w} for c, w in REMINDERS],
-            "max": None if call.me.operator else OWN_MAX}
-
-
-def _owner_for(call: Call) -> str:
-    """À qui est ce qu'elle branche : « à toi » pour une de ses propriétaires, sinon à son nom (la règle du
-    courrier)."""
-    return "" if call.me.owner else PERSON + call.me.person
-
-
-def _account_key(call: Call, label: str, kind: str, taken: set[str]) -> str:
-    """La clé d'un compte branché : son nom affiché (sinon sa sorte), puis la fin d'un identifiant de l'``IdGen`` —
-    jamais son adresse, ni un nom qui en est une : ses réglages, ses agendas et l'audit sont journalisés, et l'oubli
-    d'une adresse ne les atteint pas. Un compte déjà branché garde la sienne."""
-    said = "" if "@" in label else label
-    base = re.sub(r"[^a-z0-9_-]+", "-", fold(said or KIND_WORDS[kind])).strip("-_")[:30].strip("-_")
-    base = base if base and ACCOUNT_KEY.fullmatch(base) else "agenda"
-    mind = call.kernel.mind
-    while True:
-        key = f"{base}-{mind.ids.new(mind.clock.now())[-6:].lower()}"
-        if key not in taken:
-            return key
-
-
-def _mine_count(call: Call, cfg: AgendaConfig) -> int:
-    return sum(1 for k, a in cfg.accounts.items() if not system_person(k) and a.owner == _owner_for(call))
-
-
-def _values(call: Call) -> dict[str, Any]:
-    raw = call.data.get("values", {})
-    if not isinstance(raw, dict):
-        raise Denied(400, "« values » : un objet.")
-    unknown = sorted(set(raw) - set(ACCOUNT_FIELDS))
-    if unknown:
-        raise Denied(400, f"« {unknown[0]} » ne se règle pas ici.", {unknown[0]: "inconnu"})
-    out: dict[str, Any] = {}
-    for k, v in raw.items():
-        if k == "enabled":
-            out[k] = v is True
-        elif not isinstance(v, str) or len(v) > 2000:
-            raise Denied(400, f"« {k} » : une chaîne de 2 000 caractères au plus.", {k: "une chaîne"})
-        else:
-            out[k] = v.strip()
-    return out
-
-
-async def _rejournal(call: Call) -> None:
-    if call.api.reconfigure is not None:
-        await call.api.reconfigure()
-
-
-async def account_save(call: Call) -> dict[str, Any]:
-    """Brancher un compte (sans ``account`` : sa sorte, ``kind``) ou régler un des siens. Un secret laissé vide reste
-    celui qui est gardé, tant que le serveur ne change pas ; pour qui n'est pas opératrice, un serveur sur Internet
-    seulement. Une création redite avec la même clé d'envoi ne refait rien."""
-    if call.arg("account", limit=200):
-        return await _account_save(call)
-    return await call.once(lambda: _account_save(call))
-
-
-async def _account_save(call: Call) -> dict[str, Any]:
-    settings = _own(call)
-    cfg = settings.agenda()
-    values = _values(call)
-    key = call.arg("account", limit=200)
-    before: AgendaAccount | None = None
-    if key:
-        _account_mine(call, key)
-        before = cfg.account(key)
-        assert before is not None
-        if system_person(key):
-            values = {k: v for k, v in values.items() if k == "label"}
-        merged = {**before.model_dump(), **values, "owner": before.owner, "kind": before.kind,
-                  "calendars": before.calendars}
-        moved = before.url != merged.get("url", before.url) or before.username != merged.get("username",
-                                                                                              before.username)
-        if not values.get("password") and before.password and not moved:
-            merged["password"] = before.password
-        elif not values.get("password") and before.password and moved and before.kind == CALDAV:
-            raise Denied(400, "Le serveur change : redonne son mot de passe.", {"password": "à redonner"})
-        if before.kind == ICAL and not values.get("url"):
-            merged["url"] = before.url
-        targets = {"url": merged.get("url")} if moved or (before.kind == ICAL and values.get("url")) else {}
-    else:
-        kind = call.arg("kind", limit=20)
-        if kind not in PLUGGABLE:
-            raise Denied(400, "« kind » : google, microsoft, caldav ou ical.", {"kind": "une sorte de compte"})
-        own_room(call, _mine_count(call, cfg))
-        key = _account_key(call, str(values.get("label") or "").strip(), kind, set(cfg.accounts))
-        merged = {**values, "kind": kind, "owner": _owner_for(call)}
-        if kind in (CALDAV, ICAL) and not merged.get("url"):
-            raise Denied(400, "Son adresse, d'abord.", {"url": "valeur requise"})
-        targets = {"url": merged.get("url")}
-    if merged.get("kind") in (GOOGLE, MICROSOFT):
-        merged["url"] = merged["password"] = ""
-        targets = {}
-    await public_only(call, {f: server_host(str(v or "")) for f, v in targets.items() if v})
-    # son serveur revérifié sur Internet à chaque connexion, pas seulement ici (une opératrice vise ce qu'elle veut)
-    merged["internet"] = not call.me.operator and merged.get("kind") in (CALDAV, ICAL)
-    try:
-        account = AgendaAccount.model_validate(merged)
-    except ValidationError as exc:
-        raise refused(exc) from None
-    async with settings.writing:
-        cfg = settings.agenda()
-        if before is not None:
-            if cfg.account(key) != before:
-                raise Denied(409, "Ce compte vient d'être réglé ailleurs : rouvre-le, puis recommence.")
-        else:
-            own_room(call, _mine_count(call, cfg))
-        try:
-            await settings.save_agenda(AgendaConfig(accounts={**cfg.accounts, key: account}))
-        except ValidationError as exc:
-            raise refused(exc) from None
-        await _rejournal(call)
-    await audit(call.kernel, "moi.agenda_compte", by=call.me.handle, subject_kind="compte_agenda", subject=key)
-    if account.kind in (CALDAV, ICAL) and account.enabled:
-        await call.act("agenda.synchroniser", form(fixed={"account": key}), part="sync")
-    return {"ok": True, "message": "Compte d'agenda enregistré.", "account": key}
-
-
-async def account_remove(call: Call) -> dict[str, Any]:
-    """Retirer un compte branché : ses agendas et leur copie partent ; ce que Mika en a appris reste."""
-    settings = _own(call)
-    key = call.arg("account", limit=200)
-    _account_mine(call, key)
-    if system_person(key):
-        raise Denied(409, "Ton agenda du système reste : on ne le retire pas.")
-    async with settings.writing:
-        cfg = settings.agenda()
-        if key not in cfg.accounts:
-            raise missing()
-        await settings.save_agenda(AgendaConfig(accounts={k: a for k, a in cfg.accounts.items() if k != key}))
-        await _rejournal(call)
-    store, _providers = _ports(call)
-    store.drop_account(key)
-    await audit(call.kernel, "moi.agenda_compte_retire", by=call.me.handle, subject_kind="compte_agenda", subject=key)
-    return {"ok": True, "message": "Compte d'agenda retiré."}
-
-
-async def account_try(call: Call) -> dict[str, Any]:
-    """Essayer un serveur CalDAV (son adresse, son identifiant, son mot de passe ; ou un compte déjà branché, dont le
-    mot de passe gardé sert tant que le serveur ne change pas) : les agendas qu'il propose, sans rien enregistrer."""
-    _store, providers = _ports(call)
-    key = call.arg("account", limit=200)
-    url, user, password = call.arg("url", limit=1000).strip(), call.arg("username", limit=300).strip(), \
-        call.arg("password", limit=300)
-    if key:
-        _account_mine(call, key)
-        a = _own(call).agenda().account(key)
-        if a is None or a.kind != CALDAV:
-            raise Denied(409, "Seul un compte CalDAV s'essaie ainsi.")
-        url, user = url or a.url, user or a.username
-        if not password and url == a.url and user == a.username:
-            password = a.password
-    if not url:
-        raise Denied(400, "Son adresse, d'abord.", {"url": "valeur requise"})
-    await public_only(call, {"url": server_host(url)})
-    call.probe()
-    provider = providers.of(CALDAV)
-    if provider is None:
-        raise Denied(503, "CalDAV n'est pas branché sur ce serveur.")
-    conn = Connection(key=key or "essai", kind=CALDAV, url=url, username=user, secret=password,
-                      internet=not call.me.operator)
-    try:
-        found = await provider.calendars(conn)
-    except AgendaError as exc:
-        return {"ok": False, "message": str(exc)[:300] or "Le serveur a refusé.", "calendars": []}
-    except Exception as exc:  # noqa: BLE001 — un serveur en panne, quelle qu'elle soit, se dit en mots
-        return {"ok": False, "message": f"Le serveur n'a pas répondu : {type(exc).__name__}", "calendars": []}
-    return {"ok": True, "message": f"{len(found)} agenda{'s' if len(found) > 1 else ''} trouvé"
-                                   f"{'s' if len(found) > 1 else ''}.",
-            "calendars": [{"local": split_calendar_key(c.key)[1], "name": c.name, "color": c.color,
-                           "writable": c.writable, "primary": c.primary, "selected": c.selected} for c in found]}
-
-
-def _connectable(call: Call, kind: str) -> tuple[str, Any, Connection]:
-    key = call.arg("account", limit=200)
-    _account_mine(call, key)
-    _store, providers = _ports(call)
-    conn = providers.connection(key)
-    signin = getattr(providers.of(kind), "signin", None)
-    if conn is None or conn.kind != kind or signin is None:
-        raise Denied(409, f"Ce compte n'entre pas par {KIND_WORDS[kind]}.")
-    return key, signin, conn
-
-
-async def google_start(call: Call) -> dict[str, Any]:
-    """Commencer la connexion Google d'un compte : l'adresse de consentement à ouvrir ; on finit en collant l'adresse
-    de la page qui n'a pas pu s'ouvrir (ou son code), ou la redirection revient seule (``direct``)."""
-    key, signin, conn = _connectable(call, GOOGLE)
-    if _own(call).google_application() is None:
-        raise Denied(409, NO_GOOGLE_APP)
-    origin = call.request.headers.get("origin") or str(call.request.base_url).rstrip("/")
-    try:
-        got = signin.start(key, who=call.me.handle, origin=origin, hint=conn.address)
-    except AgendaError as exc:
-        raise Denied(409, str(exc)[:300]) from None
-    return {"ok": True, "url": got.url, "until": millis(got.until), "direct": signin.direct()}
-
-
-async def _connected(call: Call, key: str, kind: str) -> None:
-    """Après une connexion : l'adresse du compte (pour y reconnaître ses invitations), puis une synchronisation."""
-    settings = _own(call)
-    _store, providers = _ports(call)
-    provider, conn = providers.of(kind), providers.connection(key)
-    address = ""
-    try:
-        address = await provider.whoami(conn) if provider is not None and conn is not None else ""
-    except Exception:  # noqa: BLE001 — l'adresse est un surcroît : la connexion, elle, est faite
-        address = ""
-    if address:
-        async with settings.writing:
-            cfg = settings.agenda()
-            a = cfg.accounts.get(key)
-            if a is not None and a.address != address:
-                await settings.save_agenda(AgendaConfig(accounts={
-                    **cfg.accounts, key: a.model_copy(update={"address": address})}))
-                await _rejournal(call)
-    await call.act("agenda.synchroniser", form(fixed={"account": key}), part="sync")
-
-
-async def google_finish(call: Call) -> dict[str, Any]:
-    """Finir la connexion Google : l'adresse collée (ou son code)."""
-    key, signin, _conn = _connectable(call, GOOGLE)
-    text = call.arg("text", limit=4000).strip()
-    if not text:
-        raise Denied(400, "Colle l'adresse de la page qui n'a pas pu s'ouvrir.", {"text": "valeur requise"})
-    try:
-        await signin.finish(text, key=key, who=call.me.handle)
-    except AgendaError as exc:
-        raise Denied(400, str(exc)[:300], {"text": str(exc)[:200]}) from None
-    await _connected(call, key, GOOGLE)
-    await audit(call.kernel, "moi.agenda_connexion", by=call.me.handle, subject_kind="compte_agenda", subject=key)
-    return {"ok": True, "message": "Connecté à Google : l'agenda se synchronise."}
-
-
-def _page(title: str, text: str, address: str = "") -> HTMLResponse:
-    shown = f"<p><code style=\"word-break:break-all\">{escape(address)}</code></p>" if address else ""
-    body = (f"<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\">"
-            f"<title>{escape(title)}</title><h1>{escape(title)}</h1><p>{escape(text)}</p>{shown}")
-    return HTMLResponse(body, headers={**NO_STORE, "Content-Security-Policy": "default-src 'none'",
-                                       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"})
-
-
-#: le retour de Google dans un navigateur sans session (celui du téléphone, où l'application l'a ouvert)
-PASTE_HERE = ("Copie l'adresse de cette page, puis colle-la dans l'application, là où tu as lancé la connexion "
-              "(Paramètres › Agendas). Elle seule la finit, pour ton compte.")
-
-
-def _return_route(api: MeApiBase) -> Route:
-    """La redirection directe de Google. Avec une session, le parcours se finit ici, pour qui l'a commencé. Sans (le
-    navigateur du téléphone, où l'application a ouvert le consentement), une page en mots dit de copier son adresse et
-    de la coller dans l'application : le ``state`` seul ne dit pas qui revient — un parcours commencé par une
-    personne et consenti par une autre rattacherait l'agenda Google de la seconde au compte de la première."""
-    inner = api.route("/agenda/google/retour", google_return, raw=True)
-
-    async def endpoint(request: Request) -> Response:
-        if account_of(request, api.accounts) is None:
-            return _page("Encore une étape", PASTE_HERE, str(request.url))
-        return await inner.endpoint(request)
-
-    return Route(inner.path, endpoint, methods=["GET"])
-
-
-async def google_return(call: Call) -> HTMLResponse:
-    """La redirection directe de Google (une « Application Web » du serveur) : le parcours se finit ici, pour qui l'a
-    commencé ; une page dit ce qui s'est passé (le client l'apprend par le direct)."""
-    _store, providers = _ports(call)
-    signin = getattr(providers.of(GOOGLE), "signin", None)
-    if signin is None:
-        raise missing()
-    try:
-        key = await signin.finish("?" + call.request.url.query, who=call.me.handle)
-    except AgendaError as exc:
-        return _page("Google Agenda n'est pas connecté", str(exc)[:300])
-    await _connected(call, key, GOOGLE)
-    await audit(call.kernel, "moi.agenda_connexion", by=call.me.handle, subject_kind="compte_agenda", subject=key)
-    return _page("Google Agenda est connecté", "Tu peux fermer cette page : l'agenda se synchronise.")
-
-
-async def microsoft_start(call: Call) -> dict[str, Any]:
-    """Connecter un compte Outlook.com / Microsoft 365 : un code à entrer chez Microsoft ; la fin de l'attente est
-    poussée en direct (``agenda``), puis ``…/account/sync`` relit le compte."""
-    key, signin, conn = _connectable(call, MICROSOFT)
-    try:
-        got = await signin.start(key, conn)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise Denied(409, f"La connexion n'a pas pu commencer : {exc}"[:300]) from None
-    return {"ok": True, "code": got.code, "url": got.url, "until": millis(got.until), "state": got.state,
-            "error": got.error}
-
-
-async def account_sync(call: Call) -> dict[str, Any]:
-    """Synchroniser maintenant un de ses comptes (un compte Google ou Microsoft connecté retrouve d'abord son
-    adresse)."""
-    key = call.arg("account", limit=200)
-    _account_mine(call, key)
-    if system_person(key):
-        return {"ok": True, "message": "Ton agenda du système est toujours à jour.", "deduped": False}
-    kind = _kind_of(call, key)
-    a = _own(call).agenda().accounts.get(key)
-    if kind in (GOOGLE, MICROSOFT) and a is not None and not a.address:
-        signed = _signin(call, key, kind, _ports(call)[1].connection(key))
-        if signed is not None and signed["state"] == SIGNED_IN:
-            await _connected(call, key, kind)
-            return {"ok": True, "message": "Synchronisation demandée.", "deduped": False}
-    return done(await call.act("agenda.synchroniser", form(fixed={"account": key})))
-
-
-async def account_disconnect(call: Call) -> dict[str, Any]:
-    """Déconnecter un compte Google ou Microsoft : sa connexion est retirée (chez Google aussi) et oubliée ; le compte
-    reste, « à reconnecter »."""
-    settings = _own(call)
-    key = call.arg("account", limit=200)
-    _account_mine(call, key)
-    kind = _kind_of(call, key)
-    if kind not in (GOOGLE, MICROSOFT):
-        raise Denied(409, "Ce compte n'a pas de connexion à retirer : retire le compte.")
-    signin = getattr(_ports(call)[1].of(kind), "signin", None)
-    if signin is not None:
-        if kind == GOOGLE:
-            try:
-                await signin.revoke(key)
-            except (AgendaError, OSError, RuntimeError, ValueError):
-                pass  # Google injoignable : la connexion part quand même d'ici
-        signin.drop(key)
-    await settings.drop_agenda_grant(key)
-    await audit(call.kernel, "moi.agenda_deconnexion", by=call.me.handle, subject_kind="compte_agenda", subject=key)
-    return {"ok": True, "message": "Déconnecté."}
-
-
-async def calendar_new(call: Call) -> dict[str, Any]:
-    account = call.arg("account", limit=200) or system_account(call.me.person)
-    _account_mine(call, account)
-    return _with_show(await call.act("agenda.nouvel_agenda", form(fixed={"account": account},
-                                                                  name=call.arg("name", limit=200))))
-
-
-async def calendar_save(call: Call) -> dict[str, Any]:
-    """Régler un de ses agendas : son nom (``agenda.renommer``), sa couleur, masqué (Mika ne s'en sert plus), « Mika
-    te le rappelle », suivi."""
-    settings = _own(call)
-    key = call.arg("calendar", limit=200)
-    _owned(call, key)
-    account, local_ = split_calendar_key(key)
-    renamed = None
-    if "name" in call.data:
-        renamed = await call.act("agenda.renommer", form(fixed={"calendar": key}, name=call.arg("name", limit=200)))
-        if not renamed.ok or not ({"color", "hidden", "reminder", "followed"} & set(call.data)):
-            return done(renamed)
-    changes: dict[str, Any] = {}
-    if "color" in call.data:
-        changes["color"] = call.arg("color", limit=20)
-    if "hidden" in call.data:
-        changes["hidden"] = call.data["hidden"] is True
-    if "reminder" in call.data:
-        changes["reminder"] = call.arg("reminder", limit=10)
-    if "followed" in call.data:
-        raw = call.data["followed"]
-        if raw is not None and not isinstance(raw, bool):
-            raise Denied(400, "« followed » : vrai, faux ou null.", {"followed": "vrai, faux ou null"})
-        changes["followed"] = raw
-    if not changes:
-        raise Denied(409, "Rien à changer.")
-    async with settings.writing:
-        cfg = settings.agenda()
-        found = cfg.account(account)
-        if found is None:
-            raise missing()
-        try:
-            setting = found.setting(local_).model_validate({**found.setting(local_).model_dump(), **changes})
-            changed = found.model_copy(update={"calendars": {**found.calendars, local_: setting}})
-            await settings.save_agenda(AgendaConfig(accounts={**cfg.accounts, account: changed}))
-        except ValidationError as exc:
-            raise refused(exc) from None
-        await _rejournal(call)
-    await audit(call.kernel, "moi.agenda_reglage", by=call.me.handle, subject_kind="agenda", subject=key)
-    return {"ok": True, "message": "Agenda réglé."}
 
 
 # ── son tableau de droits ──
@@ -1217,7 +745,7 @@ async def rights_get(call: Call) -> dict[str, Any]:
     """Le tableau de droits d'un de ses agendas : réglé (``set``), sinon celui que son propriétaire et ses partages
     donnent."""
     key = call.arg("calendar", limit=200)
-    _owned(call, key)
+    owned_calendar(call, key)
     rights = rights_of(call.frame.env)
     table = table_of(params_of(call.frame), rights, key)
     return {"calendar": key, "set": key in rights.agendas, "lines": [_rule_json(call, x) for x in table.lines],
@@ -1228,7 +756,7 @@ async def rights_save(call: Call) -> dict[str, Any]:
     """Régler le tableau d'un de ses agendas (``lines`` et ``default``), ou revenir à celui de départ (``reset``)."""
     settings = settings_of(call)
     key = call.arg("calendar", limit=200)
-    _owned(call, key)
+    owned_calendar(call, key)
     if call.flag("reset"):
         table = None
     else:
@@ -1296,15 +824,5 @@ def routes(api: MeApiBase) -> list[Route]:
             r("/agenda/proposal/accept", proposal_accept, write=True),
             r("/agenda/proposal/refuse", proposal_refuse, write=True),
             r("/agenda/proposal/edit", proposal_edit, write=True),
-            r("/agenda/accounts", accounts), r("/agenda/account/save", account_save, write=True),
-            r("/agenda/account/remove", account_remove, write=True),
-            r("/agenda/account/try", account_try, write=True),
-            r("/agenda/account/sync", account_sync, write=True),
-            r("/agenda/account/disconnect", account_disconnect, write=True),
-            r("/agenda/account/google/start", google_start, write=True),
-            r("/agenda/account/google/finish", google_finish, write=True),
-            _return_route(api),
-            r("/agenda/account/microsoft/start", microsoft_start, write=True),
-            r("/agenda/calendar/new", calendar_new, write=True),
-            r("/agenda/calendar/save", calendar_save, write=True),
+            *account_settings.routes(api),
             r("/agenda/rights", rights_get), r("/agenda/rights/save", rights_save, write=True)]

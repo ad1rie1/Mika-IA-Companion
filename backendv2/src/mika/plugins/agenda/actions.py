@@ -1,6 +1,7 @@
 """Ce qu'une personne fait de ses agendas depuis son espace (ADR 0309, lot 4) : les actions de la console
-(``@AGENDA.action``), au nom de qui agit (``ctx.by``), que l'API par personne appelle (``app/domains/agenda/api.py``) —
-journalisées, dédoublonnées et auditées comme toute action (``moi.agenda.<action>``).
+(``@AGENDA.action``), au nom de qui agit (``ctx.by``), que l'API par personne appelle (``app/domains/agenda/api.py`` ;
+pour ses comptes et ses agendas, ``app/domains/agenda/account_settings.py``) — journalisées, dédoublonnées et
+auditées comme toute action (``moi.agenda.<action>``).
 
 - **À qui.** Chaque action relit ce que la personne qui agit a de l'agenda visé (``level_of``) : le sien (à son nom, ou
   « à toi » pour une de ses propriétaires, la règle de ``vocab.ownership``) ou un partage. Créer, modifier, supprimer,
