@@ -81,7 +81,8 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_pulls import CANNOT, DESCRIPTION, OPENED, PREVIEW, SUMMARY
 from mika.faculties.projects.inspect_reviews import UNREVIEWED, review_line
-from mika.faculties.projects.tools import TAKE_BASE, current, gone
+from mika.faculties.projects.tool_common import gone_reply, running_project
+from mika.faculties.projects.tools import TAKE_BASE
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, ToolResult, Zone
@@ -639,9 +640,9 @@ async def checks_log(args: LogArgs, ctx: Any) -> Any:
     """La fin du journal de la vérification en échec du commit de sa pull request (ADR 0275), relue chez l'hôte :
     une lecture du dépôt déclaré, rien n'y part. Ce qu'elle rend est le texte d'un inconnu — une vérification écrit
     ce qu'elle veut dans son journal — : cité, annoncé comme une donnée."""
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, o = got
     host = ctx.ports.get("repo_host")
     read = getattr(host, "check_log", None)

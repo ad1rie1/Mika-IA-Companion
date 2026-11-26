@@ -84,8 +84,19 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.faculty import living as open_objectives
 from mika.faculties.projects.inspect_common import unchanged
-from mika.faculties.projects.steer import STEERABLE, _changed, _listed, _steered, _which, may_steer, steerable
-from mika.faculties.projects.tools import RUNS, caretaker, contents_of, current, gone, speaker
+from mika.faculties.projects.steer import STEERABLE, may_steer, steerable
+from mika.faculties.projects.tool_common import (
+    RUNS,
+    caretaker,
+    changed_reply,
+    choices_listed,
+    contents_of,
+    emit_gesture,
+    gone_reply,
+    running_project,
+    speaker,
+    which_one,
+)
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, Draft, Payload
 from mika.kernel.faculty import Tier, ToolResult
@@ -1552,9 +1563,9 @@ class AddArgs(BaseModel):
                label=phrase("projects.tools.items.add.label"), args=AddArgs, bundle="projects", episodes=RUNS,
                max_calls_per_episode=6)
 async def items_add(args: AddArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     name = named_list(args.list_name)
     if name is None:
@@ -1648,9 +1659,9 @@ async def _written(ctx: Any, p: Project, e: Entry, draft: Draft[Any]) -> Entry |
                label=phrase("projects.tools.items.change.label"), args=ChangeArgs, bundle="projects", episodes=RUNS,
                max_calls_per_episode=25)
 async def items_change(args: ChangeArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     found = _found(ctx, p, args.list_name, args.item)
     if isinstance(found, ToolResult):
@@ -1699,9 +1710,9 @@ class NoteArgs(BaseModel):
                label=phrase("projects.tools.items.note.label"), args=NoteArgs, bundle="projects", episodes=RUNS,
                max_calls_per_episode=12)
 async def items_note(args: NoteArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     found = _found(ctx, p, args.list_name, args.item)
     if isinstance(found, ToolResult):
@@ -1752,9 +1763,9 @@ def _read(frame: Frame, store: Any, p: Project, texts: Mapping[str, str], raw_li
                label=phrase("projects.tools.items.list.label"), args=ListArgs, bundle="projects", episodes=RUNS,
                max_calls_per_episode=12)
 async def items_list(args: ListArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     return _read(ctx.frame, _store(ctx), p, _titles(ctx, p.board), args.list_name, args.item, args.status,
                  args.who, args.search, args.page, RUN)
@@ -1794,10 +1805,10 @@ def _chosen(ctx: Any, said: str, mine: list[Project]) -> tuple[Project, str] | T
     """Le projet dont il s'agit parmi ceux qu'on peut désigner ici, et son titre cité ; sinon lesquels."""
     texts = contents_of(ctx, [p.title_ref for p in mine])
     rows = [(p.id, texts.get(p.title_ref, "")) for p in mine]
-    pid = _which(said, rows)
+    pid = which_one(said, rows)
     if pid is None:
         return _no(phrase("projects.tools.steer.which_project",
-                        listed=_listed(rows, phrase("projects.tools.steer.untitled"))))
+                        listed=choices_listed(rows, phrase("projects.tools.steer.untitled"))))
     p = next(x for x in mine if x.id == pid)
     title = phrase("projects.tools.steer.quoted", text=texts[p.title_ref]) if texts.get(p.title_ref) else \
         phrase("projects.tools.steer.numbered", id=p.id)
@@ -1887,9 +1898,9 @@ async def project_item(args: WriteArgs, ctx: Any) -> Any:
     if args.what == NOTE_ON:
         if not args.text.strip():
             return _no(phrase("projects.tools.board.write.no_text"))
-        if await _steered(ctx, noting(p, e.item, args.text, author=c.BY_PERSON, by=person),
+        if await emit_gesture(ctx, noting(p, e.item, args.text, author=c.BY_PERSON, by=person),
                           unchanged(p.id, STEERABLE)) is None:
-            return _changed()
+            return changed_reply()
         return phrase("projects.tools.board.write.noted", handle=handle(e.item), title=title)
     if args.what in (ACCEPT, DISMISS, VALIDATE, REFUSE):
         return await _settle(args, ctx, p, e, person, title)
@@ -1905,8 +1916,8 @@ async def project_item(args: WriteArgs, ctx: Any) -> Any:
     draft = changing(p, e.item, author=c.BY_PERSON, by=person, status=status, note=args.text)
     if changes_nothing(draft, e.item):
         return _no(phrase("projects.tools.items.nothing"))
-    if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
-        return _changed()
+    if await emit_gesture(ctx, draft, unchanged(p.id, STEERABLE)) is None:
+        return changed_reply()
     after = entry(_store(ctx), p.id, lst.name, e.item.key)
     if after is None or after == e:
         return _no(phrase("projects.tools.items.moved"))
@@ -1925,9 +1936,9 @@ async def _open_ticket(args: WriteArgs, ctx: Any, p: Project, person: str, title
     key = key_of("", args.title)
     draft = adding(p, c.TICKETS, key, args.title, text=args.text, kind=args.kind, priority=args.priority,
                    proposed=proposed, author=c.BY_PERSON, by=person)
-    commit = await _steered(ctx, draft, unchanged(p.id, STEERABLE))
+    commit = await emit_gesture(ctx, draft, unchanged(p.id, STEERABLE))
     if commit is None:
-        return _changed()
+        return changed_reply()
     e = entry(_store(ctx), p.id, c.TICKETS, key)
     number = e.item.number if e is not None else 0
     if not commit.events:
@@ -1973,8 +1984,8 @@ async def _settle(args: WriteArgs, ctx: Any, p: Project, e: Entry, person: str, 
             return _no(phrase("projects.tools.board.write.no_reason"))
         draft = changing(p, item, author=c.BY_PERSON, by=person, closed=c.DROPPED, note=args.text)
         said = phrase("projects.tools.board.write.dismissed", number=item.number, title=title)
-    if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
-        return _changed()
+    if await emit_gesture(ctx, draft, unchanged(p.id, STEERABLE)) is None:
+        return changed_reply()
     return said
 
 
@@ -1994,14 +2005,14 @@ async def _validate(args: WriteArgs, ctx: Any, p: Project, e: Entry, person: str
                               plan=clipped(plan, NOTE_MAX)))
         draft, *more = validating(p, item, plan, author=c.BY_PERSON, by=person, comment=args.text)
         guard, alive = free_number(p, item), unchanged(p.id, STEERABLE)
-        if await _steered(ctx, draft, alive & guard if guard is not None else alive, *more) is not None:
+        if await emit_gesture(ctx, draft, alive & guard if guard is not None else alive, *more) is not None:
             break
         fresh = ctx.mind.frame().state("projects").projects.get(p.id)
         seen = entry(_store(ctx), p.id, c.TICKETS, item.key)
         if again or fresh is None or not live(fresh) or seen is None:
-            return _changed()
+            return changed_reply()
         p, e = fresh, seen
     after = entry(_store(ctx), p.id, c.TICKETS, e.item.key)
     if after is None or not after.item.validated_at:  # le plan a changé sous elle : la validation n'a pas valu
-        return _changed()
+        return changed_reply()
     return phrase("projects.tools.board.write.validated", number=e.item.number, title=title)

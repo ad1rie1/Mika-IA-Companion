@@ -72,7 +72,7 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_issues import CANNOT, DESCRIPTION, DONE, HOW, PREVIEW, SUMMARY, WHY
 from mika.faculties.projects.pulls import named, names_someone
-from mika.faculties.projects.tools import caretaker, current, gone
+from mika.faculties.projects.tool_common import caretaker, gone_reply, running_project
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, ToolResult
@@ -664,9 +664,9 @@ async def ticket_publish(args: PublishArgs, ctx: Any) -> Any:
     """Demander de publier un ticket du projet en issue, ou une note de son fil en commentaire (ADR 0275). Rien ne
     part d'ici : la demande s'écrit, la capacité se propose ensuite — sur accord, sauf quand le projet synchronise et
     que rien n'impose l'accord ; une note qu'elle choisit attend toujours l'accord."""
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     store = ctx.ports.get("store")
     if not reflected(p) or not writes_issues(ctx.ports, p.remote):

@@ -69,7 +69,8 @@ from mika.faculties.projects.faculty import (
     review_of,
     written_for,
 )
-from mika.faculties.projects.tools import RUNS, propose_push
+from mika.faculties.projects.tool_common import RUNS
+from mika.faculties.projects.tools import propose_push
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, ToolResult, Zone

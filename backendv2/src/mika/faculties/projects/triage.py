@@ -55,7 +55,7 @@ from mika.faculties.projects.faculty import (
     written,
 )
 from mika.faculties.projects.rhythm import framing
-from mika.faculties.projects.tools import RUNS, caretaker, current, gone
+from mika.faculties.projects.tool_common import RUNS, caretaker, gone_reply, running_project
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, ToolResult
@@ -151,9 +151,9 @@ def _written(args: StepArgs, p: Project, item: Item) -> list[Draft[Any]] | ToolR
                label=phrase("projects.tools.tickets.label"), args=StepArgs, bundle="projects", episodes=RUNS,
                max_calls_per_episode=30)
 async def ticket_step(args: StepArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     store = ctx.ports.get("store")
     e = tracker.find(store, p.id, c.TICKETS, args.item)

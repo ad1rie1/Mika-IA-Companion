@@ -11,7 +11,8 @@ projet à elle — aussi pendant une exploration qui s'avère plus grosse qu'une
 envie). Partout : ``project_close`` (clore un projet à elle). Le pilotage de
 vive voix (``project_steer`` : un objectif de plus, une consigne, s'y mettre
 maintenant, la pause, la reprise — jamais son cadre) vit dans ``steer.py``,
-qui lit les aides d'ici (``speaker``, ``their_words``, ``contents_of``…).
+qui lit les aides d'ici (``their_words``…) et celles que partagent les outils (``tool_common.py`` : ``speaker``,
+``contents_of``…).
 
 **Ce qu'un projet lit des autres** (ADR 0257) se demande ici de deux façons :
 ``create_project`` le pose d'emblée (``reads`` : qui le confie en est le
@@ -50,7 +51,7 @@ la liste de passage d'un constant (``each_pass``) ; leurs règles sont dans
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -96,7 +97,6 @@ from mika.faculties.projects.faculty import (
     living,
     milestones_of,
     objective_at,
-    objective_of,
     objectives_of,
     open_milestones,
     opened,
@@ -109,13 +109,21 @@ from mika.faculties.projects.faculty import (
     written_for,
 )
 from mika.faculties.projects.rhythm import cadence
+from mika.faculties.projects.tool_common import (
+    RUNS,
+    caretaker,
+    contents_of,
+    gone_reply,
+    running_project,
+    speaker,
+)
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import ToolResult, proving_tools
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.ports.workshop import BASE_BRANCH
-from mika.vocab.episodes import PROJECT_KINDS, Kind, goal_of, goal_target, project_of, project_target
+from mika.vocab.episodes import Kind, goal_of, goal_target, project_of, project_target
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import stems
@@ -131,22 +139,8 @@ CONFLICTS_SHOWN = 12
 CHANGING = frozenset({"ws_write", "ws_edit", "ws_run", TAKE_BASE, "email_draft", "forge_write", "forge_edit"})
 #: hors de l'atelier (où c'est le commit), ce qui **prouve** qu'une exécution a produit se déclare sur l'outil
 #: (``ToolResult.proof`` : un brouillon, une app essayée qui marche — ADR 0104) : aucun nom ici
-RUNS = list(PROJECT_KINDS)
 
 PROJECTS.bundle("projects", phrase("projects.bundle"))
-
-
-def current(ctx: Any) -> tuple[Project, Objective | None] | None:
-    """Le projet de l'exécution en cours et l'objectif qu'elle vise (``None`` : plus actif)."""
-    ep = ctx.frame.episode
-    pid = project_of(ep.target) if ep is not None else None
-    s: ProjectsState = ctx.frame.state("projects")
-    p = s.projects.get(pid) if pid is not None else None
-    if p is None or p.status != c.ACTIVE:
-        return None
-    got = objective_of(ep.attrs.get("subject")) if ep is not None else None
-    o = objective_at(p, got[1]) if got is not None and got[0] == p.id else None
-    return p, o
 
 
 #: ce qu'on garde des mots de qui parle (ADR 0145) : ses derniers messages avant sa réponse, au plus
@@ -241,13 +235,6 @@ def text_of(ctx: Any, ref: str, level: int, empty: str) -> Content:
     return Content.of(text or empty, level=level)
 
 
-def contents_of(ctx: Any, refs: list[str]) -> Mapping[str, str]:
-    """Les textes gardés de ces références, lus d'un coup (les références vides écartées)."""
-    store = ctx.ports.get("store")
-    wanted = [r for r in refs if r]
-    return store.content(wanted) if store is not None and wanted else {}
-
-
 def named_projects(ctx: Any, s: ProjectsState, ids: tuple[int, ...]) -> str:
     """Des projets nommés à la suite (« n° 3 « Le produit », n° 5 « Le site » ») : ce qu'un lien pose (ADR 0257)."""
     found = [s.projects[i] for i in ids if i in s.projects]
@@ -296,16 +283,6 @@ def bad_trigger(exc: triggers.BadTrigger) -> str:
     why = family("projects.triggers.refused")[exc.why]
     return phrase("projects.triggers.bad", text=exc.text, why=why) if exc.text else \
         phrase("projects.triggers.bad_bare", why=why)
-
-
-def caretaker(frame: Frame) -> str:
-    """Qui s'occupe d'elle, par son prénom (jamais « ta propriétaire »)."""
-    return identity_c.keepers(frame, quoted=True)
-
-
-def gone() -> str:
-    """La réponse de chaque outil d'exécution quand le projet n'est plus actif."""
-    return phrase("projects.tools.gone")
 
 
 def still_open(project: int, objective: int) -> Guard:
@@ -379,9 +356,9 @@ def commit_message(p: Project, o: Objective | None) -> str:
 
 @PROJECTS.tool(REPORT, acts=True, description=phrase("projects.tools.report.description"), label=phrase("projects.tools.report.label"), args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3, ends_loop=True)
 async def report_run(args: ReportArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     if any(name == REPORT and ok for name, ok in ctx.calls):
         return ToolResult(ok=False, content=phrase("projects.tools.report.already"))
     p, o = got
@@ -574,9 +551,9 @@ class NoteArgs(BaseModel):
 
 @PROJECTS.tool(NOTE, acts=True, description=phrase("projects.tools.note.description"), label=phrase("projects.tools.note.label"), args=NoteArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
 async def project_note(args: NoteArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, o = got
     await ctx.emit(NOTED.draft(project=p.id, text=Content.of(args.text.strip(), level=written_for(p, o)),
                                owner=p.owner, about=p.about, read_about=inherited_for(p, o),
@@ -595,9 +572,9 @@ class DecideArgs(BaseModel):
 
 @PROJECTS.tool(DECIDE, acts=True, description=phrase("projects.tools.decide.description"), label=phrase("projects.tools.decide.label"), args=DecideArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
 async def project_decide(args: DecideArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, o = got
     if args.replaces:
         old = decision_at(p, args.replaces)
@@ -638,9 +615,9 @@ class ObjectiveArgs(BaseModel):
                label=phrase("projects.tools.objective_add.label"), args=ObjectiveArgs,
                bundle="projects", episodes=RUNS, max_calls_per_episode=3)
 async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     if living(p) >= OBJECTIVES_KEPT:
         return ToolResult(ok=False, content=phrase("projects.tools.objective_add.full", count=OBJECTIVES_KEPT))
@@ -800,9 +777,9 @@ async def project_plan(args: PlanArgs, ctx: Any) -> Any:
     dépend ; ceux qu'il ne garde pas sont retirés (sauf une réparation d'app). Un plan qui pose des questions sur un
     projet qu'on lui a demandé attend sa réponse ; sinon il vaut d'office. Ce qu'il demande à lire (``reads``, ADR
     0257) attend de même, quand qui répondra au plan en est le propriétaire : le lien se pose à sa validation."""
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     s: ProjectsState = ctx.frame.state("projects")
     world = links.world_of(ctx.frame)
@@ -896,9 +873,9 @@ async def project_equip(args: EquipArgs, ctx: Any) -> Any:
     """Se donner un lot de plus, sur un projet à elle (``SELF_BUNDLES``) : en main à l'exécution suivante — les
     outils d'une exécution sont fixés quand elle commence. Un projet confié garde le cadre qu'on lui a donné : elle
     le demande (``needs_you``)."""
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     if p.authority != c.SELF:
         return ToolResult(ok=False, content=phrase("projects.tools.equip.confided"))
@@ -926,14 +903,6 @@ def attributed(ctx: Any, project: int, commit: Any, field: str, kind: str, asked
 
 
 # ── En conversation : créer un projet ─────────────────────────────────────
-
-
-def speaker(frame: Frame) -> tuple[str, str] | None:
-    """Qui lui parle, en réponse : son adresse et sa personne (``None`` hors d'une réponse)."""
-    ep = frame.episode
-    if ep is None or not ep.target or ep.kind != Kind.REPLY:
-        return None
-    return ep.target, frame.get(identity_c.PERSON(ep.target))
 
 
 class ConstantArg(BaseModel):

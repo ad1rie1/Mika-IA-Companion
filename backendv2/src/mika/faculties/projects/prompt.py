@@ -88,7 +88,8 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.rhythm import cadence, pick
 from mika.faculties.projects.steer import steerable
-from mika.faculties.projects.tools import RUNS, caretaker, triggers_said
+from mika.faculties.projects.tool_common import RUNS, caretaker
+from mika.faculties.projects.tools import triggers_said
 from mika.faculties.projects.work import unplanned_stall, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone

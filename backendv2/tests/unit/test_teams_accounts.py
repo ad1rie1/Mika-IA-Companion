@@ -32,7 +32,7 @@ from mika.app import schema
 from mika.app.domains.teams.desk import digest
 from mika.contracts import identity as identity_c
 from mika.contracts import teams as teams_c
-from mika.faculties.projects.tools import caretaker
+from mika.faculties.projects.tool_common import caretaker
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.plugins import email as email_p

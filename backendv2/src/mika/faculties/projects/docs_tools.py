@@ -26,7 +26,7 @@ from mika.contracts import projects as c
 from mika.faculties.projects import docs, links
 from mika.faculties.projects.faculty import DOC_PAGES_MAX, PROJECTS, Project, ProjectsState, written
 from mika.faculties.projects.prompt import episode_project
-from mika.faculties.projects.tools import RUNS, current, gone
+from mika.faculties.projects.tool_common import RUNS, gone_reply, running_project
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody, Zone, cited
@@ -61,9 +61,9 @@ def readable(s: ProjectsState, frame: Frame, p: Project) -> tuple[Project, ...]:
 def _space(ctx: Any, project: int) -> tuple[Project, Project] | ToolResult:
     """Le projet de l'exécution et celui dont on lit la documentation (lui-même sans numéro) ; un projet qu'il ne
     lit pas, ou dont le lien ne donne pas la documentation : un refus."""
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return _no(gone())
+        return _no(gone_reply())
     p = got[0]
     if not project or project == p.id:
         return p, p
@@ -197,9 +197,9 @@ class WriteArgs(BaseModel):
                label=phrase("projects.tools.docs.write.label"), args=WriteArgs, bundle="projects", episodes=RUNS,
                max_calls_per_episode=24)
 async def doc_write(args: WriteArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p = got[0]
     path = docs.page_path(args.path.strip())
     if path is None:

@@ -54,8 +54,18 @@ from mika.faculties.projects.faculty import (
     written_for,
 )
 from mika.faculties.projects.inspect_common import unchanged
-from mika.faculties.projects.steer import STEERABLE, _changed, _steered, steerable
-from mika.faculties.projects.tools import RUNS, bad_milestone, caretaker, contents_of, current, gone, speaker
+from mika.faculties.projects.steer import STEERABLE, steerable
+from mika.faculties.projects.tool_common import (
+    RUNS,
+    caretaker,
+    changed_reply,
+    contents_of,
+    emit_gesture,
+    gone_reply,
+    running_project,
+    speaker,
+)
+from mika.faculties.projects.tools import bad_milestone
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
 from mika.kernel.text import clipped
@@ -79,9 +89,9 @@ def _no(content: str) -> ToolResult:
 
 def _target(ctx: Any) -> tuple[Project, Objective] | ToolResult | str:
     """Le projet et l'objectif ponctuel que vise cette exécution, ou pourquoi ses jalons ne s'y tiennent pas."""
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, o = got
     if o is None:
         return _no(phrase("projects.tools.milestones.no_objective"))
@@ -378,12 +388,12 @@ async def project_milestone(args: SettleArgs, ctx: Any) -> Any:
     if args.what == REFUSE and not text:
         return _no(phrase("projects.tools.breakpoint.no_reason"))
     draft = settling(p, o, m, args.what, author="owner", by=person, text=text)
-    if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
-        return _changed()
+    if await emit_gesture(ctx, draft, unchanged(p.id, STEERABLE)) is None:
+        return changed_reply()
     after = _fresh(ctx, p, o)
     now = milestone_at(after, m.id) if after is not None else None
     if now is None or now.ready_at or (args.what == VALIDATE and now.status != c.REACHED):
-        return _changed()  # il n'attendait plus : rien n'a changé
+        return changed_reply()  # il n'attendait plus : rien n'a changé
     if args.what == VALIDATE:
         return phrase("projects.tools.breakpoint.validated", id=m.id, objective=o.id, title=title)
     return phrase("projects.tools.breakpoint.refused", id=m.id, objective=o.id, title=title)

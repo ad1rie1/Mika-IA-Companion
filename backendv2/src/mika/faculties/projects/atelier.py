@@ -81,11 +81,10 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_pulls import BASE_KEPT, BASE_PULL
 from mika.faculties.projects.inspect_reviews import review_line
+from mika.faculties.projects.tool_common import gone_reply, running_project
 from mika.faculties.projects.tools import (
     CONFLICTS_SHOWN,
     TAKE_BASE,
-    current,
-    gone,
     pending_push,
     pinned,
     propose_push,
@@ -123,9 +122,9 @@ SEEN_KEY = "_apercu"
 
 
 def _atelier(ctx: Any) -> tuple[Any, Any] | str:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     port = ctx.ports.get("workshop")
     if port is None:
         return phrase("projects.workshop.unavailable")
@@ -387,7 +386,7 @@ async def ws_take_base(args: BaseArgs, ctx: Any) -> Any:
     p, port = got
     if not by_pulls(p):
         return ToolResult(ok=False, content=phrase("projects.workshop.take_base_direct"))
-    found = current(ctx)
+    found = running_project(ctx)
     joined = await port.take_base(p.id, branch_of(found[1] if found is not None else None),
                                   stow=phrase("projects.commit.stowed"))
     if not joined.branch:
@@ -450,9 +449,9 @@ def _already(frame: Any, p: Project, argv: list[str]) -> bool:
                episodes=RUNS,
                max_calls_per_episode=2)
 async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     # ses mots et sa commande sont ce qu'elle écrit pendant une exécution : au niveau de ce qu'elle y lit, celui des
     # projets que le sien lit compris (``written``, ADR 0262) — pas au seul niveau de son cadre
@@ -476,9 +475,9 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
                label=phrase("projects.workshop.push_label"), args=PushArgs, bundle=BUNDLE,
                episodes=RUNS, max_calls_per_episode=1)
 async def project_push(args: PushArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, _ = got
     if not p.remote:
         return ToolResult(ok=False, content=phrase("projects.workshop.no_remote"))

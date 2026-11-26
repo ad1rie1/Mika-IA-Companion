@@ -32,7 +32,7 @@ from mika.faculties.projects.faculty import (
     subjects_of,
     written,
 )
-from mika.faculties.projects.tools import RUNS, current, gone
+from mika.faculties.projects.tool_common import RUNS, gone_reply, running_project
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
 from mika.kernel.text import clipped
@@ -97,9 +97,9 @@ def _twice(p: Project, target: int, key: str) -> str:
                label=phrase("projects.tools.ask.label"), args=AskArgs, bundle="projects", episodes=RUNS,
                max_calls_per_episode=8)
 async def project_ask(args: AskArgs, ctx: Any) -> Any:
-    got = current(ctx)
+    got = running_project(ctx)
     if got is None:
-        return gone()
+        return gone_reply()
     p, o = got
     s: ProjectsState = ctx.frame.state("projects")
     # le droit se relit dans le lien, à chaque appel : un droit repris depuis le départ de l'exécution ne demande rien

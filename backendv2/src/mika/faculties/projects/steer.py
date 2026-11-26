@@ -8,8 +8,8 @@ s'écrit aussitôt, au nom de la personne ; sur l'accord du propriétaire, la de
 (``projects.steer_asked``, son texte effaçable) et proposée dans la console (la capacité ``projects.steer``, son
 aperçu), et l'effet qui suit l'accord écrit le geste (ADR 0133).
 
-Il lit les aides des outils (``tools.py`` : qui parle, ses mots tels quels, les textes gardés, qui s'occupe d'elle) ;
-``tools.py`` ne l'importe pas.
+Il lit les aides des outils (``tools.py`` : ses mots tels quels ; ``tool_common.py`` : qui parle, les textes gardés,
+qui s'occupe d'elle) ; ``tools.py`` ne l'importe pas.
 """
 
 from __future__ import annotations
@@ -56,27 +56,25 @@ from mika.faculties.projects.faculty import (
 )
 from mika.faculties.projects.inspect_common import unchanged
 from mika.faculties.projects.rhythm import pick
-from mika.faculties.projects.tools import (
-    attributed,
+from mika.faculties.projects.tool_common import (
     caretaker,
+    changed_reply,
+    choices_listed,
     contents_of,
-    named_projects,
-    refused_lines,
+    emit_gesture,
     speaker,
-    still_open,
-    their_words,
+    which_one,
 )
+from mika.faculties.projects.tools import attributed, named_projects, refused_lines, still_open, their_words
 from mika.kernel.clock import HOUR
 from mika.kernel.codec import canonical_json
-from mika.kernel.events import Content, Draft
+from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, Superseded
 from mika.kernel.operate import Preview
 from mika.vocab.episodes import Kind, project_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import hearable
-from mika.vocab.words import stems
 
 # ── En conversation : piloter un projet ───────────────────────────────────
 
@@ -87,8 +85,6 @@ ADD, INSTRUCT, NOW, PAUSE, RESUME = "add", "instruct", "now", "pause", "resume"
 PLAN_VERDICTS = (APPROVE, REVISE)
 #: un projet qu'on pilote encore (archivé, il ne fait plus rien)
 STEERABLE = (c.ACTIVE, c.PAUSED)
-#: les projets, les objectifs qu'elle énumère quand elle ne sait pas duquel il s'agit
-LISTED = 12
 #: la raison d'une pause demandée en conversation (qui l'a demandée : ``by``, que la console nomme)
 PAUSED_IN_TALK = "mis en pause en conversation"
 
@@ -120,42 +116,6 @@ def may_steer(audience: Any, kind: str, frame: Any = None) -> bool:
     return any(steering(p, audience, kind, frame) in c.CHANGES for p in s.projects.values() if live(p))
 
 
-def _which(said: str, rows: list[tuple[int, str]]) -> int | None:
-    """Le numéro dont il s'agit : dit tel quel (« 3 », « n° 3 »), sinon le seul qu'il y a, sinon celui qui a le
-    plus de mots en commun avec ce qu'elle en dit — s'il est seul dans ce cas (sinon rien : elle demande lequel)."""
-    raw = said.strip().lower().removeprefix("n°").removeprefix("#").strip()
-    if raw.isdigit():
-        return int(raw) if any(i == int(raw) for i, _ in rows) else None
-    if len(rows) == 1:
-        return rows[0][0]
-    said_stems = stems(said)
-    scored = [(len(said_stems & stems(text)), i) for i, text in rows]
-    best = max((n for n, _ in scored), default=0)
-    top = [i for n, i in scored if n == best]
-    return top[0] if best and len(top) == 1 else None
-
-
-def _listed(rows: list[tuple[int, str]], empty: str) -> str:
-    """Les projets (ou les objectifs) parmi lesquels elle n'a pas su choisir, un par ligne."""
-    return "\n".join(phrase("projects.tools.steer.item", id=i, text=text or empty) for i, text in rows[:LISTED])
-
-
-async def _steered(ctx: Any, draft: Draft[Any], guard: Guard, *more: Draft[Any]) -> Any:
-    """Écrire un geste sous sa garde (et ce qui s'écrit avec lui, ``more``) ; ``None`` quand c'est elle qui a cédé (le
-    projet a changé entre-temps)."""
-    try:
-        return await ctx.emit(draft, *more, guard=guard)
-    except Superseded:
-        if guard.predicate is not None and guard.predicate(ctx.mind.frame().view):
-            raise  # c'est la garde de la conversation qui a cédé
-        return None
-
-
-def _changed() -> ToolResult:
-    """La réponse d'un geste quand le projet a changé sous elle (une garde a cédé) : rien n'a changé."""
-    return ToolResult(ok=False, content=phrase("projects.tools.steer.changed"))
-
-
 @PROJECTS.tool(STEER, acts=True, description=phrase("projects.tools.steer.description"),
                label=phrase("projects.tools.steer.label"), args=SteerArgs, bundle="projects",
                episodes=[Kind.REPLY], max_calls_per_episode=2, fits=may_steer,
@@ -177,9 +137,9 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.none"))
     texts = contents_of(ctx, [p.title_ref for p in mine])
     rows = [(p.id, texts.get(p.title_ref, "")) for p in mine]
-    pid = _which(args.project, rows)
+    pid = which_one(args.project, rows)
     if pid is None:
-        return ToolResult(ok=False, content=phrase("projects.tools.steer.which_project", listed=_listed(
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.which_project", listed=choices_listed(
             rows, phrase("projects.tools.steer.untitled"))))
     p = s.projects[pid]
     title = phrase("projects.tools.steer.quoted", text=texts[p.title_ref]) if texts.get(p.title_ref) else \
@@ -194,15 +154,15 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
         if p.status == c.PAUSED:
             return phrase("projects.tools.steer.already_paused", title=title)
         draft = PAUSED.draft(project=p.id, reason=PAUSED_IN_TALK, by=person, owner=p.owner, about=p.about)
-        if await _steered(ctx, draft, unchanged(p.id, (c.ACTIVE,))) is None:
-            return _changed()
+        if await emit_gesture(ctx, draft, unchanged(p.id, (c.ACTIVE,))) is None:
+            return changed_reply()
         return phrase("projects.tools.steer.paused", title=title)
     if args.what == RESUME:
         if p.status == c.ACTIVE:
             return phrase("projects.tools.steer.not_paused", title=title)
         draft = RESUMED.draft(project=p.id, by=person, owner=p.owner, about=p.about)
-        if await _steered(ctx, draft, unchanged(p.id, (c.PAUSED,))) is None:
-            return _changed()
+        if await emit_gesture(ctx, draft, unchanged(p.id, (c.PAUSED,))) is None:
+            return changed_reply()
         return phrase("projects.tools.steer.resumed", title=title)
     text = args.text.strip()
     if not text:
@@ -213,20 +173,20 @@ async def project_steer(args: SteerArgs, ctx: Any) -> Any:
         draft = AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), by=person,
                               words=Content.of(said, level=p.sensitivity) if said else None,
                               owner=p.owner, about=p.about, read_about=p.read_about)
-        if await _steered(ctx, draft, unchanged(p.id, STEERABLE)) is None:
-            return _changed()
+        if await emit_gesture(ctx, draft, unchanged(p.id, STEERABLE)) is None:
+            return changed_reply()
         return phrase("projects.tools.steer.instructed", title=title)
     if len(text) > 500:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.too_long"))
     if living(p) >= OBJECTIVES_KEPT:
         return ToolResult(ok=False, content=phrase("projects.tools.steer.full", title=title, count=OBJECTIVES_KEPT))
     number = p.objective_seq + 1
-    commit = await _steered(ctx, OBJECTIVE_ADDED.draft(
+    commit = await emit_gesture(ctx, OBJECTIVE_ADDED.draft(
         project=p.id, objective=number, text=Content.of(text, level=written(p)), kind=args.kind,
         cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0, author="owner", by=person,
         owner=p.owner, about=p.about, read_about=p.read_about), unchanged(p.id, STEERABLE))
     if commit is None:
-        return _changed()
+        return changed_reply()
     number = attributed(ctx, p.id, commit, "text", "objectives", number)
     kind = phrase("projects.tools.objective_add.constant") if args.kind == c.CONSTANT else \
         phrase("projects.tools.objective_add.once")
@@ -255,8 +215,8 @@ async def _answer_plan(args: SteerArgs, ctx: Any, p: Project, person: str, title
     linking = links.approved(s, p, person, links.world_of(frame)) if args.what == APPROVE else links.Approved()
     link = (LINKS_SET.draft(project=p.id, reads=linking.reads, by=person, owner=p.owner, about=p.about,
                             read_about=p.read_about),) if linking.added else ()
-    if await _steered(ctx, draft, unchanged(p.id, (c.ACTIVE,)), *link) is None:
-        return _changed()
+    if await emit_gesture(ctx, draft, unchanged(p.id, (c.ACTIVE,)), *link) is None:
+        return changed_reply()
     if args.what == APPROVE:
         return phrase("projects.tools.steer.plan_approve", title=title) + _linked_words(ctx, s, linking)
     return phrase("projects.tools.steer.plan_revise", title=title)
@@ -287,9 +247,9 @@ async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, pe
             return ToolResult(ok=False, content=phrase("projects.tools.steer.no_open", title=title))
         texts = contents_of(ctx, [x.text_ref for x in opened])
         rows = [(x.id, texts.get(x.text_ref, "")) for x in opened]
-        oid = _which(args.objective, rows)
+        oid = which_one(args.objective, rows)
         if oid is None:
-            return ToolResult(ok=False, content=phrase("projects.tools.steer.which_objective", listed=_listed(
+            return ToolResult(ok=False, content=phrase("projects.tools.steer.which_objective", listed=choices_listed(
                 rows, phrase("projects.tools.steer.forgotten"))))
         o = objective_at(p, oid)
     if busy(s, p.id):
@@ -305,8 +265,8 @@ async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, pe
     guard = unchanged(p.id, (c.ACTIVE,)) if o is None else unchanged(p.id, (c.ACTIVE,)) & still_open(p.id, o.id)
     draft = NUDGED.draft(project=p.id, objective=o.id if o is not None else 0, by=person, owner=p.owner,
                          about=p.about)
-    if await _steered(ctx, draft, guard) is None:
-        return _changed()
+    if await emit_gesture(ctx, draft, guard) is None:
+        return changed_reply()
     on = phrase("projects.tools.steer.on_objective", id=o.id) if o is not None else ""
     return phrase("projects.tools.steer.asked", title=title, on=on)
 
@@ -342,9 +302,9 @@ async def _ask_steer(args: SteerArgs, ctx: Any, p: Project, person: str, title: 
         opened = [x for x in p.objectives if x.status == c.OPEN]
         texts = contents_of(ctx, [x.text_ref for x in opened])
         rows = [(x.id, texts.get(x.text_ref, "")) for x in opened]
-        found = _which(args.objective, rows) if rows else None
+        found = which_one(args.objective, rows) if rows else None
         if found is None:
-            return ToolResult(ok=False, content=phrase("projects.tools.steer.which_objective", listed=_listed(
+            return ToolResult(ok=False, content=phrase("projects.tools.steer.which_objective", listed=choices_listed(
                 rows, phrase("projects.tools.steer.forgotten"))) if rows else
                 phrase("projects.tools.steer.no_open", title=title))
         objective = found
