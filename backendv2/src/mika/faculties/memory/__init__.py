@@ -22,6 +22,7 @@ from mika.faculties.memory import (  # noqa: F401 — contributions
     relayed,
     reread,
     tools,
+    veiled,
 )
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
 
