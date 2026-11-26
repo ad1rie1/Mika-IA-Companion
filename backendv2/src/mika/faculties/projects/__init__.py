@@ -4,9 +4,9 @@ Voir ``contracts/projects.py``."""
 from mika.faculties.projects import (  # noqa: F401 — contributions
     access,
     actions,
+    asks_tools,
     atelier,
     decisions,
-    demands,
     docs,
     docs_tools,
     framing_tools,

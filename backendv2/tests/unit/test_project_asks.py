@@ -22,7 +22,7 @@ import pytest
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import asks, links, tracker, triggers
-from mika.faculties.projects.demands import AskArgs, key_of, project_ask
+from mika.faculties.projects.asks_tools import AskArgs, key_of, project_ask
 from mika.faculties.projects.faculty import (
     ASKS_KEPT,
     LINKS_SET,

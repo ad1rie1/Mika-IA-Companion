@@ -24,7 +24,7 @@ from dataclasses import replace
 from mika.adapters.workshop import BwrapWorkshop
 from mika.contracts import projects as c
 from mika.faculties.projects import faculty, rhythm, tickets, tracker, triage, triggers
-from mika.faculties.projects.demands import AskArgs, project_ask
+from mika.faculties.projects.asks_tools import AskArgs, project_ask
 from mika.faculties.projects.faculty import (
     ITEMS_RECENT,
     NUDGED,

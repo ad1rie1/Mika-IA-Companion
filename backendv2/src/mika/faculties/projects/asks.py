@@ -18,7 +18,7 @@ l'état des projets et de ce qu'un lien donne maintenant (``links.py``) :
   (``ask:<n>``, ADR 0265) ; le processus ``projects.stirs`` éveille l'objectif qui l'a ouverte si le lien donne
   encore le détail du projet visé (``reads``).
 
-L'outil et ce que son exécution en lit sont dans ``demands.py`` ; rien ici n'agit.
+L'outil et ce que son exécution en lit sont dans ``asks_tools.py`` ; rien ici n'agit.
 """
 
 from __future__ import annotations

@@ -53,7 +53,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.contracts import wakeup as wakeup_c
-from mika.faculties.projects import asks, demands, links, milestones, tracker, triage, triggers
+from mika.faculties.projects import asks, asks_tools, links, milestones, tracker, triage, triggers
 from mika.faculties.projects.access import reads, sees
 from mika.faculties.projects.atelier import no_view_words
 from mika.faculties.projects.faculty import (
@@ -389,7 +389,7 @@ async def _asks(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dic
     run = s.running.get(ep.id) if ep is not None else None
     # son dernier passage : celui d'avant cette exécution, qu'elle a déjà rendu sien à son départ
     since = run.previous_objective if run is not None and run.objective == target.id else target.last_run_at
-    said, seen = demands.lines(s, frame, store, p, target, since, links.world_of(frame))
+    said, seen = asks_tools.lines(s, frame, store, p, target, since, links.world_of(frame))
     return {"lines": said, "seen": list(seen)}
 
 
