@@ -140,26 +140,85 @@ def test_a_mail_is_ranged_even_when_nothing_of_hers_runs(served):
     assert pro["last_poll"] > 0 and not pro["error"]  # rangé : compté comme une relève
 
 
+Function = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+def _relays(fn: Function | None) -> bool:
+    """La fonction reçoit ``serving`` sans rien en dire elle-même : un paramètre sans défaut, ou ``False`` par défaut.
+    Un défaut ``True`` — ou toute autre valeur —, ou un ``serving`` qui n'est pas un paramètre, c'est le dire."""
+    if fn is None:
+        return False
+    args = fn.args
+    positional = [*args.posonlyargs, *args.args]
+    defaults: dict[str, ast.expr | None] = {a.arg: None for a in [*positional, *args.kwonlyargs]}
+    defaults.update(zip((a.arg for a in positional[len(positional) - len(args.defaults):]), args.defaults, strict=True))
+    defaults.update((a.arg, d) for a, d in zip(args.kwonlyargs, args.kw_defaults, strict=True) if d is not None)
+    if "serving" not in defaults:
+        return False
+    default = defaults["serving"]
+    return default is None or (isinstance(default, ast.Constant) and default.value is False)
+
+
+def asking(tree: ast.Module, where: str) -> set[tuple[str, str]]:
+    """Qui, dans un source, dit au serveur qu'il sert pour de bon : chaque appel ``…(serving=…)`` qui ne passe pas
+    ``False``, sous le nom de la fonction qui l'écrit (``<module>`` hors de toute fonction). Relayer ce qu'on a reçu
+    (``serving=serving``, de ``build`` au câblage) n'est pas le dire — seulement si la fonction qui relaie le reçoit en
+    paramètre, sans défaut ou avec ``False`` par défaut (``_relays``)."""
+    out: set[tuple[str, str]] = set()
+
+    def says(value: ast.expr, fn: Function | None) -> bool:
+        relayed = isinstance(value, ast.Name) and value.id == "serving" and _relays(fn)
+        return not relayed and not (isinstance(value, ast.Constant) and value.value is False)
+
+    def visit(node: ast.AST, fn: Function | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = child if isinstance(child, Function) else fn  # la fonction qui écrit l'appel : la plus proche
+            if isinstance(child, ast.Call) and any(k.arg == "serving" and says(k.value, fn) for k in child.keywords):
+                out.add((where, fn.name if fn is not None else "<module>"))
+            visit(child, inner)
+
+    visit(tree, None)
+    return out
+
+
+def making(tree: ast.Module) -> bool:
+    """Le source construit-il un courrier en direct (``MailWatch(…)``), où que ce soit ?"""
+    return any(isinstance(n, ast.Call) and (n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", ""))
+               == "MailWatch" for n in ast.walk(tree))
+
+
 def test_only_the_real_server_watches_the_mail():
     """Seul ``serve`` dit que le serveur sert pour de bon, et seul le câblage du courrier construit son courrier en
     direct : ni une commande, ni la sonde, ni l'aperçu de la console n'ouvrent de connexion IMAP d'eux-mêmes (lu dans
-    le source, par l'AST). Relayer ce qu'on a reçu (``serving=serving``, de ``build`` au câblage) n'est pas le dire."""
-    asking: set[tuple[str, str]] = set()
-    making: set[str] = set()
-
-    def says(value: ast.expr) -> bool:
-        relayed = isinstance(value, ast.Name) and value.id == "serving"
-        return not relayed and not (isinstance(value, ast.Constant) and value.value is False)
-
+    le source, par l'AST)."""
+    said: set[tuple[str, str]] = set()
+    made: set[str] = set()
     for path in SRC.rglob("*.py"):
         where = path.relative_to(SRC).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
-            for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
-                if any(k.arg == "serving" and says(k.value) for k in call.keywords):
-                    asking.add((where, fn.name))
-                named = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
-                if named == "MailWatch":
-                    making.add(where)
-    assert asking == {("app/server.py", "serve")}
-    assert making == {"app/domains/mail/wiring.py"}
+        said |= asking(tree, where)
+        if making(tree):
+            made.add(where)
+    assert said == {("app/server.py", "serve")}
+    assert made == {"app/domains/mail/wiring.py"}
+
+
+@pytest.mark.parametrize(("source", "said"), [
+    ("def serve():\n    build(d, serving=True)\n", {"serve"}),
+    ("def serve(d):\n    build(d, serving=d.real)\n", {"serve"}),
+    # relayer ce qu'on reçoit : sans défaut, ou ``False`` par défaut, en paramètre positionnel ou nommé
+    ("def build(d, *, serving=False):\n    Wiring(d, serving=serving)\n", set()),
+    ("def build(d, serving):\n    Wiring(d, serving=serving)\n", set()),
+    ("def build(d, serving=False, more=True):\n    Wiring(d, serving=serving)\n", set()),
+    ("async def build(d, /, serving):\n    Wiring(d, serving=serving)\n", set()),
+    ("def build(d):\n    Wiring(d, serving=False)\n", set()),
+    # … mais un défaut qui le dit, ou un ``serving`` qui n'est pas un paramètre, le dit
+    ("def build(d, *, serving=True):\n    Wiring(d, serving=serving)\n", {"build"}),
+    ("def build(d, serving=True):\n    Wiring(d, serving=serving)\n", {"build"}),
+    ("def build(d, serving=1):\n    Wiring(d, serving=serving)\n", {"build"}),
+    ("def build(d):\n    serving = True\n    Wiring(d, serving=serving)\n", {"build"}),
+    ("def build(d, *, serving=False):\n    def later():\n        Wiring(d, serving=serving)\n", {"later"}),
+    ("W = Wiring(d, serving=True)\n", {"<module>"}),
+])
+def test_the_guard_of_the_live_mail_sees_who_says_it(source, said):
+    assert asking(ast.parse(source), "x.py") == {("x.py", name) for name in said}
