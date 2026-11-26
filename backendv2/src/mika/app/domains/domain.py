@@ -228,7 +228,9 @@ class QueuePart:
     réunissent les parts ; elles n'en connaissent aucune."""
 
     #: ses onglets de la file (des ``inspector.ui.QueueTab``) : les demandes de ses capacités, ses sortes d'éléments ;
-    #: leur place : leur ``order``
+    #: leur place dans la barre de la file et dans son menu : leur ``order`` (avant l'historique, qui vient après
+    #: tous) ; leur lien de menu : leur ``title`` et leur ``hint`` (``app/console_menu.py`` les lit, la carte de la
+    #: console aussi : un onglet neuf n'y retouche rien)
     tabs: tuple[Any, ...] = ()
     #: ce qui, chez lui, attend une décision sans être une demande d'envoi (les rapprochements de l'annuaire) :
     #: ``items(ui)``, asynchrone, rend des ``inspector.ui.QueueItem``

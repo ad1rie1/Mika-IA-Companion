@@ -162,10 +162,14 @@ class QueueTab:
     title: str
     capabilities: tuple[str, ...] = ()
     kinds: tuple[str, ...] = ()
+    #: sa place dans la barre de la file, après « Tout ce qui attend » et avant l'historique, qui vient après tous
+    #: (``pages/approvals.py::HISTORY_ORDER``) ; son lien de menu a la même place (``app/console_menu.py``)
     order: int = 100
     description: str = ""
     #: ce que dit l'onglet vide (« Aucun mail n'attend ton accord »)
     empty: str = ""
+    #: ce qu'on y trouve, en quelques mots, sous son lien dans le menu de « À valider » — le lien porte son ``title``
+    hint: str = ""
 
 
 @dataclass(frozen=True, slots=True)

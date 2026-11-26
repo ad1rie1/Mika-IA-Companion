@@ -30,7 +30,8 @@ def sources(ui: UI, args: Mapping[str, Any]) -> list[tuple[str, str]]:
 QUEUE = QueuePart(
     tabs=(QueueTab("teams", "Réponses Teams", capabilities=(teams_c.SEND,), order=20,
          description="Ses réponses dans Teams, à ta place : ce qui sera posé, après ton accord.",
-         empty="Aucune réponse Teams n'attend ton accord."),),
+         empty="Aucune réponse Teams n'attend ton accord.",
+         hint="Ce qu'elle poserait dans Teams"),),
     covers=("teams/reponses",),
     sources={teams_c.SEND: sources},
     channels={teams_c.OWNER: "Teams"},

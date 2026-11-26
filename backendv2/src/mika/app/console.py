@@ -80,12 +80,13 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
     NavGroup("À valider", (
         # une seule file : ce qui attend une décision, quelle qu'en soit la sorte ; ses onglets (courriers, Teams,
-        # identités, rapprochements) sont déclarés par la composition (``app/handmade/waiting.py``, ADR 0177)
+        # identités, rapprochements) sont déclarés par la composition et les fiches (``app/handmade/waiting.py``,
+        # ADR 0177), et rangés par leur ``QueueTab.order`` après « Tout ce qui attend » ; l'historique vient après
+        # tous (``inspector/pages/approvals.py::HISTORY_ORDER``)
         Destination("approbations", "À valider", "Ce qui attend ta décision — ce qu'elle voudrait faire sortir de "
                     "la machine, les identités à confirmer, les rapprochements — et ce qui en a "
                     "été décidé.",
-                    builtin=("approbations.en_attente", "approbations.historique"), dynamic=True,
-                    order=("en_attente", "courriers", "teams", "identites", "rapprochements", "historique")),
+                    builtin=("approbations.en_attente",), dynamic=True),
     )),
     NavGroup("Relations & échanges", (
         _destination("mail"),  # le courrier

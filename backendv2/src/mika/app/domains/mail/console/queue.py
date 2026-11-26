@@ -28,7 +28,8 @@ def sources(ui: UI, args: Mapping[str, Any]) -> list[tuple[str, str]]:
 QUEUE = QueuePart(
     tabs=(QueueTab("courriers", "Courriers à envoyer", capabilities=(email_c.SEND,), order=10,
          description="Les mails qu'elle voudrait envoyer : ce qui partira, tel quel, après ton accord.",
-         empty="Aucun mail n'attend ton accord."),),
+         empty="Aucun mail n'attend ton accord.",
+         hint="Ses mails, prêts à partir"),),
     covers=("courrier/brouillons",),
     sources={email_c.SEND: sources},
     channels={email_c.OWNER: "courrier"},

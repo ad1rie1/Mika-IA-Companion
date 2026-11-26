@@ -151,7 +151,8 @@ QUEUE = QueuePart(
     tabs=(QueueTab("rapprochements", "Rapprochements", kinds=(MATCH, NAME), order=35,
          description="Deux fiches qui pourraient être la même personne — deux fiches de l'annuaire, ou une personne "
                      "dont on lui a parlé et quelqu'un qui lui parle : la même personne ? " + MATCH_RULE,
-         empty="Aucune fiche n'en rappelle une autre par son nom."),),
+         empty="Aucune fiche n'en rappelle une autre par son nom.",
+         hint="Deux fiches au même nom, des noms racontés"),),
     items=items, count=count, views=(NAMES_VIEW, MATCHES_VIEW),
     # les deux fiches côte à côte d'un rapprochement : les feuilles de l'annuaire
     styles=DIRECTORY_STYLES,

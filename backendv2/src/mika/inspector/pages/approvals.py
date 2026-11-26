@@ -409,7 +409,12 @@ def _sorts(ui: Any, ctx: Any, sort: str, issue: str) -> Nav | None:
                   for c in known)), title=HISTORY_SORTS)
 
 
-@TABS.tab("approbations.historique", title="Historique des autorisations",
+#: la place de l'historique dans la barre de la file : après tous ses onglets (``QueueTab.order`` est plus petit), qui
+#: se rangent par leur ordre (``Destination.dynamic``) après « Tout ce qui attend », que la destination nomme
+HISTORY_ORDER = 1000
+
+
+@TABS.tab("approbations.historique", title="Historique des autorisations", order=HISTORY_ORDER,
           description="Chaque demande tranchée : ta décision (approuvée ou refusée, par qui, ta note) et son exécution "
                       "(réussie ou non, ce qu'elle a donné), à filtrer par sorte et par issue.")
 async def history(ui: Any, request: Request) -> dict[str, Any]:

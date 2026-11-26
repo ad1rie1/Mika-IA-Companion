@@ -46,6 +46,7 @@ from mika.app.domains import (
     OutsidePart,
     PersonPart,
     PortPart,
+    QueuePart,
     SharingPart,
     TablePart,
     gathered,
@@ -54,11 +55,14 @@ from mika.app.domains import (
 from mika.app.handmade.person import TABS as PERSON_TABS
 from mika.app.handmade.person import account_tabs
 from mika.app.handmade.rights import share_consoles
+from mika.app.handmade.waiting import TABS as QUEUE_TABS
 from mika.app.me.accounts import CHANNELS
 from mika.app.me.outside import OUTSIDE
 from mika.app.me.sharing import KINDS as SHARED_KINDS
 from mika.app.mindport import MIXED, KernelPort
 from mika.app.settings import SettingsPart
+from mika.inspector.pages.approvals import HISTORY_ORDER
+from mika.inspector.ui import QueueTab
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / "mika"
@@ -251,6 +255,24 @@ def test_every_destination_and_menu_link_of_a_card_is_placed():
              if d.menu is not None and not any(x is d.menu for x in links)]
     assert any(d.destination is not None for d in DOMAINS) and any(d.menu is not None for d in DOMAINS)
     assert not lost, lost
+
+
+def test_each_tab_of_the_queue_has_its_place_and_its_link():
+    """La file « À valider » range ses onglets — celui du cadre, puis ceux des fiches (``QueuePart.tabs``) — par leur
+    ordre (``QueueTab.order``), après « Tout ce qui attend » et avant l'historique (``HISTORY_ORDER``), et son menu en
+    tire un lien par onglet, sous son nom et son ``hint`` (``app/console_menu.py``). Un onglet sans mots aurait un lien
+    muet ; rangé au-delà de l'historique, il viendrait après lui ; d'un nom déjà pris (un autre onglet, « en_attente »,
+    « historique »), il remplacerait l'autre page — sans bruit."""
+    queues = [c.queue for d in DOMAINS if d.console is not None if (c := part(d.console, "CONSOLE")).queue is not None]
+    assert queues and all(isinstance(q, QueuePart) and all(isinstance(t, QueueTab) for t in q.tabs) for q in queues)
+    assert {id(t) for q in queues for t in q.tabs} <= {id(t) for t in QUEUE_TABS}
+    loose = [t.slug for t in QUEUE_TABS if not (t.slug and t.title and t.hint and t.order < HISTORY_ORDER)]
+    assert not loose, loose
+    slugs = [t.slug for t in QUEUE_TABS]
+    assert len(slugs) == len(set(slugs)) and not {"en_attente", "historique"} & set(slugs), slugs
+    links = next(g for g in MENU if g.label == "À valider").items
+    assert [(x.target, x.label, x.hint) for x in links[1:-1]] == [
+        (f"approbations/{t.slug}", t.title, t.hint) for t in QUEUE_TABS]
 
 
 def _label_kinds_read(source: str) -> set[str]:

@@ -4,7 +4,8 @@ Les routes et les fiches gardent leurs adresses. Le menu montre les groupes de p
 destination (« vie », « memoire ») y est une colonne, son nom puis ses onglets, lus dans sa barre d'onglets même — on ne
 les recopie pas ici ; une page sans onglets (En ce moment, Apps forgées) n'a que son nom. Une rubrique qui n'est
 qu'une destination (« À valider », une seule file, ADR 0177 ; « Système ») nomme ses pages une à une, dans l'ordre et
-sous le nom de leurs onglets (test_console_navigation.py) ; Système les range en trois colonnes, Surveiller, Journaux
+sous le nom de leurs onglets (test_console_navigation.py) — ceux de la file, entre « Tout ce qui attend » et
+l'historique, se lisent dans ses onglets mêmes (``app/handmade/waiting.py::TABS`` : leur nom, leur ``hint``) ; Système les range en trois colonnes, Surveiller, Journaux
 et Anatomie (``MenuLink.column``, ADR 0202), et ses Journaux mènent aussi aux historiques des réglages et des
 autorisations, qui restent dans leur rubrique. « Réglages » fait exception : une sélection d'entrées dans un annuaire
 d'une cinquantaine de pages (le sien) ; les pages d'un même sujet y forment la barre d'onglets de son lien (``also``,
@@ -26,6 +27,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from mika.app.domains import DOMAINS
+from mika.app.handmade.waiting import TABS as QUEUE_TABS
 from mika.inspector.catalog import MenuGroup, MenuLink
 
 #: les rubriques dont les liens ne suivent pas les onglets de leurs destinations (voir plus haut)
@@ -46,10 +48,9 @@ MENU = (
     # une seule file, une seule page (ADR 0177) : chaque lien en est un onglet
     MenuGroup("À valider", "check", (
         MenuLink("Tout ce qui attend", "approbations/en_attente", hint="Toutes les décisions qui t'attendent"),
-        MenuLink("Courriers à envoyer", "approbations/courriers", hint="Ses mails, prêts à partir"),
-        MenuLink("Réponses Teams", "approbations/teams", hint="Ce qu'elle poserait dans Teams"),
-        MenuLink("Identités à confirmer", "approbations/identites", hint="Qui est qui, à valider"),
-        MenuLink("Rapprochements", "approbations/rapprochements", hint="Deux fiches au même nom, des noms racontés"),
+        # ses onglets, entre ces deux-là : ceux de la file, dans leur ordre, sous leur nom (``QueueTab.order``,
+        # ``title``, ``hint``) — un onglet qu'un domaine inscrit y a son lien sans retoucher ce menu
+        *(MenuLink(tab.title, f"approbations/{tab.slug}", hint=tab.hint) for tab in QUEUE_TABS),
         MenuLink("Historique des autorisations", "approbations/historique", hint="Ce que tu as permis ou refusé"),
     ), question="Qu'est-ce qui attend ta décision ?"),
     MenuGroup("Elle", "heart", (

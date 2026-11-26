@@ -101,7 +101,9 @@ ses groupes de pages (ADR 0178) : un lien vers une destination à onglets y est 
 d'explication, puis ses onglets, lus dans sa barre d'onglets même (`UI.tab_bar` : sans ce qui est rangé derrière sa
 roue, sa page dessinée à part en premier) ; les pages seules qui se suivent partagent une colonne. Une rubrique qui
 n'est qu'une destination (À valider, Système) nomme ses pages une à une, dans l'ordre et sous le nom de leurs onglets
-(`tests/protocol/test_console_navigation.py`). Système les range en trois colonnes, comme des groupes de pages
+(`tests/protocol/test_console_navigation.py`) ; ceux de la file, entre « Tout ce qui attend » et l'historique, se lisent
+dans ses onglets mêmes (`QueueTab` : leur ordre, leur nom, leur `hint`), qu'un domaine inscrit par sa fiche
+(`QueuePart.tabs`) sans retoucher ni la carte ni le menu. Système les range en trois colonnes, comme des groupes de pages
 (`MenuLink.column`, son nom et sa ligne d'explication dans `MenuGroup.columns`, ADR 0202) : Surveiller, Journaux,
 Anatomie ; Journaux mène aussi à l'historique des réglages et à celui des autorisations, qui restent dans leur rubrique
 (ouverts, c'est elle que le menu allume, et leur fil en part). Simulations n'est au menu que si le serveur a un dossier
@@ -857,7 +859,8 @@ requête avec elle ; une fiche qui n'est qu'un nom raconté ne se propose pas fa
 lui parle (c'est ce couple-là, décidé par l'identité). « Tout » et l'historique sont ceux de la console
 (`inspector/pages/approvals.py`) ; les autres onglets et ce qui n'est pas une demande d'envoi (une identité à
 confirmer, un nom à relier, lus dans les vues de la faculté d'identité) viennent de la composition
-(`app/handmade/waiting.py`, `InspectorDeps.queue`). Ces deux vues sont hors de la navigation : la file est le seul
+(`app/handmade/waiting.py`, `InspectorDeps.queue`) et des fiches des domaines (`QueuePart`), rangés par leur ordre
+(`QueueTab.order`) avant l'historique (`HISTORY_ORDER`). Ces deux vues sont hors de la navigation : la file est le seul
 endroit où l'on en décide (ADR 0180). Courrier › Ses brouillons et Teams › Réponses restent dans leur destination pour
 retoucher un texte ; l'accueil ne compte la file qu'une fois (son total, qui dit ce qu'il compte, onglet par
 onglet), pas ses onglets ni ces vues (`UI.attention_items(distinct=True)`). Ce qu'une demande concerne (une personne, « projet n° 61 », « service

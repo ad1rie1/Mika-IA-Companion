@@ -38,7 +38,8 @@ TABS: tuple[QueueTab, ...] = tuple(sorted((
     QueueTab("identites", "Identités à confirmer", kinds=(CLAIM,), order=30,
          description="Qui dit être quelqu'un d'autre, sans preuve encore : t'en porter garant, la démentir ou "
                      "relier ce moyen de communication.",
-         empty="Personne ne dit être quelqu'un d'autre sans preuve en ce moment."),
+         empty="Personne ne dit être quelqu'un d'autre sans preuve en ce moment.",
+         hint="Qui est qui, à valider"),
     *(tab for queue in QUEUES for tab in queue.tabs),
 ), key=lambda tab: tab.order))
 
