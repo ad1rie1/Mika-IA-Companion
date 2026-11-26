@@ -135,20 +135,22 @@ inspector | sim             la console, le simulateur
 runtime                     le Mind générique : ajouts, épisodes, voies, arbitre, ordonnanceur, effets, projections, santé
 faculties | plugins | adapters
 contracts                   le contrat public de chaque propriétaire, ses fonctions pures, le port d'entrée : rien qui agit
-ports                       les interfaces que les adaptateurs implémentent et leurs types, entités SQL
-vocab                       types de valeur partagés par au moins trois propriétaires
+ports                       les interfaces que les adaptateurs implémentent et leurs types, les bases du cœur
+vocab                       types de valeur partagés par au moins trois propriétaires, ou lus sans nommer le leur
 kernel                      machinerie générique, sans un mot du domaine
 ```
 
 Ce qui fait échouer un changement :
 
 - **`lint-imports`** : une couche n'importe que celles du dessous ; une faculté n'importe ni une autre faculté ni un
-  plugin, et l'inverse non plus ; les adaptateurs n'importent ni facultés, ni plugins, ni runtime ; facultés et plugins
-  n'importent ni adaptateurs ni runtime ; ni le runtime ni l'inspecteur ne nomment une faculté ou un plugin ; le runtime
-  n'importe aucun adaptateur, l'inspecteur pas le simulateur.
+  plugin, et l'inverse non plus (la liste d'indépendance de `pyproject.toml` les nomme un à un : tout dossier neuf de
+  `faculties/` ou de `plugins/` s'y inscrit) ; les adaptateurs n'importent ni facultés, ni plugins, ni runtime ;
+  facultés et plugins n'importent ni adaptateurs ni runtime ; ni le runtime ni l'inspecteur n'importent une faculté ou
+  un plugin ; le runtime n'importe aucun adaptateur, l'inspecteur pas le simulateur.
 - **`ruff`** : pas d'import dans une fonction ; pas de `except Exception` aveugle (sauf `runtime/boundary.py`,
   `adapters/**`, `sim/**` ; ailleurs, seulement avec `# noqa: BLE001` et sa raison) ; ni l'heure, ni le hasard, ni un
-  identifiant lus directement (sauf `adapters/**`, `sim/**`, `app/**` et `plugins/web/server.py`, ADR 0066) : le temps
+  identifiant lus directement (sauf `adapters/**`, `sim/**`, `plugins/web/server.py`, ADR 0066, et les trois modules
+  d'`app` que nomme `pyproject.toml` ; ailleurs dans `app`, seulement avec `# noqa: TID251` et sa raison) : le temps
   vient de `kernel.clock`, le hasard du rng de l'événement, les identifiants de l'`IdGen` injecté.
 - **Les gardes d'architecture** (`tests/architecture/`, leur table dans ARCHITECTURE.md), dont :
   - `Mind.append` est le seul point d'écriture ;

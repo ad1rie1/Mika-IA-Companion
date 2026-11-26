@@ -110,8 +110,9 @@ SHARED: dict[str, str] = {
 
 #: les couches dont chaque paquet est à un domaine (``PACKAGES``) ou au cadre (``FRAME_OWNED``) : une liste fermée
 #: qu'un paquet neuf ne peut pas oublier sans bruit
-CLAIMED_LAYERS = ("plugins", "adapters", "contracts", "ports")
+CLAIMED_LAYERS = ("faculties", "plugins", "adapters", "contracts", "ports")
 CORE = "le cœur : le contrat d'une faculté qui n'est à aucun domaine (les facultés du cœur ne sont pas des domaines)"
+CORE_FACULTY = "le cœur : une faculté qui n'est à aucun domaine — le cadre la lit directement"
 MODELS = "la passerelle des modèles : elle sert tout le moteur"
 STORAGE = "le stockage : le magasin, ses bases et leurs moteurs (ADR 0101)"
 OFF_JOURNAL = "les octets hors du journal (ADR 0062) : les fichiers envoyés, les pièces reçues, la documentation"
@@ -119,6 +120,12 @@ DRAWINGS = "passerelle de fournisseurs, comme celle des modèles ; en faire un d
 
 #: chaque paquet de ``CLAIMED_LAYERS`` qui n'est à aucun domaine, et pourquoi : le cadre peut le nommer
 FRAME_OWNED: dict[str, str] = {
+    # les facultés du cœur
+    **dict.fromkeys(("faculties.affect", "faculties.agency", "faculties.attachments", "faculties.attention",
+                     "faculties.body", "faculties.expression", "faculties.goals", "faculties.identity",
+                     "faculties.memory", "faculties.needs", "faculties.others", "faculties.place",
+                     "faculties.presence", "faculties.self", "faculties.shares", "faculties.social",
+                     "faculties.transcript", "faculties.world"), CORE_FACULTY),
     # les dessins (ADR 0061, 0063)
     "plugins.imaging": DRAWINGS,
     "adapters.imaging": DRAWINGS,
@@ -349,7 +356,7 @@ def unclaimed(found: set[str], packages: Mapping[str, tuple[str, ...]], frame_ow
 
 
 def test_every_package_below_app_is_of_a_domain_or_of_the_frame():
-    """Chaque paquet de ``plugins/``, ``adapters/``, ``contracts/`` et ``ports/`` est à un domaine (``PACKAGES`` :
+    """Chaque paquet de ``faculties/``, ``plugins/``, ``adapters/``, ``contracts/`` et ``ports/`` est à un domaine (``PACKAGES`` :
     ce que le cadre n'a pas le droit de nommer) ou au cadre (``FRAME_OWNED``, avec sa raison). Un paquet neuf
     qu'on oublierait des deux côtés passerait pour du cadre : le cadre pourrait importer le domaine qu'il sert."""
     found = layer_packages()
