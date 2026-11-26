@@ -1,6 +1,6 @@
 """L'agenda, tel que la couche ``app`` le relie (ADR 0309, 0310) : sa fiche.
 
-Ce dossier porte ce que la console change d'un compte (``desk.py`` : le port ``agenda_desk``), « L'agenda de Mika »
+Ce dossier porte ce que la console change d'un compte (``store.py`` : le port ``agenda_desk``), « L'agenda de Mika »
 (``her.py`` : sa mémoire montrée comme un agenda), ses réglages (``settings.py`` : ses comptes, leurs connexions,
 l'application Google du serveur, le partage d'un agenda), son câblage (``wiring.py`` : sa base, le port ``agenda`` ;
 ses fournisseurs, le port ``agenda_providers`` ; le guichet de la console), son module de l'API par personne

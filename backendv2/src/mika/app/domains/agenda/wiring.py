@@ -23,9 +23,9 @@ from mika.adapters.agenda import (
     Web,
     microsoft_signin,
 )
-from mika.app.domains.agenda.desk import AgendaSettingsDesk
 from mika.app.domains.agenda.live import signed
 from mika.app.domains.agenda.settings import AgendaSettings
+from mika.app.domains.agenda.store import AgendaSettingsDesk
 from mika.app.domains.mail.settings import MailSettings
 from mika.app.wiring import Wiring
 

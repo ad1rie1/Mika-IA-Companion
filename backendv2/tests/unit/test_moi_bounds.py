@@ -17,8 +17,8 @@ from mika.adapters import addresses
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mcp.config import AccessRule, McpServer
 from mika.adapters.web.gate import SlidingWindow
+from mika.app.domains.mail import account_settings
 from mika.app.domains.mail import api as mail_me
-from mika.app.domains.mail import box_settings
 from mika.app.domains.tools import api as mcp_me
 from mika.app.me import Call, Denied, hosts, sharing
 from mika.app.me import api as moi_api
@@ -187,8 +187,8 @@ def quiet(monkeypatch):
         return None
 
     monkeypatch.setattr(hosts, "local_host", slow_dns)  # que ``hosts.public_only`` lit
-    monkeypatch.setattr(box_settings, "audit", nothing)
-    monkeypatch.setattr(box_settings, "_traces", lambda call: set())
+    monkeypatch.setattr(account_settings, "audit", nothing)
+    monkeypatch.setattr(account_settings, "_traces", lambda call: set())
     monkeypatch.setattr(mail_me, "owned", lambda call, key, *more: None)
 
 
@@ -197,8 +197,8 @@ def test_two_people_plugging_a_box_at_once_both_keep_it(quiet):
 
     async def together() -> list[dict]:
         return list(await asyncio.gather(
-            box_settings.box_save(someone(api, 7, {"values": {**BOX, "label": "Léa"}})),
-            box_settings.box_save(someone(api, 8, {"values": {**BOX, "label": "Bob"}}))))
+            account_settings.box_save(someone(api, 7, {"values": {**BOX, "label": "Léa"}})),
+            account_settings.box_save(someone(api, 8, {"values": {**BOX, "label": "Bob"}}))))
 
     made = asyncio.run(together())
     kept = api.settings.cfg.accounts
@@ -212,8 +212,8 @@ def test_a_box_removed_while_she_changes_it_does_not_come_back(quiet):
     moved = {"box": "rando", "values": {"imap_host": "imap.ailleurs.example.test", "password": "secret-neuf"}}
 
     async def together() -> list:
-        return list(await asyncio.gather(box_settings.box_save(someone(api, 7, moved)),
-                                         box_settings.box_remove(someone(api, 7, {"box": "rando"})),
+        return list(await asyncio.gather(account_settings.box_save(someone(api, 7, moved)),
+                                         account_settings.box_remove(someone(api, 7, {"box": "rando"})),
                                          return_exceptions=True))
 
     changed, removed = asyncio.run(together())
@@ -234,7 +234,7 @@ def test_a_box_changed_elsewhere_meanwhile_is_not_overwritten(quiet):
             await api.settings.save_email(MailConfig(accounts={"rando": before.model_copy(update={"label": "Pro"})}))
 
     async def together() -> list:
-        return list(await asyncio.gather(box_settings.box_save(someone(api, 7, moved)), renamed_meanwhile(),
+        return list(await asyncio.gather(account_settings.box_save(someone(api, 7, moved)), renamed_meanwhile(),
                                          return_exceptions=True))
 
     changed, _ = asyncio.run(together())

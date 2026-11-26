@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 /*
  * Les formes des réglages d'une boîte dans l'API par personne (`backendv2/docs/protocole-moi.md` § 7 ; code
- * `app/domains/mail/box_settings.py`) : ce que Paramètres › Boîtes mail lit et écrit. Chaque champ a son défaut :
+ * `app/domains/mail/account_settings.py`) : ce que Paramètres › Boîtes mail lit et écrit. Chaque champ a son défaut :
  * `MikaJson` ignore ce qu'il ne connaît pas, et un champ absent ne casse rien. Un secret n'est jamais rendu : seulement
  * le fait qu'il est gardé. Sa règle d'envoi a la forme commune (`settings/SettingsModels.kt`, `SendRules`).
  */

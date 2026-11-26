@@ -15,7 +15,7 @@ fiche d'une personne, et ce qu'un opérateur y fait.
   ou un abonnement : décoché), retire un agenda de Mika (sa copie part, rien chez son fournisseur), retire un partage
   (Réglages › Droits) ; il ne se reconnecte qu'à ses propres comptes. Il ne crée, ne modifie ni ne répond jamais à la
   place de quelqu'un : aucune action ici n'écrit dans un agenda. Ce qui change les réglages passe par le port
-  ``agenda_desk`` (``app/domains/agenda/desk.py``).
+  ``agenda_desk`` (``app/domains/agenda/store.py``).
 """
 
 from __future__ import annotations

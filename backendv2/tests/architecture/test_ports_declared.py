@@ -43,7 +43,7 @@ SRC = ROOT / "src" / "mika"
 IMPLEMENTATIONS: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {
     ("contracts/entry.py", "MindPort"): (("app/mindport.py", "KernelPort"),),
     ("ports/agenda.py", "AgendaPort"): (("adapters/agenda/store.py", "AgendaStore"),),
-    ("ports/agenda.py", "AgendaDesk"): (("app/domains/agenda/desk.py", "AgendaSettingsDesk"),),
+    ("ports/agenda.py", "AgendaDesk"): (("app/domains/agenda/store.py", "AgendaSettingsDesk"),),
     ("ports/agenda.py", "AgendaProviders"): (("adapters/agenda/__init__.py", "Providers"),),
     ("ports/agenda.py", "CalendarProvider"): (("adapters/agenda/system.py", "SystemProvider"),
                                               ("adapters/agenda/google.py", "GoogleProvider"),

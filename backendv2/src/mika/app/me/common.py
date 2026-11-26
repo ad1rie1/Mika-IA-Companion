@@ -66,7 +66,7 @@ def texts_of(call: Call, refs: Iterable[str]) -> dict[str, str]:
 
 def settings_of(call: Call) -> Any:
     """Les réglages du serveur (``Settings``), ou 503 s'ils ne sont pas branchés : ce que lisent les routes qui en
-    écrivent (``settings.py`` : son compte, les règles ; les réglages d'une boîte, ``domains/mail/box_settings.py``, et
+    écrivent (``settings.py`` : son compte, les règles ; les réglages d'une boîte, ``domains/mail/account_settings.py``, et
     d'un compte Teams, ``domains/teams/account_settings.py`` ; ``sharing.set_share``)."""
     settings = call.api.settings
     if settings is None:
@@ -76,7 +76,7 @@ def settings_of(call: Call) -> Any:
 
 def own_room(call: Call, count: int) -> None:
     """Une personne qui n'est pas opératrice branche au plus ``OWN_MAX`` ressources de chaque sorte (409 au-delà) :
-    ``count``, celles de cette sorte qui sont déjà à elle. Boîtes et comptes Teams (``domains/mail/box_settings.py``,
+    ``count``, celles de cette sorte qui sont déjà à elle. Boîtes et comptes Teams (``domains/mail/account_settings.py``,
     ``domains/teams/account_settings.py``) et services (``domains/tools/api.py::_plug``) le disent ainsi."""
     if not call.me.operator and count >= OWN_MAX:
         raise Denied(409, f"Tu en as déjà {OWN_MAX} : retires-en avant d'en brancher d'autres.")

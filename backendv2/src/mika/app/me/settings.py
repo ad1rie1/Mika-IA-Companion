@@ -1,6 +1,6 @@
 """Paramètres, pour qui est connecté (ADR 0187) : son compte (son nom, son mot de passe), et comment part ce que Mika
 prépare depuis chacun de ses comptes (ADR 0207). Ses boîtes aux lettres et ses comptes Teams se règlent dans leur
-domaine (ADR 0310 : ``app/domains/mail/box_settings.py``, ``app/domains/teams/account_settings.py``), avec les aides
+domaine (ADR 0310 : ``app/domains/mail/account_settings.py``, ``app/domains/teams/account_settings.py``), avec les aides
 d'ici, qui leur sont communes : à qui est ce qu'elle branche, une clé neuve, les valeurs envoyées, ce qui se
 rejournalise, la règle d'un compte en mots.
 

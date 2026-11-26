@@ -18,7 +18,7 @@ import kotlinx.serialization.json.jsonObject
  * (`frontendv2/src/screens/mail/words.ts` et `settings.ts`) : l'état d'une boîte, comment elle y écrit, une boîte
  * qu'on te partage, ses fournisseurs et leurs préréglages, une boîte nouvelle, ses dossiers, ce qu'un formulaire en
  * envoie, ses bornes, les secrets à redonner, les noms de ses champs. Les codes sont ceux du moteur
- * (`adapters/mail/config.py`, `app/domains/mail/box_settings.py`). Tout se teste sur la JVM.
+ * (`adapters/mail/config.py`, `app/domains/mail/account_settings.py`). Tout se teste sur la JVM.
  */
 
 // ── Les boîtes ──────────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ fun rangeProblems(values: Map<String, String>): Map<String, String> {
 }
 
 /** La connexion de chaque secret : quand l'une de ces valeurs change, le secret gardé se redonne
- *  (`app/domains/mail/box_settings.py`, `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
+ *  (`app/domains/mail/account_settings.py`, `IMAP_CONNECTION` et `SMTP_CONNECTION`). */
 val CONNECTION: Map<String, List<String>> = mapOf(
     "password" to listOf("auth", "imap_host", "imap_port", "imap_ssl", "user", "oauth_client_id", "oauth_tenant"),
     "smtp_password" to listOf("smtp_host", "smtp_port", "smtp_security", "smtp_user"),
