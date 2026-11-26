@@ -23,7 +23,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 | Thème | Décisions |
 |---|---|
-| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223, 0306 |
+| Le noyau : journal, arbitrage, pipeline | 0001, 0002, 0003, 0006, 0007, 0008, 0009, 0014, 0015, 0021, 0040, 0059, 0149, 0151, 0221, 0222, 0223, 0306, 0311 |
 | Le stockage | 0004, 0101, 0212 |
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224, 0263, 0264 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226, 0298, 0303, 0304 |
@@ -232,6 +232,15 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 *Révise 0016 (en partie : ce qu'on attend d'elle passe la porte de nuit), 0149 (en partie : « Se mettre au travail » ne décale plus ce qu'on attend d'elle), 0191 (en partie : « Préremplir » part tout de suite et se suit en direct).*
 
 *Révisée par 0308.*
+
+### 0311 — Un secret ne va ni au journal, ni à un prompt, ni à une trace
+
+- **Un secret ne quitte son adaptateur que par une référence.** Un mot de passe, une clé, un jeton vit scellé dans les réglages ou dans la base de son domaine. Ce qui circule ailleurs — un événement, un fait, les paramètres d'un plugin, l'argument ou le résultat d'un outil, une section du prompt — n'en porte que le nom (une clé, un identifiant). Seul l'adaptateur qui s'en sert l'ouvre, au moment de s'en servir : le modèle ne voit jamais un secret et n'a jamais à en écrire un.
+- **Ce qu'une action rapporte du dehors ne va pas en entier au journal.** L'aperçu d'une demande d'accord et le résultat d'une capacité (`contracts/runtime.py` : `EffectProposed`, `EffectExecuted.result`) sont du texte en clair, que l'oubli n'atteint pas. Une capacité qui lit le dehors — la sortie d'une commande sur une machine, le contenu d'un fichier distant — range ce qu'elle a lu à part, là où l'oubli et une purge l'atteignent, et ne rend au journal qu'un résumé borné et la référence de ce qu'elle a rangé.
+- **Ce que les réglages donnent aux plugins ne porte jamais un champ scellé.** `inputs(settings)` (le câblage d'un domaine, `app/wiring.py`) est journalisé avec les paramètres : il dit à qui est un compte et s'il est coché, jamais son mot de passe. `tests/architecture/test_secrets_stay_out_of_the_journal.py` le garde, domaine par domaine.
+- **Ce qui existe reste tel quel.** Les commandes réseau des projets (`projects.networked`) rendent déjà jusqu'à 3 000 caractères de sortie au journal ; elles ne manient aucun secret gardé. Elles suivront cette règle le jour où on y touchera ; un domaine neuf (un coffre de mots de passe, un bastion SSH) la suit d'emblée.
+
+*Pourquoi :* le journal est sa vie, rejoué et sauvegardé tel quel : un secret qui y entre n'en sort plus. Rien ne le disait, et ce qui protège déjà — le masque des journaux du serveur, `Knob(secret=True)` dans les formulaires, `ToolResult.unkept` — ne couvre ni les paramètres journalisés ni les charges utiles des effets.
 
 ## Le stockage
 
