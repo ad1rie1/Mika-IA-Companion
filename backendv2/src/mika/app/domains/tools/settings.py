@@ -35,9 +35,7 @@ class ToolsSettings(SettingsPart):
         """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant."""
         servers = {}
         for name, spec in dict(dict(self._get(MCP_KEY) or {}).get("servers") or {}).items():
-            spec = dict(spec)
-            for k in self.MCP_SECRETS:
-                spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
+            spec = self._opened(spec, self.MCP_SECRETS)
             try:
                 servers[name] = McpServer.model_validate(spec)
             except ValueError:
@@ -49,12 +47,8 @@ class ToolsSettings(SettingsPart):
 
     async def save_mcp(self, cfg: McpConfig) -> McpConfig:
         cfg = McpConfig.model_validate({"servers": dict(cfg.servers)})
-        servers = {}
-        for name, server in cfg.servers.items():
-            spec = server.model_dump(mode="json")
-            for k in self.MCP_SECRETS:
-                spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
-            servers[name] = spec
+        servers = {name: self._sealed(server.model_dump(mode="json"), self.MCP_SECRETS)
+                   for name, server in cfg.servers.items()}
         await self._put(MCP_KEY, {"servers": servers})
         return cfg
 

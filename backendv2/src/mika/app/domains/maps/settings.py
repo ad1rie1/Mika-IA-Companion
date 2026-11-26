@@ -29,6 +29,8 @@ TOURISM_KEY = "tourisme"
 WARM_KEY = "rechauffage"
 #: les avis de Google Places (ADR 0256) : la clé de son API scellée, les bornes, la durée du cache, la case
 REVIEWS_KEY = "avis"
+#: ce que les données touristiques et les avis gardent scellé : la clé de leur API
+API_SECRETS = ("api_key",)
 
 
 class MapsSettings(SettingsPart):
@@ -70,17 +72,14 @@ class MapsSettings(SettingsPart):
     def tourism_config(self) -> TourismConfig:
         """La clé (déchiffrée), les zones, l'horizon, l'heure de nuit et les bornes ; un réglage illisible : les
         défauts (aucune clé : rien ne se synchronise)."""
-        data = dict(self._get(TOURISM_KEY) or {})
-        key = self.box.open(str(data.pop("api_key_sealed", "") or ""))
+        data = self._opened(self._get(TOURISM_KEY) or {}, API_SECRETS)
         try:
-            return TourismConfig.model_validate({**data, "api_key": key})
+            return TourismConfig.model_validate(data)
         except ValueError:
-            return TourismConfig(api_key=key)
+            return TourismConfig(api_key=data["api_key"])
 
     async def save_tourism_config(self, cfg: TourismConfig) -> None:
-        data = cfg.model_dump(mode="json")
-        data["api_key_sealed"] = self.box.seal(data.pop("api_key"))
-        await self._put(TOURISM_KEY, data)
+        await self._put(TOURISM_KEY, self._sealed(cfg.model_dump(mode="json"), API_SECRETS))
 
     def warm_config(self) -> WarmConfig:
         """Le réchauffage du soir des caches de la carte ; un réglage illisible : les défauts (22:00, autour des
@@ -97,17 +96,14 @@ class MapsSettings(SettingsPart):
     def reviews_config(self) -> ReviewsConfig:
         """La clé (déchiffrée), les bornes des demandes, la durée du cache, la case ; un réglage illisible : les
         défauts, la clé gardée (rien ne part sans elle)."""
-        data = dict(self._get(REVIEWS_KEY) or {})
-        key = self.box.open(str(data.pop("api_key_sealed", "") or ""))
+        data = self._opened(self._get(REVIEWS_KEY) or {}, API_SECRETS)
         try:
-            return ReviewsConfig.model_validate({**data, "api_key": key})
+            return ReviewsConfig.model_validate(data)
         except ValueError:
-            return ReviewsConfig(api_key=key)
+            return ReviewsConfig(api_key=data["api_key"])
 
     async def save_reviews_config(self, cfg: ReviewsConfig) -> None:
-        data = cfg.model_dump(mode="json")
-        data["api_key_sealed"] = self.box.seal(data.pop("api_key"))
-        await self._put(REVIEWS_KEY, data)
+        await self._put(REVIEWS_KEY, self._sealed(cfg.model_dump(mode="json"), API_SECRETS))
 
 
 #: la classe que le cadre prend par le nom du domaine (``Settings.named``)

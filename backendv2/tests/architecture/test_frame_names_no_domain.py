@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
@@ -376,6 +377,26 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
         kept = (*part(d.backup, "UNSAVED", ()), *part(d.backup, "SAVED", ()))
         assert d.backup is None or (kept and all(isinstance(path, str) and path for path in kept)), d.name
         assert d.base is None or _exists(d.base.models.removeprefix("mika.")), d.name
+
+
+def sealed_by_hand(text: str) -> list[int]:
+    """Les lignes d'un source qui écrivent à la main le nom d'un champ scellé (``"password_sealed"``,
+    ``f"{k}_sealed"``) : une chaîne (ou un morceau d'une f-chaîne) qui n'est que ce nom — jamais un commentaire ni
+    une docstring."""
+    return sorted({node.lineno for node in ast.walk(ast.parse(text)) if isinstance(node, ast.Constant)
+                   and isinstance(node.value, str) and re.fullmatch(r"\w*_sealed", node.value)})
+
+
+def test_a_domain_seals_its_secrets_through_its_settings_part():
+    """Les réglages d'un domaine scellent les champs secrets d'une fiche, et les rouvrent, par l'aide de leur part
+    (``app/settings.py::SettingsPart._sealed``, ``_opened``), qui seule écrit leur nom rangé (``<champ>_sealed``) :
+    une copie à la main du motif est une copie qui peut dériver — un champ oublié resterait en clair dans
+    ``mind.db``. Ce qui se scelle autrement (la Forge, sous le nom même du champ ; la clé d'un réveil signé) passe par
+    ``box``."""
+    found = [f"{path}:{line}" for path, text in _sources().items() if path.startswith(f"{HOME}/")
+             for line in sealed_by_hand(text)]
+    assert not found, found
+    assert sealed_by_hand('A = "password_sealed"\nB = f"{k}_sealed"\n"""Le champ password_sealed."""\n') == [1, 2]
 
 
 def test_each_kind_of_share_has_its_part_said_once():

@@ -32,6 +32,9 @@ AGENDA_KEY = "agenda"
 AGENDA_GRANTS_KEY = "agenda_oauth"
 #: l'application Google du serveur (ADR 0309, lot 2) : le client OAuth d'un projet Google Cloud, son secret scellé
 AGENDA_GOOGLE_KEY = "agenda_google"
+#: ce qu'une connexion garde scellé : son jeton de renouvellement ; l'application Google : son secret
+GRANT_SECRETS = ("refresh",)
+GOOGLE_SECRETS = ("secret",)
 
 
 class AgendaSettings(SettingsPart):
@@ -47,12 +50,8 @@ class AgendaSettings(SettingsPart):
 
     def agenda(self) -> AgendaConfig:
         """Les comptes d'agenda (leurs secrets ouverts) ; illisibles, aucun (jamais bloquant)."""
-        accounts = {}
-        for name, spec in dict((self._get(AGENDA_KEY) or {}).get("accounts") or {}).items():
-            spec = dict(spec)
-            for k in self.AGENDA_SECRETS:
-                spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
-            accounts[name] = spec
+        accounts = {name: self._opened(spec, self.AGENDA_SECRETS)
+                    for name, spec in dict((self._get(AGENDA_KEY) or {}).get("accounts") or {}).items()}
         try:
             return AgendaConfig.model_validate({"accounts": accounts})
         except ValueError:
@@ -62,12 +61,8 @@ class AgendaSettings(SettingsPart):
     async def save_agenda(self, cfg: AgendaConfig) -> AgendaConfig:
         """Enregistre les comptes d'agenda (revalidés) ; leurs secrets scellés."""
         cfg = AgendaConfig.model_validate(cfg.model_dump())
-        accounts = {}
-        for name, account in cfg.accounts.items():
-            spec = account.model_dump(mode="json")
-            for k in self.AGENDA_SECRETS:
-                spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
-            accounts[name] = spec
+        accounts = {name: self._sealed(account.model_dump(mode="json"), self.AGENDA_SECRETS)
+                    for name, account in cfg.accounts.items()}
         await self._put(AGENDA_KEY, {"accounts": accounts})
         async with self._grants_lock:  # la connexion d'un compte retiré, ou qui change de sorte, ne reste pas
             grants = dict(self._get(AGENDA_GRANTS_KEY) or {})
@@ -83,7 +78,7 @@ class AgendaSettings(SettingsPart):
         spec = dict(self._get(AGENDA_GRANTS_KEY) or {}).get(account)
         if not isinstance(spec, dict) or spec.get("kind") != kind:
             return None
-        refresh = self.box.open(str(spec.get("refresh_sealed") or ""))
+        refresh = self._opened(spec, GRANT_SECRETS)["refresh"]
         if not refresh:  # un scellé qui ne s'ouvre plus (``secret.key`` changée) : il faut se reconnecter
             return None
         return Grant(refresh, str(spec.get("client_id") or ""), str(spec.get("tenant") or ""))
@@ -92,8 +87,8 @@ class AgendaSettings(SettingsPart):
         """Garde la connexion d'un compte d'agenda, son jeton de renouvellement scellé."""
         async with self._grants_lock:
             grants = dict(self._get(AGENDA_GRANTS_KEY) or {})
-            grants[account] = {"kind": kind, "refresh_sealed": self.box.seal(grant.refresh),
-                               "client_id": grant.client_id, "tenant": grant.tenant}
+            grants[account] = self._sealed({"kind": kind, "refresh": grant.refresh, "client_id": grant.client_id,
+                                            "tenant": grant.tenant}, GRANT_SECRETS)
             await self._put(AGENDA_GRANTS_KEY, grants)
 
     async def drop_agenda_grant(self, account: str) -> bool:
@@ -116,7 +111,7 @@ class AgendaSettings(SettingsPart):
         if not isinstance(got, dict) or not got.get("client_id"):
             return None
         try:
-            return GoogleApplication.of(str(got["client_id"]), self.box.open(str(got.get("secret_sealed") or "")),
+            return GoogleApplication.of(str(got["client_id"]), self._opened(got, GOOGLE_SECRETS)["secret"],
                                         web=bool(got.get("web")))
         except ValueError:
             log.warning("agenda : l'application Google gardée est illisible (le secret ne s'ouvre plus ?)")
@@ -134,8 +129,8 @@ class AgendaSettings(SettingsPart):
         if not secret.strip() and known is not None and known.client_id == client_id.strip().lower():
             secret = known.secret
         app = GoogleApplication.of(client_id, secret, web=web)
-        await self._put(AGENDA_GOOGLE_KEY, {"client_id": app.client_id, "secret_sealed": self.box.seal(app.secret),
-                                            "web": app.web})
+        await self._put(AGENDA_GOOGLE_KEY, self._sealed({"client_id": app.client_id, "secret": app.secret,
+                                                         "web": app.web}, GOOGLE_SECRETS))
         return app
 
     async def share_calendar(self, calendar: str, person: str, level: str | None) -> AgendaConfig:

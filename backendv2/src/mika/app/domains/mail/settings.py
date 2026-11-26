@@ -26,6 +26,8 @@ MAIL_GRANTS_KEY = "mail_oauth"
 MAIL_IMAGES_KEY = "mail_images"
 #: l'application Microsoft propre à l'instance, à la place de celle que Mika livre (son client ID, ADR 0238)
 MAIL_APPLICATION_KEY = "mail_application"
+#: ce qu'une connexion Microsoft garde scellé : son jeton de renouvellement
+GRANT_SECRETS = ("refresh",)
 
 
 class MailSettings(SettingsPart):
@@ -49,28 +51,18 @@ class MailSettings(SettingsPart):
         gardés à la forme du jour (audit du 2026-11-05)."""
         raw = dict(self._get(EMAIL_KEY) or {})
         if "accounts" not in raw:  # la forme d'avant plusieurs boîtes : un compte, ses secrets au premier niveau
-            raw = {**raw, **{k: self.box.open(raw.pop(f"{k}_sealed", "")) for k in self.MAIL_SECRETS}}
-            data = from_stored(raw)
+            data = from_stored(self._opened(raw, self.MAIL_SECRETS))
         else:
-            accounts = {}
-            for name, spec in dict(raw.get("accounts") or {}).items():
-                spec = dict(spec)
-                for k in self.MAIL_SECRETS:
-                    spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
-                accounts[name] = spec
-            data = {"accounts": accounts}
+            data = {"accounts": {name: self._opened(spec, self.MAIL_SECRETS)
+                                 for name, spec in dict(raw.get("accounts") or {}).items()}}
         try:
             return MailConfig.model_validate(data)
         except ValueError:
             return MailConfig()
 
     async def save_email(self, cfg: MailConfig) -> MailConfig:
-        accounts = {}
-        for name, account in cfg.accounts.items():
-            spec = account.model_dump(mode="json")
-            for k in self.MAIL_SECRETS:
-                spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
-            accounts[name] = spec
+        accounts = {name: self._sealed(account.model_dump(mode="json"), self.MAIL_SECRETS)
+                    for name, account in cfg.accounts.items()}
         await self._put(EMAIL_KEY, {"accounts": accounts})
         async with self._grants_lock:  # la connexion d'une boîte retirée, ou qui reprend un mot de passe, ne reste pas
             grants = dict(self._get(MAIL_GRANTS_KEY) or {})
@@ -85,7 +77,7 @@ class MailSettings(SettingsPart):
         spec = dict(self._get(MAIL_GRANTS_KEY) or {}).get(account)
         if not isinstance(spec, dict):
             return None
-        refresh = self.box.open(str(spec.get("refresh_sealed") or ""))
+        refresh = self._opened(spec, GRANT_SECRETS)["refresh"]
         if not refresh:  # un scellé qui ne s'ouvre plus (``secret.key`` changée) : il faut se reconnecter
             return None
         return Grant(refresh, str(spec.get("client_id") or ""), str(spec.get("tenant") or ""))
@@ -94,8 +86,8 @@ class MailSettings(SettingsPart):
         """Garde la connexion Microsoft d'une boîte, son jeton de renouvellement scellé."""
         async with self._grants_lock:
             grants = dict(self._get(MAIL_GRANTS_KEY) or {})
-            grants[account] = {"refresh_sealed": self.box.seal(grant.refresh), "client_id": grant.client_id,
-                               "tenant": grant.tenant}
+            grants[account] = self._sealed({"refresh": grant.refresh, "client_id": grant.client_id,
+                                            "tenant": grant.tenant}, GRANT_SECRETS)
             await self._put(MAIL_GRANTS_KEY, grants)
         self.mail_saved()
 

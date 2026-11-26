@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, TypeVar
@@ -151,8 +151,8 @@ class SecretBox:
 class SettingsPart:
     """Les réglages d'un domaine (ADR 0310) : une classe de son dossier (``app/domains/<nom>/settings.py``), posée sur
     la porte des réglages. Elle lit et écrit ses clés par cette porte seulement (``_get``, ``_put`` qui dit chaque
-    écriture, ``box`` pour sceller, ``writing`` pour relire puis récrire sans se croiser) : jamais le magasin lui-même,
-    ce que
+    écriture, ``_sealed`` et ``_opened`` pour sceller les champs secrets d'une fiche puis les rouvrir — ``box`` pour un
+    scellé à part —, ``writing`` pour relire puis récrire sans se croiser) : jamais le magasin lui-même, ce que
     ``tests/architecture/test_changes_signalled.py`` garde. On la prend par ``Settings.of(SaClasse)``."""
 
     def __init__(self, door: Settings) -> None:
@@ -166,6 +166,25 @@ class SettingsPart:
 
     async def _put(self, key: str, value: Any) -> None:
         await self.door._put(key, value)
+
+    def _sealed(self, data: Mapping[str, Any], fields: Sequence[str]) -> dict[str, Any]:
+        """Une fiche prête à ranger (un compte, un serveur, une clé d'API) : chacun des champs qu'elle dit secrets
+        (``fields`` : ceux que le domaine scelle — pas forcément ceux qu'un formulaire masque, ``Knob(secret=True)`` :
+        l'adresse d'un abonnement iCal est scellée sans être masquée) part en clair et revient scellé sous
+        ``<champ>_sealed`` (vide : vide) ; le reste tel quel. ``data`` n'est pas changée. Ces noms sont ceux des
+        réglages déjà rangés : ils ne changent pas."""
+        out = dict(data)
+        for k in fields:
+            out[f"{k}_sealed"] = self.box.seal(out.pop(k))
+        return out
+
+    def _opened(self, data: Mapping[str, Any], fields: Sequence[str]) -> dict[str, Any]:
+        """La même fiche relue : chacun de ces champs rouvert depuis ``<champ>_sealed``, qui s'en va ; un scellé absent,
+        ou qui ne s'ouvre plus (``secret.key`` changée), rend un champ vide. ``data`` n'est pas changée."""
+        out = dict(data)
+        for k in fields:
+            out[k] = self.box.open(str(out.pop(f"{k}_sealed", "") or ""))
+        return out
 
     async def open(self) -> None:
         """Appelé à l'ouverture des réglages, une fois leur table là : un domaine qui tient ses réglages en mémoire
