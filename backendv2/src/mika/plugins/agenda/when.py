@@ -9,7 +9,8 @@ sa voix (``agenda.words.*``, ``agenda.tools.bad_time``).
 - **En mots** : une heure (``hm`` : « 9 h », « 14 h 30 »), un moment (``when_words``), une période
   (``period_words``).
 - **Ce qu'un outil demande** : une période, en mots ou en dates (``period``, jamais plus de ``DAYS_MAX`` jours), ou
-  le moment d'un rendez-vous (``span_of``, jamais plus de ``LONGEST_DAYS`` jours ; une heure par défaut).
+  le moment d'un rendez-vous (``span_of``, jamais plus de ``LONGEST_DAYS`` jours ; une heure par défaut). Une
+  durée s'y compte en temps réel : la nuit d'un changement d'heure, trente minutes font trente minutes.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from mika.kernel.clock import instant, local
+from mika.kernel.clock import DAY, MINUTE, instant, local
 from mika.ports.agenda import Span, local_days, whole_days
 from mika.vocab.circadian import day_fr
 from mika.vocab.phrasebook import phrase
@@ -135,19 +136,23 @@ def span_of(start: str, end: str, minutes: int | None, all_day: bool, tz: ZoneIn
             return phrase("agenda.tools.bad_time")
         return whole_days(first.isoformat(), last.isoformat())
     assert isinstance(begin, datetime)
+    # en instants, pas à l'heure murale : une durée est du temps réel. À l'heure murale, la nuit d'un changement
+    # d'heure, « 2 h 30 pendant 30 min » finissait avant de commencer (2 h 30 n'existe pas) et une heure d'automne
+    # durait deux heures ; et deux moments dits avec leur décalage se comparaient sans lui
+    opens = instant(begin)
     if isinstance(finish, datetime):
-        stop = finish
+        closes = instant(finish)
     elif isinstance(finish, date):
         return phrase("agenda.tools.bad_time")
     elif minutes is not None:
-        stop = begin + timedelta(minutes=minutes)
+        closes = opens + minutes * MINUTE
     elif current is not None and not current.all_day:
-        stop = begin + timedelta(microseconds=current.end - current.start)
+        closes = opens + (current.end - current.start)
     else:
-        stop = begin + timedelta(minutes=DEFAULT_MINUTES)
-    if stop <= begin or stop - begin > timedelta(days=LONGEST_DAYS):
+        closes = opens + DEFAULT_MINUTES * MINUTE
+    if closes <= opens or closes - opens > LONGEST_DAYS * DAY:
         return phrase("agenda.tools.bad_time")
-    return Span(instant(begin), instant(stop), getattr(tz, "key", ""), False)
+    return Span(opens, closes, getattr(tz, "key", ""), False)
 
 
 __all__ = ["local_span", "period", "span_of", "when_words"]
