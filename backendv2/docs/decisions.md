@@ -28,7 +28,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Sa mémoire et ce qu'elle sait | 0010, 0011, 0034, 0046, 0052, 0055, 0074, 0076, 0078, 0079, 0080, 0081, 0082, 0083, 0084, 0085, 0086, 0087, 0091, 0099, 0109, 0110, 0111, 0153, 0224, 0263, 0264 |
 | Identité et divulgation | 0012, 0035, 0075, 0092, 0133, 0134, 0148, 0184, 0185, 0186, 0188, 0207, 0220, 0226, 0298, 0303, 0304 |
 | Sa vie intérieure : affect, corps, besoins, liens, initiatives | 0013, 0016, 0017, 0018, 0019, 0028, 0032, 0033, 0036, 0044, 0047, 0053, 0058, 0088, 0089, 0090, 0093, 0094, 0095, 0096, 0097, 0098, 0100, 0107, 0118, 0137, 0150, 0155, 0160, 0227, 0283 |
-| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260, 0262, 0265, 0268, 0270, 0271, 0272, 0273, 0274, 0275, 0276, 0277, 0278, 0279, 0280, 0289 |
+| Buts, projets, Forge et atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105, 0143, 0144, 0145, 0161, 0253, 0254, 0257, 0260, 0262, 0265, 0268, 0270, 0271, 0272, 0273, 0274, 0275, 0276, 0277, 0278, 0279, 0280, 0289, 0313 |
 | Les sens et les plugins | 0022, 0027, 0037, 0038, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120, 0128, 0129, 0130, 0131, 0132, 0147, 0163, 0166, 0168, 0171, 0172, 0189, 0190, 0191, 0192, 0193, 0194, 0195, 0196, 0198, 0199, 0211, 0213, 0214, 0228, 0229, 0236, 0238, 0240, 0243, 0244, 0245, 0246, 0247, 0248, 0249, 0250, 0251, 0255, 0256, 0258, 0259, 0269, 0299, 0300, 0301, 0302, 0305, 0307, 0309 |
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
@@ -1660,6 +1660,15 @@ retirer des lettres ne rend pas le processus adaptable de manière générale »
 *Pourquoi :* l'écran Projets validé le 21 novembre a un onglet Documentation — « une gestion directe dans le navigateur qui proposera un éditeur de fichier .md et upload des images », « la documentation est séparée du projet principal et accessible en MCP » — et son propriétaire a retiré la page qui réglait l'accès MCP : « le MCP est automatiquement ajouté à qui a accès au projet ». Rien ne gardait une documentation hors du dépôt, et rien ne servait un MCP à une personne.
 
 *Révise 0062 (en partie : une troisième sorte de jeton de compte, `tool`, qui n'ouvre que le point MCP d'une personne), 0122 (en partie : elle sert aussi un point MCP à chaque personne qui a un compte, sans déclaration d'opérateur), 0133 (en partie : une ligne d'accès d'un projet a une colonne « documentation »), 0257 (en partie : un lien donne aussi la documentation du projet lu, quand ses lignes la donnent), 0282 (en partie : l'API par personne sert et écrit la documentation d'un projet). Révisée par 0292, 0297.*
+
+### 0313 — Un sous-sujet des projets garde ses événements dans son module
+
+- **Un sous-sujet, un module.** Ce qu'un projet tient en plus de lui-même a son module dans `faculties/projects/` : ses charges utiles, ses événements, leurs réducteurs et sa projection y vivent, comme le registre (`tracker.py`) et la documentation (`docs.py`). Ses outils et sa section du prompt vont dans `<sujet>_tools.py` (`docs_tools.py`), ses vues, ses mots et ses actions de console dans `inspect_<sujet>.py`.
+- **`faculty.py` garde le projet lui-même** : la tranche, les formes que `Project` et `Objective` embarquent (un `Item`, un `Milestone`), les lectures que tous en font, et les événements du projet et de ses objectifs.
+- **Ce qui est né avant reste où il est, jusqu'à ce qu'on y touche.** Les jalons, les pull requests (avec la CI et la fusion), les issues et la relecture ont encore leurs événements et leurs réducteurs dans `faculty.py`. Ils en sortent un sous-sujet à la fois, les jalons d'abord ; en déménageant, aucun événement ne change de nom, de charge utile ni de propriétaire, et la version de la tranche ne bouge pas.
+- **La garde** (`tests/architecture/test_project_events_stay_with_their_subject.py`) nomme un à un les événements que `faculty.py` déclare : la liste ne s'allonge pas d'un sous-sujet neuf, et raccourcit quand l'un de ceux d'avant en sort.
+
+*Pourquoi :* un jalon se lisait dans deux fichiers à 1 500 lignes d'écart — ses règles dans `milestones.py`, ses événements et ses réducteurs dans un `faculty.py` de 3 600 lignes —, et rien ne disait au prochain sous-sujet lequel des deux modèles suivre.
 
 ## Les sens et les plugins
 
