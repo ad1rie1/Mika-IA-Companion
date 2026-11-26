@@ -52,7 +52,7 @@ from mika.faculties.projects.faculty import (
     Docs,
     Project,
     ProjectsState,
-    _set,
+    with_project,
     written,
 )
 from mika.kernel.codec import digest
@@ -337,7 +337,7 @@ def image_subjects(p: Project, by: str = "") -> tuple[str, ...]:
 
 
 def _docs(s: ProjectsState, p: Project, docs: Docs) -> ProjectsState:
-    return _set(s, replace(p, docs=docs))
+    return with_project(s, replace(p, docs=docs))
 
 
 @PROJECTS.reducer(DOC_WRITTEN)

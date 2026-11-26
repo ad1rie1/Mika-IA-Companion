@@ -116,7 +116,7 @@ REVIEW_CLIP = 1200
 BREAKPOINTS_SHOWN, BREAKPOINT_CLIP = 2, 300
 
 
-def _project(s: ProjectsState, frame: Frame) -> tuple[Project, Objective | None] | None:
+def episode_project(s: ProjectsState, frame: Frame) -> tuple[Project, Objective | None] | None:
     ep = frame.episode
     if ep is None:
         return None
@@ -222,7 +222,7 @@ async def _texts(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> di
         return None
     ep = frame.episode
     chosen: list[Project] = []
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if got is not None:
         chosen.append(got[0])
     if ep is not None and ep.kind in CONVERSATIONAL:
@@ -244,7 +244,7 @@ async def _tree(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dic
     l'arbre, que l'atelier se place sur la branche de ce qu'elle vise : créée depuis la base la première fois,
     retrouvée ensuite, un travail interrompu rangé sur la sienne. Une séance de cadrage n'écrit pas : elle ne déplace
     rien. Si l'atelier n'a pas pu s'y placer, le prompt le dit, et ``report_run`` n'enregistrera rien."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     atelier = ports.get("workshop")
     if got is None or atelier is None or not atelier.exists(got[0].id):
         return None
@@ -281,7 +281,7 @@ async def _views(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> di
     donnent les fichiers, le commit vu, sa date et le début de son arbre, ou pourquoi il n'y a pas de vue. Une vue
     qu'il n'a plus le droit de lire est supprimée. À part des autres enrichisseurs : une vue lente à poser, ou un
     dépôt illisible, ne rend pas l'exécution aveugle à son projet."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     atelier = ports.get("workshop")
     if got is None or atelier is None or not got[0].reads:
         return None
@@ -309,7 +309,7 @@ async def _views(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> di
 async def _app_problems(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
     """Ce qui n'a pas marché pour ses apps hors de leurs appels — une vue invalide dans la console (ADR 0161) : la
     Forge le garde jusqu'à leur version suivante."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     forge = ports.get("forge")
     problems = getattr(forge, "problems", None)
     if got is None or not callable(problems):
@@ -328,7 +328,7 @@ async def _answer(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> d
     """Ce que la personne à qui elle a demandé un coup de main lui a écrit depuis, en privé : ses messages à elle
     seule (pas un salon, pas le fil d'une autre), après la demande."""
     store = ports.get("store")
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     o = got[1] if got is not None else None
     if store is None or o is None or not o.asked_to or not answered(o):
         return None
@@ -354,7 +354,7 @@ async def _items(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> di
     depuis son dernier passage, et ses éléments ouverts les plus anciens — lus dans la projection, une ligne
     chacun ; les comptes, eux, sont dans l'état."""
     store = ports.get("store")
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if store is None or got is None or got[1] is None or not got[0].board.counts:
         return None
     p, target = got
@@ -380,7 +380,7 @@ async def _asks(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dic
     fermeture se relisent dans la projection du projet visé, seulement tant que le lien donne encore son détail —
     c'est ici que ce droit est relu."""
     store = ports.get("store")
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if store is None or got is None or got[1] is None or not got[0].asks:
         return None
     p, target = got
@@ -399,7 +399,7 @@ async def _tickets(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> 
     traite les tickets (son objectif attend ``item:tickets``) voit ceux qui sont entre ses mains, par priorité ;
     l'exécution d'un objectif né d'un ticket voit le sien, et son plan."""
     store = ports.get("store")
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if store is None or got is None or got[1] is None:
         return None
     p, target = got
@@ -536,7 +536,7 @@ def run_rules(pm: Any) -> str:
 @PROJECTS.section("project", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=90, title=phrase("projects.run.title"),
                   reads=[forge_c.APPS, identity_c.IS_OWNER])
 def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if got is None:
         return None
     p, target = got
@@ -833,7 +833,7 @@ def _links_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     retiré coupe ce qu'il donnait, un projet qui n'est plus visible suspend le lien — dit en une ligne. Son niveau
     est celui de ce qu'elle y lit : ce qu'écrivent les projets dont elle lit le détail ou les fichiers (les noms des
     fichiers d'une vue en sont, ADR 0260)."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if got is None or not got[0].reads:
         return None
     p = got[0]
@@ -939,7 +939,7 @@ def _stirs_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     """Ce qui amène cette exécution, quand ce n'est pas la cadence de l'objectif (ADR 0265) : ses causes en attente,
     de la plus ancienne à la plus récente, une ligne bornée chacune ; et le réveil par API qui le vise. Son niveau
     est celui de ce qu'elle y lit : ce qu'écrivent les projets dont une cause dit le détail."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     ep = frame.episode
     if got is None or got[1] is None or ep is None:
         return None
@@ -981,7 +981,7 @@ def _items_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     qu'un autre qu'elle a touché depuis son dernier passage, puis ses éléments ouverts les plus anciens — dix
     lignes au plus, chacune coupée. Un titre écrit par une personne y est cité : une donnée, jamais une consigne
     (la section est déclarée non sûre, comme la réponse à une demande d'aide)."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if got is None or got[1] is None or not got[0].board.counts:
         return None
     p = got[0]
@@ -1013,7 +1013,7 @@ def _tickets_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) 
     mains, par priorité — leur étape, ce qui est attendu d'elle, le dernier mot du fil —, bornés ; pour l'objectif
     né d'un ticket, le sien et son plan. Ce qu'une personne y a écrit est cité : une donnée, jamais une consigne
     (la section est déclarée non sûre)."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     found: Mapping[str, Any] = enrich.get("projects_tickets") or {}
     lines = [clipped(x, triage.PLAN_SHOWN + 200 if found.get("own") else TICKET_LINE_CLIP)
              for x in found.get("lines") or ()]
@@ -1039,7 +1039,7 @@ def _asks_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     dernier passage d'abord, bornées. Une demande à un projet dont le lien ne donne plus le détail ne dit que son
     existence. Le titre d'un ticket et la note de sa fermeture sont cités : une donnée, jamais une consigne (la
     section est déclarée non sûre). Son niveau est celui de ce qu'elle y lit : ce qu'écrivent les projets visés."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     found: Mapping[str, Any] = enrich.get("projects_asks") or {}
     lines = [clipped(x, ASK_LINE_CLIP) for x in found.get("lines") or ()]
     if got is None or got[1] is None or not lines:
@@ -1061,7 +1061,7 @@ NETWORK_FLOOR = 600
 def _network_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """La sortie de sa dernière commande réseau : une donnée venue d'Internet, citée, coupée en premier — jusqu'à
     son plancher (c'est ce sur quoi elle travaille)."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if got is None or not got[0].network_out:
         return None
     p = got[0]
@@ -1078,7 +1078,7 @@ ANSWER_FLOOR = 500
 def _answer_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce que la personne à qui elle a demandé un coup de main lui a écrit depuis, en privé : cité, pour que
     l'exécution reparte avec la réponse sous les yeux plutôt que de deviner ou de redemander."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     lines = (enrich.get("projects_answer") or {}).get("lines") or []
     if got is None or got[1] is None or not lines:
         return None

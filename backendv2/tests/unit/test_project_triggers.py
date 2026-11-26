@@ -49,7 +49,6 @@ from mika.faculties.projects.faculty import (
     _base_seen,
     _ended,
     _executed,
-    _hear,
     _links_set,
     _objective_added,
     _objective_changed,
@@ -58,6 +57,7 @@ from mika.faculties.projects.faculty import (
     _started,
     _stirred,
     declared,
+    hear_if_listening,
     listening,
     objective_of,
     stirring,
@@ -277,7 +277,7 @@ def test_a_sort_of_one_more_only_needs_its_line_and_fires_in_the_project_where_i
     assert triggers.accepted(2, (), True, ["Alarm:porte"]) == ("alarm:porte",)
     s = _with(_state(_project(1), _project(2)), 1, _constant(1, on=("alarm:porte",)))
     s = _with(s, 2, _constant(1, on=("alarm:porte",)))
-    s = _hear(s, _ev(None, T0 + 5), "alarm:porte", "12", project=2)
+    s = hear_if_listening(s, _ev(None, T0 + 5), "alarm:porte", "12", project=2)
     assert s.heard == (Heard(T0 + 5, T0 + 5, "alarm:porte", "12", 2),)
     assert stirs_of(s, None, s.heard[0]) == ((2, 1),)  # son projet seulement : l'autre « porte » dort
     stirred = _judged(s, (2, 1))

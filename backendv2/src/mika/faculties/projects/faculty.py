@@ -1901,7 +1901,7 @@ def wake_aim(p: Project, endpoint: str) -> Objective | None:
 # ── Réducteurs ────────────────────────────────────────────────────────────
 
 
-def _set(s: ProjectsState, p: Project) -> ProjectsState:
+def with_project(s: ProjectsState, p: Project) -> ProjectsState:
     return replace(s, projects=s.projects.set(p.id, p))
 
 
@@ -1926,7 +1926,7 @@ def _created(s: ProjectsState, e, cx) -> ProjectsState:
         request_ref=d.request.ref or "" if d.request is not None else "", asked_by=d.asked_by,
         plan_state=c.TO_FRAME if d.framing else c.UNPLANNED,
     )
-    return _set(s, p)
+    return with_project(s, p)
 
 
 @PROJECTS.reducer(OBJECTIVE_ADDED)
@@ -1964,7 +1964,7 @@ def _objective_added(s: ProjectsState, e, cx) -> ProjectsState:
         if oldest is None:
             break
         objectives = tuple(x for x in objectives if x is not oldest)
-    return _set(s, replace(p, objectives=objectives, objective_seq=max(p.objective_seq, oid),
+    return with_project(s, replace(p, objectives=objectives, objective_seq=max(p.objective_seq, oid),
                            triage=_triage(p, oid, on)))
 
 
@@ -2027,7 +2027,7 @@ def _objective_changed(s: ProjectsState, e, cx) -> ProjectsState:
     if not changes:
         return s
     new = replace(o, **changes)
-    return _set(s, replace(_objective(p, new), triage=_triage(p, new.id, new.on)))
+    return with_project(s, replace(_objective(p, new), triage=_triage(p, new.id, new.on)))
 
 
 def _retriggered(p: Project, o: Objective, d: ObjectiveChanged, changes: Mapping[str, Any]) -> dict[str, Any]:
@@ -2078,7 +2078,7 @@ def _milestone_added(s: ProjectsState, e, cx) -> ProjectsState:
         oldest = next(x for x in kept if x.status == c.DROPPED)
         kept = tuple(x for x in kept if x is not oldest)
     first = o.milestone_seq == 0  # jamais aucun jalon : la toute première pose
-    return _set(s, _objective(p, replace(o, milestones=kept, milestone_seq=number, stale=0 if first else o.stale)))
+    return with_project(s, _objective(p, replace(o, milestones=kept, milestone_seq=number, stale=0 if first else o.stale)))
 
 
 #: pourquoi, en exécution, un jalon n'est pas à elle seule (ADR 0278 ; les clés de
@@ -2190,7 +2190,7 @@ def _milestone_changed(s: ProjectsState, e, cx) -> ProjectsState:
     if got is None:
         return s
     new, progressed = got
-    return _set(s, _objective(p, replace(o, milestones=tuple(new if x.id == m.id else x for x in o.milestones),
+    return with_project(s, _objective(p, replace(o, milestones=tuple(new if x.id == m.id else x for x in o.milestones),
                                          stale=0 if progressed else o.stale)))
 
 
@@ -2217,7 +2217,7 @@ def _decided(s: ProjectsState, e, cx) -> ProjectsState:
     while len(decisions) > DECISIONS_KEPT:  # la place manque : la plus ancienne qui n'est plus en vigueur tombe
         oldest = next(x for x in decisions if x.status != c.IN_FORCE)
         decisions = tuple(x for x in decisions if x is not oldest)
-    return _set(s, replace(p, decisions=decisions, decision_seq=max(p.decision_seq, did)))
+    return with_project(s, replace(p, decisions=decisions, decision_seq=max(p.decision_seq, did)))
 
 
 @PROJECTS.reducer(DECISION_CHANGED)
@@ -2228,7 +2228,7 @@ def _decision_changed(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or x is None or d.status not in c.DECISION_STATUSES:
         return s
     new = replace(x, status=d.status, replaced_by=x.replaced_by if d.status == c.SUPERSEDED else 0)
-    return _set(s, replace(p, decisions=tuple(new if y.id == x.id else y for y in p.decisions)))
+    return with_project(s, replace(p, decisions=tuple(new if y.id == x.id else y for y in p.decisions)))
 
 
 @PROJECTS.reducer(REFRAMED)
@@ -2287,9 +2287,9 @@ def _reframed(s: ProjectsState, e, cx) -> ProjectsState:
         changes["reread"] = d.reread
     if not changes:
         return s
-    s = _set(s, replace(p, **changes))
+    s = with_project(s, replace(p, **changes))
     # son niveau ou ses sujets ont changé : ce qu'il laisse à ses lecteurs aussi
-    return _spread(s, p.id) if changes.keys() & {"owner", "about", "sensitivity"} else s
+    return spread_confidentiality(s, p.id) if changes.keys() & {"owner", "about", "sensitivity"} else s
 
 
 @PROJECTS.reducer(PAUSED)
@@ -2297,7 +2297,7 @@ def _paused(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None or p.status != c.ACTIVE:
         return s
-    return _set(s, replace(p, status=c.PAUSED, paused_at=e.at, pause_reason=e.data.reason[:300],
+    return with_project(s, replace(p, status=c.PAUSED, paused_at=e.at, pause_reason=e.data.reason[:300],
                            stalled_at=e.at if e.data.broke else 0, stall_asked=False, stall_attempts=0))
 
 
@@ -2306,7 +2306,7 @@ def _resumed(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None or p.status != c.PAUSED:
         return s
-    return _set(s, replace(p, status=c.ACTIVE, paused_at=0, pause_reason="", failures=0, stalled_at=0,
+    return with_project(s, replace(p, status=c.ACTIVE, paused_at=0, pause_reason="", failures=0, stalled_at=0,
                            frame_silent=0))
 
 
@@ -2316,7 +2316,7 @@ def _archived(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or p.status == c.ARCHIVED:
         return s
     # archivé, il ne pousse ni ne récupère plus rien : ses demandes en file tombent
-    return _set(s, replace(p, status=c.ARCHIVED, archived_at=e.at, pause_reason=e.data.reason[:300], requests=(),
+    return with_project(s, replace(p, status=c.ARCHIVED, archived_at=e.at, pause_reason=e.data.reason[:300], requests=(),
                            network=()))
 
 
@@ -2326,7 +2326,7 @@ def _restored(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or p.status != c.ARCHIVED:
         return s
     # restauré, il repart en pause : on le relance quand on veut ; rien de ce qui attendait avant ne repart seul
-    return _set(s, replace(p, status=c.PAUSED, archived_at=0, paused_at=e.at, pause_reason="restauré", failures=0,
+    return with_project(s, replace(p, status=c.PAUSED, archived_at=0, paused_at=e.at, pause_reason="restauré", failures=0,
                            requests=(), network=(), outgoing=()))
 
 
@@ -2339,7 +2339,7 @@ def _nudged(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if d.objective else None
     if o is not None and o.waiting_until:  # « maintenant » l'emporte sur l'attente
         p = _objective(p, replace(o, waiting_until=0))
-    return _set(s, replace(p, nudged_at=e.at, nudged_objective=d.objective if o is not None else 0))
+    return with_project(s, replace(p, nudged_at=e.at, nudged_objective=d.objective if o is not None else 0))
 
 
 @PROJECTS.reducer(ACCESS_SET)
@@ -2348,7 +2348,7 @@ def _access_set(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(d.project)
     if p is None:
         return s
-    return _set(s, replace(p, access=tuple(d.rows), default_access=d.default))
+    return with_project(s, replace(p, access=tuple(d.rows), default_access=d.default))
 
 
 def _carried(p: Project) -> tuple[int, tuple[str, ...]]:
@@ -2368,7 +2368,7 @@ def _reading(reader: Project, level: int, subjects: tuple[str, ...]) -> Project:
     return replace(reader, read_about=kept, read_level=level)
 
 
-def _spread(s: ProjectsState, source: int) -> ProjectsState:
+def spread_confidentiality(s: ProjectsState, source: int) -> ProjectsState:
     """La confidentialité suit le lien, de lecteur en lecteur : ce que ``source`` laisse à qui le lit passe à ses
     lecteurs, puis aux leurs. Rien ne redescend, donc la marche s'arrête : chaque pas relève un niveau borné ou
     ajoute, aux sujets hérités d'un lecteur, une personne déjà connue d'un projet."""
@@ -2381,7 +2381,7 @@ def _spread(s: ProjectsState, source: int) -> ProjectsState:
         for reader in readers_of(s, p.id):
             raised = _reading(reader, level, subjects)
             if raised is not reader:
-                s = _set(s, raised)
+                s = with_project(s, raised)
                 todo.append(reader.id)
     return s
 
@@ -2408,7 +2408,7 @@ def _links_set(s: ProjectsState, e, cx) -> ProjectsState:
     p = replace(p, ties=tuple(ties))
     for target in p.reads:
         p = _reading(p, *_carried(s.projects[target]))
-    return _spread(_set(s, p), p.id)
+    return spread_confidentiality(with_project(s, p), p.id)
 
 
 @PROJECTS.reducer(STEER_ASKED)
@@ -2434,7 +2434,7 @@ def _noted(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, e.data.objective) if e.data.objective else None
     if o is not None:  # l'objectif qu'elle visait la garde aussi : il la retrouvera à son prochain passage
         p = _objective(p, replace(o, notes=(*o.notes, ref)[-OBJECTIVE_NOTES_KEPT:]))
-    return _set(s, p)
+    return with_project(s, p)
 
 
 @PROJECTS.reducer(AMENDED)
@@ -2454,7 +2454,7 @@ def _amended(s: ProjectsState, e, cx) -> ProjectsState:
         replace(o, steered_at=e.at, asked=True, waiting_until=0) if o.status == c.OPEN and o.need_ref
         else reopened(o, e.at, steered=True) if stuck_asking(o, e.at) else o
         for o in p.objectives))
-    return _set(s, p)
+    return with_project(s, p)
 
 
 #: une réponse rouvre un blocage qu'elle a dit dans ce délai : au-delà, la personne a parlé d'autre chose depuis
@@ -2497,7 +2497,7 @@ def _plan_proposed(s: ProjectsState, e, cx) -> ProjectsState:
     # revu en cours de route sans question neuve, il garde celles qui l'ont fondé et leur réponse (ADR 0161)
     kept = not asked and p.plan_state == c.PLANNED
     reads = tuple(dict.fromkeys(t for t in d.reads if t != p.id))[:LINKS_MAX]  # ce qu'il demande à lire (ADR 0257)
-    return _set(s, replace(p, plan_ref=d.plan.ref, questions_ref=p.questions_ref if kept else asked,
+    return with_project(s, replace(p, plan_ref=d.plan.ref, questions_ref=p.questions_ref if kept else asked,
                            plan_answer_ref=p.plan_answer_ref if kept else "", plan_at=e.at, plan_reads=reads,
                            plan_version=p.plan_version + 1, plan_state=state, plan_tell=d.tell, plan_asked=False,
                            plan_asked_at=0, plan_asked_to="", plan_attempts=0, plan_reminded=False, frame_silent=0))
@@ -2518,12 +2518,12 @@ def _plan_answered(s: ProjectsState, e, cx) -> ProjectsState:
         agreed = tuple(replace(o, milestones=tuple(
             replace(m, agreed=True) if m.status == c.OPEN and m.author == "self" else m for m in o.milestones))
             if o.kind == c.ONCE and o.status in (c.OPEN, c.BLOCKED) and o.milestones else o for o in p.objectives)
-        return _set(s, replace(p, objectives=agreed, plan_state=c.PLANNED, plan_tell=False, plan_answer_ref=words))
+        return with_project(s, replace(p, objectives=agreed, plan_state=c.PLANNED, plan_tell=False, plan_answer_ref=words))
     if words:
         p = replace(p, instructions=(*p.instructions, words)[-INSTRUCTIONS_KEPT:])
     if d.verdict == REVISE:
-        return _set(s, replace(p, plan_state=c.TO_FRAME, revise_at=e.at, plan_tell=False, frame_silent=0))
-    return _set(s, p)
+        return with_project(s, replace(p, plan_state=c.TO_FRAME, revise_at=e.at, plan_tell=False, frame_silent=0))
+    return with_project(s, p)
 
 
 @PROJECTS.reducer(DEPOSITED)
@@ -2533,7 +2533,7 @@ def _deposited(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None:
         return s
     entry = (d.name, d.size, d.note.ref or "" if d.note is not None else "")
-    return _set(s, replace(p, deposits=(*p.deposits, entry)[-DEPOSITS_KEPT:]))
+    return with_project(s, replace(p, deposits=(*p.deposits, entry)[-DEPOSITS_KEPT:]))
 
 
 @PROJECTS.reducer(REMOTE_REQUESTED)
@@ -2542,7 +2542,7 @@ def _remote_requested(s: ProjectsState, e, cx) -> ProjectsState:
     # un projet archivé ne pousse ni ne récupère : la demande tombe (elle ne repartira pas à la restauration)
     if p is None or e.data.what not in ("push", "pull") or p.status == c.ARCHIVED:
         return s
-    return _set(s, replace(p, requests=(*p.requests, (e.seq, e.data.what))[-4:]))
+    return with_project(s, replace(p, requests=(*p.requests, (e.seq, e.data.what))[-4:]))
 
 
 @PROJECTS.reducer(PULL_SEEN)
@@ -2565,7 +2565,7 @@ def _pull_seen(s: ProjectsState, e, cx) -> ProjectsState:
         # redirait chaque minute, sans fin (ADR 0277)
         if d.state != PULL_MERGED or not (o.unsent or o.pull_tries):
             return s
-        return _set(s, _objective(p, _accepted(replace(o, unsent=False, pull_tries=0), e.at)))
+        return with_project(s, _objective(p, _accepted(replace(o, unsent=False, pull_tries=0), e.at)))
     said = d.said.ref or "" if d.said is not None else ""
     changes = d.changes and d.state == PULL_OPEN
     # un refus ne compte qu'une fois : une fermeture qu'on n'avait pas vue, une relecture plus récente que la dernière
@@ -2592,7 +2592,7 @@ def _pull_seen(s: ProjectsState, e, cx) -> ProjectsState:
         # après une fusion, et quand l'hôte dit la pull request en conflit (ADR 0280) : sa base a avancé, et
         # l'outil qui la ramène dans la branche de travail ne ramène que ce que l'atelier en a
         p = replace(p, requests=(*p.requests, (e.seq, BASE_REQUEST))[-4:])
-    return _set(s, _objective(p, o))
+    return with_project(s, _objective(p, o))
 
 
 def _accepted(o: Objective, at: int) -> Objective:
@@ -2632,7 +2632,7 @@ def _merge_asked(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if p is not None else None
     if p is None or o is None:
         return s
-    return _set(s, _objective(p, replace(o, merge_asked_at=e.at, merge_by=d.by, merge_refused="")))
+    return with_project(s, _objective(p, replace(o, merge_asked_at=e.at, merge_by=d.by, merge_refused="")))
 
 
 @PROJECTS.reducer(MERGE_ANSWERED)
@@ -2644,7 +2644,7 @@ def _merge_answered(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if p is not None else None
     if p is None or o is None:
         return s
-    return _set(s, _objective(p, replace(o, merge_asked_at=0, merge_answered_at=e.at,
+    return with_project(s, _objective(p, replace(o, merge_asked_at=0, merge_answered_at=e.at,
                                          merge_refused="" if d.merged else (d.why or MERGE_CUT))))
 
 
@@ -2671,7 +2671,7 @@ def _checks_seen(s: ProjectsState, e, cx) -> ProjectsState:
     o = replace(o, checks=d.state, checks_sha=d.sha, checks_at=e.at,
                 checks_failed_sha=d.sha if failed else o.checks_failed_sha,
                 checks_said_ref=said or (o.checks_said_ref if failed else ""))
-    return _set(s, _objective(p, _sent_back(o) if failed_anew else o))
+    return with_project(s, _objective(p, _sent_back(o) if failed_anew else o))
 
 
 #: les relectures refusées d'affilée sur un objectif avant que la main revienne au propriétaire ; les relectures
@@ -2738,7 +2738,7 @@ def _review_asked(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, d.objective) if p is not None else None
     if p is None or o is None or not d.sha or d.sha in (o.reviewed, o.review_due) or handed_over(o):
         return s
-    return _set(s, _objective(p, replace(o, review_due=d.sha, review_tries=0)))
+    return with_project(s, _objective(p, replace(o, review_due=d.sha, review_tries=0)))
 
 
 @PROJECTS.reducer(REVIEWED)
@@ -2762,13 +2762,13 @@ def _reviewed(s: ProjectsState, e, cx) -> ProjectsState:
     p = replace(p, failures=0)
     if d.good:
         # en flux direct, la relecture suivante lira ce qui a changé depuis ce commit-ci
-        return _set(s, _objective(p, replace(o, review_refused=(), since=o.since if by_pulls(p) else d.sha)))
+        return with_project(s, _objective(p, replace(o, review_refused=(), since=o.since if by_pulls(p) else d.sha)))
     o = replace(o, review_refused=(*o.review_refused, ref)[-REVIEW_REFUSALS_MAX:])
     if not handed_over(o):
-        return _set(s, _objective(p, _sent_back(o)))
+        return with_project(s, _objective(p, _sent_back(o)))
     if o.kind == c.ONCE and o.status in (c.DONE, c.OPEN):
         o = replace(o, status=c.BLOCKED, closed_at=e.at)
-    return _set(s, _objective(p, replace(o, need_ref=ref or o.need_ref, asked=False, ask_attempts=0, asked_at=0,
+    return with_project(s, _objective(p, replace(o, need_ref=ref or o.need_ref, asked=False, ask_attempts=0, asked_at=0,
                                          answered_at=0, steered_at=0)))
 
 
@@ -2818,7 +2818,7 @@ def _issue_asked(s: ProjectsState, e, cx) -> ProjectsState:
     old = issue_move(p, d.ticket, d.what, note)
     if old is not None and (old.proposal or old.sent_at):
         return s
-    return _set(s, _moved_issue(p, IssueMove(d.ticket, d.what, note, d.author, d.by, asked=e.seq, at=e.at)))
+    return with_project(s, _moved_issue(p, IssueMove(d.ticket, d.what, note, d.author, d.by, asked=e.seq, at=e.at)))
 
 
 @PROJECTS.reducer(NETWORK_QUEUED)
@@ -2827,7 +2827,7 @@ def _network_queued(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or p.status == c.ARCHIVED or not e.data.argv:
         return s
     entry = (e.seq, tuple(str(a) for a in e.data.argv), e.data.why.ref or "")
-    return _set(s, replace(p, network=(*p.network, entry)[-4:]))
+    return with_project(s, replace(p, network=(*p.network, entry)[-4:]))
 
 
 def subject_of(project: int, objective: int) -> str:
@@ -2913,7 +2913,7 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
                 p.id, relu[1], "review", started=e.at, previous=p.last_run_at,
                 reviewing=aimed.review_due if aimed is not None else "")),
                         runs_at=tuple(t for t in s.runs_at if e.at - t < HOUR) + (e.at,))
-            return _set(s, replace(p, runs=p.runs + 1, tried_at=e.at,
+            return with_project(s, replace(p, runs=p.runs + 1, tried_at=e.at,
                                    runs_at=tuple(t for t in p.runs_at if e.at - t < DAY) + (e.at,)))
         got = objective_of(d.subject)
         oid = got[1] if got is not None and got[0] == p.id else 0
@@ -2935,7 +2935,7 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
             # une exécution de plus sans nouveau jalon atteint : un jalon atteint remettra ce compte à zéro (ADR 0273)
             p = _objective(p, _unstirred(replace(o, runs=o.runs + 1, worked=o.worked + 1, stale=o.stale + 1,
                                                  last_run_at=e.at)))
-        return _set(s, p)
+        return with_project(s, p)
     got = objective_of(d.subject)
     reasons = d.reason.split(",")
     stalled = stall_of(d.subject)
@@ -2982,24 +2982,24 @@ def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
         return s
     p = s.projects[run.project]
     if run.purpose == "stalled":  # c'est dit : elle ne le redira pas, il attend qu'on le relance
-        return _set(s, replace(p, stall_asked=True))
+        return with_project(s, replace(p, stall_asked=True))
     if run.purpose == "plan":
         # son plan est dit : s'il attend une réponse, c'est celle de cette personne-là ; dit une seconde fois, c'était
         # la relance
         s = replace(s, running=s.running.set(e.correlation, replace(run, reported=True)))
         if p.plan_asked:
-            return _set(s, replace(p, plan_reminded=True))
+            return with_project(s, replace(p, plan_reminded=True))
         person = (cx.facts.get(identity_c.PERSON(run.address)) or run.address) if run.address else ""
-        return _set(s, replace(p, plan_asked=True, plan_asked_at=e.at, plan_asked_to=person))
+        return with_project(s, replace(p, plan_asked=True, plan_asked_at=e.at, plan_asked_to=person))
     o = objective_at(p, run.objective)
     if o is None:
         return s
     if run.purpose == "need":
         # « j'ai besoin de toi pour… » est dit : elle attend la réponse de cette personne-là, à partir de maintenant
         person = (cx.facts.get(identity_c.PERSON(run.address)) or run.address) if run.address else ""
-        return _set(s, _objective(p, replace(o, asked=True, asked_at=e.at, asked_to=person)))
+        return with_project(s, _objective(p, replace(o, asked=True, asked_at=e.at, asked_to=person)))
     story = _story(p, run)
-    return _set(s, replace(p, objectives=tuple(
+    return with_project(s, replace(p, objectives=tuple(
         (replace(x, told_at=e.at) if x.kind == c.CONSTANT else replace(x, shared=True)) if x.id in story else x
         for x in p.objectives)))
 
@@ -3012,11 +3012,11 @@ def _answered(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or o is None:
         return s
     if stuck_asking(o, e.at):  # la réponse à son blocage le rouvre (ADR 0161)
-        return _set(s, _objective(p, reopened(o, e.at)))
+        return with_project(s, _objective(p, reopened(o, e.at)))
     if o.status != c.OPEN:
         return s
     # sa réponse est là : l'objectif n'attend plus (l'exécution suivante part dans l'espacement normal)
-    return _set(s, _objective(p, replace(o, waiting_until=0, answered_at=e.at)))
+    return with_project(s, _objective(p, replace(o, waiting_until=0, answered_at=e.at)))
 
 
 def asking(o: Objective) -> bool:
@@ -3059,19 +3059,19 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
     if run.purpose == "stalled":
         renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
         if p.stall_asked or not agency_c.tried(e.data.outcome, run.started, renounced):
-            return _set(s, p)
-        return _set(s, replace(p, stall_attempts=p.stall_attempts + 1))
+            return with_project(s, p)
+        return with_project(s, replace(p, stall_attempts=p.stall_attempts + 1))
     if run.purpose == "plan":
         renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
         if run.reported or not agency_c.tried(e.data.outcome, run.started, renounced):
-            return _set(s, p)  # dit (la parole l'a noté), ou pas vraiment tenté
+            return with_project(s, p)  # dit (la parole l'a noté), ou pas vraiment tenté
         if p.plan_asked:  # la relance a été tentée sans être dite : elle n'insiste pas
-            return _set(s, replace(p, plan_reminded=True))
-        return _set(s, replace(p, plan_attempts=p.plan_attempts + 1))
+            return with_project(s, replace(p, plan_reminded=True))
+        return with_project(s, replace(p, plan_attempts=p.plan_attempts + 1))
     if run.purpose in ("share", "need"):
         renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
         if o is None or not agency_c.tried(e.data.outcome, run.started, renounced):
-            return _set(s, p)
+            return with_project(s, p)
         still_untold = pass_untold(o) if o.kind == c.CONSTANT else not o.shared
         if run.purpose == "share" and still_untold:  # un essai pour tout ce que le récit couvrait
             story = _story(p, run)
@@ -3079,17 +3079,17 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
                                             for x in p.objectives))
         elif run.purpose == "need" and not o.asked:
             p = _objective(p, replace(o, ask_attempts=o.ask_attempts + 1))
-        return _set(s, p)
+        return with_project(s, p)
     if run.reported:
         return s
     if run.purpose == "review":
         if e.data.outcome in REFUND and e.data.outcome not in BROKEN:  # devancée : le plafond de l'heure la rend
             s = replace(s, runs_at=tuple(t for t in s.runs_at if t != run.started))
-        return _set(s, _review_ended(p, o, run, e))
+        return with_project(s, _review_ended(p, o, run, e))
     if run.purpose == "frame" and e.data.outcome not in REFUND:
         # une séance de cadrage qui n'a pas écrit de plan : comptée — d'affilée, elles arrêtent le projet, qui ne
         # recommence pas en boucle sans rien dire (ADR 0161)
-        return _set(s, replace(p, failures=0, frame_silent=p.frame_silent + 1))
+        return with_project(s, replace(p, failures=0, frame_silent=p.frame_silent + 1))
     if e.data.outcome in REFUND:
         # elle n'a pas eu lieu : ni l'agenda, ni « lancer maintenant », ni le plafond du jour ne la comptent ;
         # l'espacement, si (il court depuis la tentative : pas de relance en boucle)
@@ -3106,10 +3106,10 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
             p = _objective(p, _handed_back(replace(o, runs=max(0, o.runs - 1), worked=max(0, o.worked - 1),
                                                    stale=max(0, o.stale - 1),
                                                    last_run_at=run.previous_objective), run))
-        return _set(s, p)
+        return with_project(s, p)
     if o is not None:  # le modèle a travaillé, mais n'a rien conclu
         p = _objective(p, replace(o, silent=o.silent + 1))
-    return _set(s, replace(p, failures=0))
+    return with_project(s, replace(p, failures=0))
 
 
 def _review_ended(p: Project, o: Objective | None, run: Run, e: Any) -> Project:
@@ -3149,15 +3149,15 @@ def _handed_back(o: Objective, run: Run) -> Objective:
                    stirred_more=run.stirred_more + o.stirred_more + over)
 
 
-def _hear(s: ProjectsState, e: Any, key: str, detail: str = "", project: int = 0) -> ProjectsState:
+def hear_if_listening(s: ProjectsState, e: Any, key: str, detail: str = "", project: int = 0) -> ProjectsState:
     """Noter ce qui vient d'arriver, si un objectif l'attend (ADR 0265) — sans rien juger de ce qu'un lien donne :
     le processus ``projects.stirs`` le fera, devant ce qu'elle vit. ``project`` : où c'est arrivé, quand le
     réducteur le sait."""
-    return _noticed(s, e, key, detail, project) if listening(s, key) else s
+    return with_heard(s, e, key, detail, project) if listening(s, key) else s
 
 
-def _noticed(s: ProjectsState, e: Any, key: str, detail: str = "", project: int = 0) -> ProjectsState:
-    """Une nouvelle de plus dans la file, à juger (``_hear`` ; la fermeture d'une demande, ADR 0271)."""
+def with_heard(s: ProjectsState, e: Any, key: str, detail: str = "", project: int = 0) -> ProjectsState:
+    """Une nouvelle de plus dans la file, à juger (``hear_if_listening`` ; la fermeture d'une demande, ADR 0271)."""
     return replace(s, heard=(*s.heard, Heard(e.seq, e.at, key, detail[:STIR_DETAIL], project))[-HEARD_KEPT:])
 
 
@@ -3191,7 +3191,7 @@ def roused(o: Objective, cause: Stir) -> Objective:
 def _app_signaled(s: ProjectsState, e, cx) -> ProjectsState:
     """Le signal public d'une app (une panne, ce qu'elle a gardé en tête de sa file) : noté si un objectif attend
     cette app. À quel projet elle appartient ne se sait pas ici — le processus qui juge la nouvelle le lit."""
-    return _hear(s, e, triggers.app_key(e.data.app), e.data.kind)
+    return hear_if_listening(s, e, triggers.app_key(e.data.app), e.data.kind)
 
 
 @PROJECTS.reducer(forge_c.RAISED)
@@ -3199,7 +3199,7 @@ def _app_raised(s: ProjectsState, e, cx) -> ProjectsState:
     """Une app d'un projet vient de mettre un signal dans sa file (ADR 0280) : noté si un objectif attend cette app
     — sans attendre que sa file soit triée, ni qu'elle tombe en panne. Le fait ne dit que son nom : le texte du
     signal reste à la Forge."""
-    return _hear(s, e, triggers.app_key(e.data.app), forge_c.APP_QUEUED)
+    return hear_if_listening(s, e, triggers.app_key(e.data.app), forge_c.APP_QUEUED)
 
 
 @PROJECTS.reducer(STIRRED)
@@ -3219,9 +3219,9 @@ def _stirred(s: ProjectsState, e, cx) -> ProjectsState:
         if p is None or o is None:
             continue
         if stirring(p, o, news.key):
-            s = _set(s, _objective(p, stir(o, cause)))
+            s = with_project(s, _objective(p, stir(o, cause)))
         elif answering(p, o, news.key, news.detail):
-            s = _set(s, _objective(p, roused(o, cause)))
+            s = with_project(s, _objective(p, roused(o, cause)))
     return s
 
 
@@ -3283,10 +3283,10 @@ def _reported(s: ProjectsState, e, cx) -> ProjectsState:
     if not d.commit or by_pulls(p):
         # en flux ``pr``, ce commit est sur une branche de travail : un projet lecteur ne le voit pas, et rien ne
         # s'éveille (ADR 0280) — sa base avancera à la fusion, par une récupération (``_base_seen``)
-        return _set(s, p)
+        return with_project(s, p)
     # en flux direct, le commit qu'elle laisse est sur la base : ce qu'attend peut-être un objectif d'un projet qui
     # lit celui-ci (ADR 0265)
-    return _base_moved(_set(s, p), e, p.id, d.commit)
+    return _base_moved(with_project(s, p), e, p.id, d.commit)
 
 
 def _base_moved(s: ProjectsState, e: Any, project: int, commit: str) -> ProjectsState:
@@ -3295,7 +3295,7 @@ def _base_moved(s: ProjectsState, e: Any, project: int, commit: str) -> Projects
     p = s.projects.get(project)
     if p is None or not commit or commit == p.base_commit:
         return s
-    return _hear(_set(s, replace(p, base_commit=commit)), e, triggers.commit_key(p.id), commit, p.id)
+    return hear_if_listening(with_project(s, replace(p, base_commit=commit)), e, triggers.commit_key(p.id), commit, p.id)
 
 
 @PROJECTS.reducer(BASE_SEEN)
@@ -3307,7 +3307,7 @@ def _base_seen(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None:
         return s
-    s = _set(s, replace(p, base_unread=False)) if p.base_unread else s
+    s = with_project(s, replace(p, base_unread=False)) if p.base_unread else s
     return _base_moved(s, e, p.id, e.data.commit)
 
 
@@ -3322,9 +3322,9 @@ def _objective_closed(s: ProjectsState, e, cx) -> ProjectsState:
                 notable=d.notable, result_ref=d.result.ref or "" if d.result is not None else "")
     if o.status == c.BLOCKED and o.asked and _settled(o, e.at):  # il bloque après sa réponse : elle le dira
         o = replace(o, asked=False, ask_attempts=0)
-    s = _set(s, _objective(p, o))
+    s = with_project(s, _objective(p, o))
     # un objectif abouti : ce qu'attend peut-être un objectif d'un projet qui lit celui-ci (ADR 0265)
-    return _hear(s, e, triggers.done_key(p.id), str(o.id), p.id) if o.status == c.DONE else s
+    return hear_if_listening(s, e, triggers.done_key(p.id), str(o.id), p.id) if o.status == c.DONE else s
 
 
 def _effect_line(p: Project, line: str) -> Project:
@@ -3360,7 +3360,7 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
             p = _moved_issue(p, replace(old, proposal=e.seq) if old is not None else
                              IssueMove(ticket, what, note, proposal=e.seq, at=e.at))
     awaiting = s.awaiting.set(e.seq, e.data.args_json) if e.data.approval else s.awaiting
-    s = replace(_set(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)), awaiting=awaiting)
+    s = replace(with_project(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)), awaiting=awaiting)
     if e.data.capability == STEER_CAPABILITY:
         asked = _asked_of(e.data.args_json)
         if asked in s.steers:
@@ -3453,7 +3453,7 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
         s = replace(s, steers=s.steers.delete(asked) if asked in s.steers else s.steers,
                     steer_proposals=s.steer_proposals.delete(e.data.proposal))
     if e.data.approved and got[1] != STEER_CAPABILITY:  # elle part : l'atelier est occupé jusqu'à ce qu'elle revienne
-        return _set(s, replace(p, outgoing=(*p.outgoing, (e.data.proposal, e.at))[-8:]))
+        return with_project(s, replace(p, outgoing=(*p.outgoing, (e.data.proposal, e.at))[-8:]))
     if e.data.approved:
         return s
     refused = _pull_asked(p, e.data.proposal) if got[1] == PULL_REQUEST_CAPABILITY else None
@@ -3468,7 +3468,7 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     note = f" : « {e.data.legacy_note[:200]} »" if e.data.legacy_note else ""
     if e.data.note is not None and e.data.note.ref:
         p = replace(p, refusals=(*p.refusals, (e.data.proposal, e.data.note.ref))[-EFFECTS_KEPT:])
-    return _set(s, _effect_line(p, f"#{e.data.proposal} {phrase('projects.effect.refused')}{note}"))
+    return with_project(s, _effect_line(p, f"#{e.data.proposal} {phrase('projects.effect.refused')}{note}"))
 
 
 @PROJECTS.reducer(rt.EFFECT_EXECUTED)
@@ -3513,7 +3513,7 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
     asked = s.steer_proposals.get(e.data.proposal, "") if got[1] == STEER_CAPABILITY else ""
     if asked in s.steers:  # acceptée : son geste s'écrit (l'effet ``steer._steer_accepted``)
         s = replace(s, steers=s.steers.set(asked, replace(s.steers[asked], applied=True)))
-    return _set(s, p)
+    return with_project(s, p)
 
 
 def _code_of(result: str) -> str:

@@ -71,14 +71,14 @@ from mika.faculties.projects.faculty import (
     Listing,
     Project,
     ProjectsState,
-    _hear,
-    _set,
-    _spread,
     awaits_her,
+    hear_if_listening,
     inherited_on,
     issue_settled,
     live,
     objective_at,
+    spread_confidentiality,
+    with_project,
     written,
     written_on,
 )
@@ -748,7 +748,7 @@ def _moved(s: ProjectsState, e: Any, p: Project, item: Item, author: str) -> Pro
     if author in (c.BY_SELF, c.BY_HOST):
         return s  # ce qu'un inconnu écrit chez l'hôte ne déclenche aucun objectif (ADR 0275)
     detail = f"#{item.number}" if item.number else item.key
-    return _hear(s, e, triggers.item_key(item.list_name), detail, p.id)
+    return hear_if_listening(s, e, triggers.item_key(item.list_name), detail, p.id)
 
 
 @PROJECTS.reducer(LIST_SET)
@@ -765,7 +765,7 @@ def _list_set(s: ProjectsState, e, cx) -> ProjectsState:
     lst = Listing(d.name, title_ref, opened, closed, actor, d.person if actor == c.ACTOR_PERSON else "",
                   old.at if old is not None else e.at)
     lists = tuple(lst if x.name == d.name else x for x in b.lists) if old is not None else (*b.lists, lst)
-    return _set(s, replace(p, board=replace(b, lists=lists)))
+    return with_project(s, replace(p, board=replace(b, lists=lists)))
 
 
 @PROJECTS.reducer(ITEM_ADDED)
@@ -788,7 +788,7 @@ def _item_added(s: ProjectsState, e, cx) -> ProjectsState:
     if d.author == c.BY_HOST:  # venu de l'hôte : compté dans sa journée (ADR 0278)
         since, count = hosted_day(p, e.at)
         p = replace(p, hosted_since=since or e.at, hosted_count=count + 1)
-    s = _set(s, p)
+    s = with_project(s, p)
     if c.asking_project(d.author):
         # une demande fait passer un texte du demandeur vers ce projet : ce qu'il en écrira ensuite — une note, un
         # plan, l'objectif qui en naît, ses comptes rendus — doit être atteint par l'oubli des personnes du demandeur
@@ -798,7 +798,7 @@ def _item_added(s: ProjectsState, e, cx) -> ProjectsState:
         poured = tuple(dict.fromkeys(x for x in (*p.read_about, *d.read_about) if x and x not in own))
         if poured != p.read_about:
             p = replace(p, read_about=poured)
-            s = _spread(_set(s, p), p.id)
+            s = spread_confidentiality(with_project(s, p), p.id)
             p = s.projects[p.id]
     # ouvert par un autre projet, c'est une demande que ce projet suit (ADR 0271)
     s = asks.born(s, e, p, item, d.origin)
@@ -806,7 +806,7 @@ def _item_added(s: ProjectsState, e, cx) -> ProjectsState:
         # un ticket qu'elle vient d'ouvrir elle-même attend qu'elle le traite (ADR 0280) : c'est ce qu'attend
         # l'objectif qui traite les tickets — sans cela ceux de son propre audit n'étaient jamais repris. Ses autres
         # gestes (changer, noter) n'éveillent toujours rien : son propre travail ne se relance pas
-        return _hear(s, e, triggers.item_key(c.TICKETS), f"#{item.number}", p.id)
+        return hear_if_listening(s, e, triggers.item_key(c.TICKETS), f"#{item.number}", p.id)
     return _moved(s, e, p, item, d.author)
 
 
@@ -832,7 +832,7 @@ def _item_changed(s: ProjectsState, e, cx) -> ProjectsState:
     if (bool(new.closed), new.issue_state) != (bool(base.closed), base.issue_state):
         # son état a changé, ici ou chez l'hôte : ce qui devait le porter là-bas est fait, ou n'a plus lieu d'être
         p = issue_settled(p, new.number, MOVE_CLOSE, MOVE_REOPEN)
-    s = _set(s, p)
+    s = with_project(s, p)
     # le projet qui l'a demandé suit son étape, et sa fermeture le réveille (ADR 0271)
     return _moved(asks.followed(s, e, p, new, d.note is not None), e, p, new, d.author)
 
@@ -848,10 +848,10 @@ def _item_noted(s: ProjectsState, e, cx) -> ProjectsState:
     # (ADR 0278)
     if d.host_at > p.remarks_at:
         p = replace(p, remarks_at=d.host_at, remarks_ids=(d.host_id,) if d.host_id else ())
-        s = _set(s, p)
+        s = with_project(s, p)
     elif d.host_at and d.host_at == p.remarks_at and d.host_id and d.host_id not in p.remarks_ids:
         p = replace(p, remarks_ids=(*p.remarks_ids, d.host_id)[-REMARK_IDS_KEPT:])
-        s = _set(s, p)
+        s = with_project(s, p)
     if not addable(d):  # comme le projecteur : une note se compte même si son texte ne se lit plus
         return s
     b = p.board
@@ -863,7 +863,7 @@ def _item_noted(s: ProjectsState, e, cx) -> ProjectsState:
     if new.status != old.status:
         counts = _counted(_counted(counts, new.list_name, old.status, -1), new.list_name, new.status, 1)
     items = (*(x for x in b.items if x is not old), new)
-    s = _set(s, replace(p, board=replace(b, counts=counts, items=kept(items))))
+    s = with_project(s, replace(p, board=replace(b, counts=counts, items=kept(items))))
     return _moved(asks.followed(s, e, p, new, False), e, p, new, d.author)
 
 

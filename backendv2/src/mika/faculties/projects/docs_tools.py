@@ -25,7 +25,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.faculties.projects import docs, links
 from mika.faculties.projects.faculty import DOC_PAGES_MAX, PROJECTS, Project, ProjectsState, written
-from mika.faculties.projects.prompt import _project
+from mika.faculties.projects.prompt import episode_project
 from mika.faculties.projects.tools import RUNS, current, gone
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
@@ -229,7 +229,7 @@ def _docs_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     """Ce qu'il y a dans la documentation de son projet (les chemins de ses pages, bornés) et de quels projets lus
     elle peut lire la documentation — les droits relus à chaque exécution. Les chemins sont écrits par elle et par
     des personnes : la section le dit, et prend le niveau de ce qu'écrit le projet."""
-    got = _project(s, frame)
+    got = episode_project(s, frame)
     if got is None:
         return None
     p = got[0]

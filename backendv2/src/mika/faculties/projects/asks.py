@@ -37,11 +37,11 @@ from mika.faculties.projects.faculty import (
     Item,
     Project,
     ProjectsState,
-    _noticed,
-    _set,
     asked_by,
     live,
     objective_at,
+    with_heard,
+    with_project,
     written,
 )
 from mika.vocab.access import STEER_EDIT, STEER_NO
@@ -145,7 +145,7 @@ def born(s: ProjectsState, e: Any, target: Project, item: Item, origin: int) -> 
     if any(a.target == target.id and a.key == item.key for a in asker.asks):
         return s
     ask = Ask(target.id, item.key, item.number, max(0, origin), e.at, item.status, run=e.correlation or "")
-    return _set(s, replace(asker, asks=_kept((*asker.asks, ask))))
+    return with_project(s, replace(asker, asks=_kept((*asker.asks, ask))))
 
 
 def followed(s: ProjectsState, e: Any, target: Project, item: Item, noted: bool) -> ProjectsState:
@@ -162,11 +162,11 @@ def followed(s: ProjectsState, e: Any, target: Project, item: Item, noted: bool)
     closing = item.status in c.STAGES_CLOSED
     new = replace(ask, status=item.status, closed_at=e.at if closing else 0,
                   note_seq=e.seq if closing and noted else 0)
-    s = _set(s, replace(asker, asks=tuple(new if a is ask else a for a in asker.asks)))
+    s = with_project(s, replace(asker, asks=tuple(new if a is ask else a for a in asker.asks)))
     o = objective_at(asker, ask.objective)
     if not closing or o is None or o.status != c.OPEN or not live(asker):
         return s
-    return _noticed(s, e, triggers.ask_key(target.id), f"#{ask.number}", target.id)
+    return with_heard(s, e, triggers.ask_key(target.id), f"#{ask.number}", target.id)
 
 
 def roused(s: ProjectsState, news: Heard, world: links.World) -> tuple[tuple[int, int], ...]:
