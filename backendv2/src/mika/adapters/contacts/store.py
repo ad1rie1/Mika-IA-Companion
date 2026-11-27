@@ -39,13 +39,15 @@ Une seule connexion sous SQLite, partagée sous ``_lock`` ; une écriture est un
 hors de la boucle d'événements pour ce qui peut être long (``observe``, ``forget``). Chaque écriture dit ce qu'elle
 change, une fois validée (``on_change``, ADR 0308) — sauf la tenue de l'annuaire que rien ne montre à une personne
 (un curseur, une paire écartée des suggestions, un avis du juge).
+
+Ses règles de nom — ranger un nom vu, ses mots, le nom d'une fiche, ce que le nom seul rapproche, un nom dans un
+texte — sont pures : elles vivent à côté, dans ``names.py``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 import threading
 import time
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
@@ -79,6 +81,17 @@ from mika.adapters.contacts.models import (
     ThreadRow,
     UnionRow,
     fit,
+)
+from mika.adapters.contacts.names import (
+    clean_name,
+    clean_role,
+    lettered,
+    name_index,
+    name_of,
+    name_tokens,
+    names_in,
+    role_of,
+    rule_pairs,
 )
 from mika.adapters.database import Target, as_target
 from mika.ports import changes
@@ -136,18 +149,12 @@ C, N, S, D, T = ContactRow, IdentifierRow, SightingRow, DismissedRow, ThreadRow
 JR = JudgementRow
 NT, NF, P = NoteRow, NoteForgottenRow, PortraitRow
 
-#: un nom vu, au plus (caractères)
-NAME_MAX = 200
 #: une organisation montre au plus tant de membres sur sa fiche, parmi les premiers venus (ceux qu'on lit pour savoir
 #: lesquels sont visibles)
 MEMBERS_MAX = 200
 MEMBERS_SCANNED = 2000
-#: un même nom chez plus de tant de contacts ne se propose plus (un nom de service, pas une personne)
-SAME_NAME_MAX = 20
 #: une vue garde au plus tant de conversations (les plus récentes)
 THREADS_MAX = 20
-#: un prénom seul se propose s'il a au moins tant de lettres (« Jo » ne rapproche personne)
-FIRST_NAME_MIN = 3
 #: le juge des rapprochements (ADR 0304) : au plus tant de paires à lui soumettre ; un mot du nom les rapproche s'il a
 #: au moins tant de lettres et que peu de fiches le portent (au plus tant) — un nom de famille, pas « ext » ni un prénom
 #: courant ; ses appels gardés tant de temps (ses plafonds se comptent sur un jour)
@@ -155,8 +162,6 @@ LIKENESSES_MAX = 2000
 RARE_WORD_MIN = 4
 RARE_WORD_HOLDERS = 10
 JUDGE_CALLS_KEPT = 30 * 86_400_000_000
-#: ce qui sépare les mots d'un nom comparé (``Rousseau, Gilles`` : deux mots)
-_NAME_MARKS = str.maketrans({c: " " for c in ".,;:()[]{}\"'«»“”‘’/\\|_"})
 
 
 def _now_us() -> int:
@@ -166,22 +171,6 @@ def _now_us() -> int:
 def _print(kind: str, value: str) -> str:
     """L'empreinte d'un identifiant oublié (jamais sa valeur)."""
     return hashlib.sha256(f"{kind}\n{value}".encode("utf-8", "surrogatepass")).hexdigest()
-
-
-def clean_name(name: str) -> str:
-    """Un nom vu, rangé : blancs repliés, sans guillemets autour, borné ; vide pour une adresse donnée comme nom."""
-    found = " ".join((name or "").replace("\x00", " ").split()).strip("\"'“”«»‘’ ")
-    return "" if "@" in found else found[:NAME_MAX]
-
-
-def clean_role(text: str) -> str:
-    """Un poste, un service : blancs repliés, borné."""
-    return " ".join((text or "").replace("\x00", " ").split())[:NAME_MAX]
-
-
-def name_words(name: str) -> list[str]:
-    """Les mots d'un nom, comparés (repliés, sans ponctuation) : « ROUSSEAU, Gilles » → ``rousseau``, ``gilles``."""
-    return fold_text(name).translate(_NAME_MARKS).split()
 
 
 def _visible(visible: Collection[tuple[str, str]] | None, on: Any = S) -> list[Any]:
@@ -497,9 +486,9 @@ class ContactsStore:
                          .order_by(S.last.desc(), S.id.desc())).all()
         names = list(dict.fromkeys(r.name for r in seen if r.name))
         of = {i.id: (i.kind, bool(i.generic)) for i in idents}
-        row.name = _name_of(row.kind, [(i.kind, i.value, i.generic) for i in idents],
+        row.name = name_of(row.kind, [(i.kind, i.value, i.generic) for i in idents],
                             [(*of[r.identifier], r.name) for r in seen])
-        row.title, row.department = _role_of([(r.title or "", r.department or "") for r in seen])
+        row.title, row.department = role_of([(r.title or "", r.department or "") for r in seen])
         row.search = fold_text(" ".join([row.name, *names, *(i.value for i in idents if i.kind not in OPAQUE_KINDS)]))
 
     # ── lire ──
@@ -541,8 +530,8 @@ class ContactsStore:
         out = []
         for r in rows:
             got = details.get(r.id, _Seen())
-            name = r.name if visible is None else _name_of(r.kind, got.idents, got.names) or r.name
-            title, department = (r.title or "", r.department or "") if visible is None else _role_of(got.roles)
+            name = r.name if visible is None else name_of(r.kind, got.idents, got.names) or r.name
+            title, department = (r.title or "", r.department or "") if visible is None else role_of(got.roles)
             org_name = orgs.get(int(r.org or 0), "") if int(r.id) in proven else ""
             out.append(ContactLine(r.id, r.kind, name, int(r.org) if org_name else 0, org_name, r.person or "",
                                    int(r.n or 0), int(r.last or 0), tuple(sorted(got.sources)),
@@ -613,7 +602,7 @@ class ContactsStore:
             return {}
         stored = {int(i): n for i, n in s.execute(select(C.id, C.name).where(C.id.in_(sorted(ids)), C.kind == ORG))}
         details = self._details(s, sorted(stored), vis)
-        return {i: stored[i] if not vis else _name_of(ORG, got.idents, got.names) or stored[i]
+        return {i: stored[i] if not vis else name_of(ORG, got.idents, got.names) or stored[i]
                 for i, got in details.items()}
 
     def sheet(self, contact_id: int, *, visible: Collection[tuple[str, str]] | None = None) -> ContactSheet | None:
@@ -654,16 +643,16 @@ class ContactsStore:
                 details = self._details(s, list(ids), vis)
                 names = dict(s.execute(select(C.id, C.name).where(C.id.in_(list(details)))).all()) if details else {}
                 members = tuple(ContactRef(cid, PERSON_KIND, names[cid] if visible is None
-                                           else _name_of(PERSON_KIND, got.idents, got.names) or names[cid])
+                                           else name_of(PERSON_KIND, got.idents, got.names) or names[cid])
                                 for cid, got in sorted(details.items()))[:MEMBERS_MAX]
         recent = sorted(rows, key=lambda r: -(r.last or 0))
         seen = [(r.kind, bool(r.generic), r.name) for r in recent if r.name]
         found = tuple(Identifier(i, r.kind, r.value, bool(r.generic), tuple(sights))
                       for i, (r, sights) in sorted(idents.items(), key=lambda kv: (kv[1][0].generic, kv[0])))
         name = row.name if visible is None else \
-            _name_of(row.kind, [(i.kind, i.value, i.generic) for i in found], seen) or row.name
+            name_of(row.kind, [(i.kind, i.value, i.generic) for i in found], seen) or row.name
         title, department = (row.title or "", row.department or "") if visible is None else \
-            _role_of([(r.title or "", r.department or "") for r in recent])
+            role_of([(r.title or "", r.department or "") for r in recent])
         return ContactSheet(row.id, row.kind, name, row.person or "", org, members, found,
                             tuple(dict.fromkeys(n for _, _, n in seen)), int(row.created or 0), title, department)
 
@@ -768,7 +757,7 @@ class ContactsStore:
     def suggestions(self, limit: int = 50) -> list[Suggestion]:
         with self._lock, self._session() as s:
             people = self._people(s)
-            rules = _rule_pairs(people.rows, people.informal)
+            rules = rule_pairs(people.rows, people.informal)
             said = {(j.a, j.b): j for j in self._judgements_in(s, None) if j.verdict}
             bases = self._bases(s, {x for pair in (*rules, *said) for x in pair})
         valid = {pair: j for pair, j in said.items()
@@ -808,7 +797,7 @@ class ContactsStore:
     def likenesses(self, limit: int = LIKENESSES_MAX) -> list[Likeness]:
         with self._lock, self._session() as s:
             people = self._people(s)
-            rules = _rule_pairs(people.rows, people.informal)
+            rules = rule_pairs(people.rows, people.informal)
             names: dict[int, set[str]] = {int(r.id): {r.name} for r in people.rows if r.name}
             for cid, name in s.execute(select(N.contact, S.name).join(S, S.identifier == N.id)
                                        .join(C, C.id == N.contact)
@@ -819,7 +808,7 @@ class ContactsStore:
         firsts: dict[int, set[str]] = {}
         for cid, found in names.items():
             for n in found:
-                tokens = name_tokens(n) if _lettered(n) and "@" not in n else []
+                tokens = name_tokens(n) if lettered(n) and "@" not in n else []
                 words.setdefault(cid, set()).update(tokens)
                 if tokens:
                     firsts.setdefault(cid, set()).add(tokens[0])
@@ -1094,8 +1083,8 @@ class ContactsStore:
             row = s.get(C, int(but)) if but else None
         if row is not None and row.name:
             own.add(fold_text(row.name))
-        wanted = _name_index(n for n in names if fold_text(n) not in own)
-        return [bool(_names_in(text, wanted)) for text in texts]
+        wanted = name_index(n for n in names if fold_text(n) not in own)
+        return [bool(names_in(text, wanted)) for text in texts]
 
     async def forget(self, subject: str) -> int:
         return await asyncio.to_thread(self.forget_now, subject)
@@ -1185,11 +1174,11 @@ class ContactsStore:
         row = s.get(C, contact)
         if row is not None and row.name:
             names.add(row.name)
-        wanted = _name_index(names)
+        wanted = name_index(names)
         if not wanted:
             return 0
         gone = [int(i) for i, text in s.execute(select(NT.id, NT.text).where(NT.contact != contact))
-                if _names_in(text or "", wanted)]
+                if names_in(text or "", wanted)]
         return int(s.execute(delete(NT).where(NT.id.in_(gone))).rowcount or 0) if gone else 0
 
     @staticmethod
@@ -1200,17 +1189,17 @@ class ContactsStore:
         row = s.get(C, contact)
         if row is not None and row.name:
             names.add(row.name)
-        wanted = _name_index(names)
+        wanted = name_index(names)
         if not wanted:
             return 0
         pairs = [(int(a), int(b)) for a, b, reason in s.execute(select(JR.a, JR.b, JR.reason))
-                 if _names_in(reason or "", wanted)]
+                 if names_in(reason or "", wanted)]
         n = 0
         for a, b in pairs:
             n += int(s.execute(delete(JR).where(JR.a == a, JR.b == b)).rowcount or 0)
         gone = [int(i) for i, kept, left, reason in s.execute(select(UnionRow.id, UnionRow.kept, UnionRow.gone,
                                                                       UnionRow.reason))
-                if _names_in(" · ".join((kept or "", left or "", reason or "")), wanted)]
+                if names_in(" · ".join((kept or "", left or "", reason or "")), wanted)]
         return n + (int(s.execute(delete(UnionRow).where(UnionRow.id.in_(gone))).rowcount or 0) if gone else 0)
 
     def _prune_org(self, s: Session, org: int) -> int:
@@ -1343,74 +1332,6 @@ class _People:
                     or (a in self.told_only and pb and not pa) or (b in self.told_only and pa and not pb))
 
 
-def _rule_pairs(rows: Sequence[Any], informal: set[int]) -> dict[tuple[int, int], str]:
-    """Les paires que le nom seul rapproche (``Suggestion.reason``) : le même nom complet, une initiale et le même nom,
-    et, plus faible, un prénom seul (d'une fiche qu'on nomme ainsi) et le prénom d'un nom complet."""
-    full: dict[str, list[int]] = {}
-    spelled: dict[tuple[str, str], list[int]] = {}
-    initials: dict[tuple[str, str], list[int]] = {}
-    #: un prénom seul (des fiches qu'on nomme ainsi) ; le prénom des noms complets
-    alone: dict[str, list[int]] = {}
-    firsts: dict[str, list[int]] = {}
-    for r in rows:
-        words = name_words(r.name)
-        if not _lettered(r.name) or "@" in r.name:
-            continue
-        if len(words) == 1:
-            if int(r.id) in informal and len(words[0]) >= FIRST_NAME_MIN:
-                alone.setdefault(words[0], []).append(int(r.id))
-            continue
-        if len(words) < 2:
-            continue
-        if len(words[0]) >= FIRST_NAME_MIN:
-            firsts.setdefault(words[0], []).append(int(r.id))
-        short = [w for w in words if len(w) == 1]
-        if short:  # « G. Rousseau » : une initiale et un nom
-            if len(words) == 2 and len(short) == 1:
-                initials.setdefault((short[0], next(w for w in words if len(w) > 1)), []).append(int(r.id))
-            continue
-        full.setdefault(" ".join(sorted(words)), []).append(int(r.id))
-        for i, w in enumerate(words):
-            for j, v in enumerate(words):
-                if i != j:
-                    spelled.setdefault((w[0], v), []).append(int(r.id))
-    pairs: dict[tuple[int, int], str] = {}
-    for ids in full.values():
-        if 1 < len(ids) <= SAME_NAME_MAX:
-            for x, a in enumerate(ids):
-                for b in ids[x + 1:]:
-                    pairs.setdefault((min(a, b), max(a, b)), "same_name")
-    for key, ids in initials.items():
-        whole = sorted(set(spelled.get(key, ())))
-        if len(whole) > SAME_NAME_MAX:
-            continue
-        for a in ids:
-            for b in whole:
-                if a != b:
-                    pairs.setdefault((min(a, b), max(a, b)), "initial")
-    for word, ids in alone.items():  # plus faible : le même prénom, d'un côté sans nom de famille
-        others = sorted({*ids, *firsts.get(word, ())})
-        if len(others) > SAME_NAME_MAX:
-            continue
-        for a in ids:
-            for b in others:
-                if a != b:
-                    pairs.setdefault((min(a, b), max(a, b)), "first_name")
-    return pairs
-
-
-#: les mots d'un nom comparés par le juge : ses lettres et ses chiffres, repliés — un trait d'union, une parenthèse,
-#: un crochet séparent (« MASSOL-EXT » : ``massol``, ``ext``)
-_TOKENS = re.compile(r"[a-z0-9]+")
-
-
-def name_tokens(name: str) -> list[str]:
-    """Les mots d'un nom tels que le juge les rapproche (ADR 0304) : repliés, séparés par tout ce qui n'est ni lettre
-    ni chiffre, ceux qui ont une lettre — sans rien retirer d'autre : c'est leur rareté dans l'annuaire qui dit s'ils
-    comptent (« ext », que portent tous les prestataires, ne rapproche personne)."""
-    return [w for w in _TOKENS.findall(fold_text(name or "")) if any(c.isalpha() for c in w)]
-
-
 def _chunks(values: Sequence[int], size: int = 500) -> Iterable[list[int]]:
     for i in range(0, len(values), size):
         yield list(values[i:i + size])
@@ -1434,70 +1355,10 @@ class _Seen:
         self.apps: dict[str, int] = {}
 
 
-def _name_of(kind: str, idents: Sequence[tuple[str, str, bool]], names: Sequence[tuple[str, bool, str]]) -> str:
-    """Le nom d'un contact (``names`` : sorte de l'identifiant, générique, nom — le plus récent d'abord) : une
-    organisation, son nom d'entreprise le plus récent, sinon son domaine ; une personne, le plus récent qu'on lui voit
-    (ceux d'une adresse générique ne comptent pas), sinon son premier identifiant."""
-    if kind == ORG:
-        found = next((n for k, _, n in names if n and k == COMPANY), "")
-        return found or next((v for k, v, _ in idents if k == DOMAIN), idents[0][1] if idents else "")
-    found = next((n for _, generic, n in names if n and not generic and _lettered(n)), "") or \
-        next((n for _, generic, n in names if n and not generic), "")
-    # sans nom vu : un identifiant qui se lit (une clé du téléphone, un nom raconté, non), sinon le premier
-    return found or next((v for k, v, g in idents if not g and k not in OPAQUE_KINDS),
-                         next((v for k, v, g in idents if not g), idents[0][1] if idents else ""))
-
-
 def _note(r: NoteRow) -> Note:
     return Note(int(r.id), int(r.contact), r.source, r.account, r.text or "", r.kind or "other",
                 int(r.confidence or 0) / 100, r.ref or "", r.place or "", int(r.said_at or 0), int(r.at or 0),
                 r.call_id or "")
 
 
-def _lettered(name: str) -> bool:
-    """Un nom qui a au moins une lettre (pas un numéro donné comme nom)."""
-    return any(c.isalpha() for c in name)
-
-
-#: les mots d'un texte, avec leur casse (un nom d'un seul mot ne se reconnaît qu'écrit avec sa majuscule)
-_TEXT_WORDS = re.compile(r"[^\W\d_]+")
-
-
-def _name_index(names: Iterable[str]) -> dict[str, list[tuple[str, ...]]]:
-    """Des noms à reconnaître dans un texte, par leur premier mot replié : un nom de plusieurs mots, ou d'un seul mot
-    d'au moins ``FIRST_NAME_MIN`` lettres (ni un numéro, ni une adresse)."""
-    out: dict[str, list[tuple[str, ...]]] = {}
-    for name in names:
-        if not name or "@" in name or not _lettered(name):
-            continue
-        words = tuple(_TEXT_WORDS.findall(fold_text(name)))
-        if not words or (len(words) == 1 and len(words[0]) < FIRST_NAME_MIN):
-            continue
-        out.setdefault(words[0], [])
-        if words not in out[words[0]]:
-            out[words[0]].append(words)
-    return out
-
-
-def _names_in(text: str, wanted: Mapping[str, Sequence[tuple[str, ...]]]) -> bool:
-    """Ce texte nomme-t-il l'un de ces noms (``_name_index``) : ses mots à la suite ; un nom d'un seul mot, écrit avec
-    sa majuscule (« il gère le support » ne nomme pas « Support »)."""
-    raw = _TEXT_WORDS.findall(text or "")
-    words = [fold_text(w) for w in raw]
-    for i, w in enumerate(words):
-        for name in wanted.get(w, ()):
-            if len(name) == 1:
-                if raw[i][:1].isupper():
-                    return True
-            elif tuple(words[i:i + len(name)]) == name:
-                return True
-    return False
-
-
-def _role_of(roles: Sequence[tuple[str, str]]) -> tuple[str, str]:
-    """Le poste et le service d'un contact : chacun le plus récent qu'on lui voit (``roles`` : le plus récent
-    d'abord)."""
-    return (next((t for t, _ in roles if t), ""), next((d for _, d in roles if d), ""))
-
-
-__all__ = ["NAME_MAX", "ContactsStore", "clean_name", "clean_role", "name_words"]
+__all__ = ["ContactsStore"]
