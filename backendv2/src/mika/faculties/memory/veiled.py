@@ -1,6 +1,7 @@
 """Raconter sans nommer (ADR 0091) : ce que le rappel ne peut pas lui montrer nommément, elle peut parfois le raconter
-sans dire de qui il s'agit — à qui n'a aucun lien connu avec la personne (``links``), gradué par ce qu'elle sait de qui
-l'écoute (``Audience.veiled_level``), en réponse seulement, jamais à la place de ce qui peut se dire nommé.
+sans dire de qui il s'agit — à qui n'a aucun lien connu avec la personne (``veiled_links``), gradué par ce qu'elle
+sait de qui l'écoute (``Audience.veiled_level``), en réponse seulement, jamais à la place de ce qui peut se dire
+nommé.
 
 Le rappel lui passe ses candidats (ce que la question réveille, ou, quand on lui demande des nouvelles, ce qui est
 récent) ; le verdict est ``memory.retelling`` ; le budget : au plus ``veiled_max_shown`` par réponse, et
@@ -26,10 +27,10 @@ from mika.contracts import memory as c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
-from mika.faculties.memory.links import handles_of, links_of, written
 from mika.faculties.memory.retelling import FRAMING, retellable
 from mika.faculties.memory.salience import Item
 from mika.faculties.memory.tables import about, batches, handle_key, items, told_lines
+from mika.faculties.memory.veiled_links import handles_of, links_of, written
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame

@@ -23,12 +23,12 @@ from mika.faculties.memory.conversation import Conversation, Line, Speaker, rend
 from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryParams, MemoryState
 from mika.faculties.memory.kept import _veiled as veiled_version
-from mika.faculties.memory.links import links_of
 from mika.faculties.memory.projections import Items, Told
 from mika.faculties.memory.recall import _recall
 from mika.faculties.memory.retelling import retellable, veiled_refusal
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.veiled import _veiled, asks_news, echoed
+from mika.faculties.memory.veiled_links import links_of
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.frame import Audience
