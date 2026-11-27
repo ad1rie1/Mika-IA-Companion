@@ -48,6 +48,8 @@ SENSES = Domain(
         "sections": {"headlines": "Les titres de ses flux", "views": "Ce que voit la caméra"},
         "reasons": {"rss_for": "Partager un titre qui lui a fait penser à cette personne"},
         "signals": {"entry": "un article", "view": "ce que voit la caméra"},
+        # la source d'un de leurs signaux, en mots : un flux (``plugins/rss``), un appareil (``port.py``, ``sense``)
+        "sources": {"rss": "le flux « {} »", "appareil": "l'appareil « {} »"},
         "processes": {"rss.poll": "Relever les flux", "camera.look": "Regarder par la caméra"},
         "events": {"rss.read": "Un article lu", "rss.noticed": "Un article remarqué",
                    "rss.thought_of": "Un article qui lui a fait penser à quelqu'un",

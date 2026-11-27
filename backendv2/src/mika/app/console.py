@@ -392,6 +392,11 @@ SIGNAL_LABELS: dict[str, str] = _named("signals", {
     "bond_shifted": "un lien qui change", "one_sided": "un lien à sens unique", "signal": "un signal",
 })
 
+#: La source d'un signal qui nomme ce qui la suit (« rss:<flux> », « forge:<app> », « appareil:<appareil> »), en mots
+#: (Ses pensées › Ce qu'elle remarque) : par le début de la source, ce qu'elle en dit, « {} » à la place de ce qui suit.
+#: Chacune est à qui la pose, et sa fiche la dit (``labels["sources"]``) : le cadre n'en pose aucune.
+SOURCE_LABELS: dict[str, str] = _named("sources", {})
+
 #: Le nom court de chaque capacité : ce qu'une ligne ou une puce de « À valider » et l'historique en disent, sans couper
 #: sa phrase. Celle-ci reste sa description, au survol et dans l'en-tête de la demande ouverte.
 CAPABILITY_LABELS: dict[str, str] = _named("capabilities", {})

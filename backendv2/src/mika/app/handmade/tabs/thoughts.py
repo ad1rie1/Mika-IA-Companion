@@ -30,7 +30,7 @@ from typing import Any
 
 from markupsafe import Markup
 
-from mika.app.console import FACULTY_LABELS, SIGNAL_LABELS
+from mika.app.console import FACULTY_LABELS, SIGNAL_LABELS, SOURCE_LABELS
 from mika.app.handmade import date_fr
 from mika.app.handmade.lists import listing
 from mika.app.handmade.tabs import (
@@ -113,9 +113,6 @@ def pensees(got: Got) -> Markup | None:
 
 # ── Ce qu'elle remarque ───────────────────────────────────────────────────
 
-#: une source qui nomme ce qui la suit (« rss:<flux> », « forge:<app> », « appareil:<appareil> », celle de
-#: ``MindPort.sense``) : ce qu'elle en dit
-SOURCE_PREFIXES = {"rss": "le flux « {} »", "forge": "son app « {} »", "appareil": "l'appareil « {} »"}
 #: la sorte d'un signal, en mots (celles d'une app sont libres : elles restent telles quelles) : celles du cadre
 #: et celles que chaque domaine dit dans sa fiche (``app/console.py::SIGNAL_LABELS``)
 KINDS_FR = SIGNAL_LABELS
@@ -123,10 +120,12 @@ KINDS_FR = SIGNAL_LABELS
 
 def source_name(key: str) -> str:
     """Le nom d'une source de signaux : « email » → « Courrier », « rss:lemonde » → « le flux « lemonde » » ; une
-    source inconnue reste telle quelle."""
+    source inconnue reste telle quelle. Une source qui nomme ce qui la suit (« rss:<flux> », « forge:<app> »,
+    « appareil:<appareil> ») se dit par les mots que la fiche du domaine qui la pose donne à son début
+    (``app/console.py::SOURCE_LABELS``)."""
     head, sep, tail = key.partition(":")
-    if sep and tail and head in SOURCE_PREFIXES:
-        return SOURCE_PREFIXES[head].format(tail)
+    if sep and tail and head in SOURCE_LABELS:
+        return SOURCE_LABELS[head].format(tail)
     return FACULTY_LABELS.get(key, key)
 
 

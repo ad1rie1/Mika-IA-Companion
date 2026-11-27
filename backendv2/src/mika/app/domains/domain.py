@@ -478,8 +478,10 @@ class Domain:
     #: ``sections``, ``processes``, ``events``… ; ``about`` : ce que fait chaque famille de ses outils, dit à
     #: l'opératrice dans Réglages › Droits ; ``parameters`` : la famille où se rangent les paramètres de chacune de ses
     #: facultés ou de ses plugins, dans Réglages › Paramètres avancés — une de ``app/console.py::PARAM_FAMILY_NAMES``,
-    #: sa place dans la famille : ``PARAM_ORDER``, sinon après les autres ; sans famille, « Autres ») puis par clé ; la
-    #: carte de la console les réunit (``app/console.py``), et un nom dit deux fois y est refusé
+    #: sa place dans la famille : ``PARAM_ORDER``, sinon après les autres ; sans famille, « Autres » ; ``sources`` : la
+    #: source d'un signal qu'il pose, par son début — « rss » dans « rss:<flux> » —, en mots, « {} » à la place de ce
+    #: qui suit, dans Ses pensées › Ce qu'elle remarque) puis par clé ; la carte de la console les réunit
+    #: (``app/console.py``), et un nom dit deux fois y est refusé
     labels: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 

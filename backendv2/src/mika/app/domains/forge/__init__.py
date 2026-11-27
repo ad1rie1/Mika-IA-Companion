@@ -63,6 +63,8 @@ FORGE = Domain(
         "bundles": {"forge": "La Forge (écrire ses apps)", "forge_signals": "Ce que ses apps lui signalent",
                     "forge_apps.*": "Son app « {} »"},
         "capabilities": {"forge.call": "Outil d'app", "forge.install": "Version d'app"},
+        # la source d'un signal d'une app (``plugins/forge``), en mots
+        "sources": {"forge": "son app « {} »"},
         "enrichers": {"apps": "Ses apps forgées", "calls": "Ses demandes à ses apps",
                       "signals": "Ce qu'une app a mis dans sa file",
                       "news": "Ce que ses apps ont trouvé pour la personne"},
