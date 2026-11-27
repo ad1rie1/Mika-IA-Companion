@@ -10,11 +10,14 @@ part. Ce que la conversation de relecture en fait de différent tient à ``Conve
 - ni note sur elle, ni promesse, ni ce qui n'appartiendrait qu'à elle et quelqu'un ;
 - de ce qu'elle sait déjà, seul l'anodin est montré (comme pour un salon : ``room`` est posé).
 
-Au plus quelques conversations par passage. Une panne du fournisseur est retentée plus tard, trois fois au plus ;
-si elle dure, si la réponse est illisible, ou si une partie de ce qu'elle en tire est invalide (ce qui est valide est
-gardé), la conversation va dans la file durable des reprises, comme une des siennes (``memory.extraction_deferred``,
-``source`` « relayed », ADR 0224) : visible et reprenable dans Mémoire › Consolidation, reprise ici — une par
-passage, de plus en plus espacée —, et ses messages ne l'attendent plus (``memory.relayed_read``).
+Au plus quelques conversations par passage. Une panne du fournisseur est retentée plus tard, au même délai et autant
+de fois que pour ses conversations (les réglages « Délai avant de réessayer » et « Essais avant de réduire les lots »,
+``retry_us`` et ``max_attempts``) ; si elle dure, si la réponse est illisible, ou si une partie de ce qu'elle en tire
+est invalide (ce qui est valide est gardé), la conversation va dans la file durable des reprises, comme une des siennes
+(``consolidation.deferral`` : ``memory.extraction_deferred``, ``source`` « relayed », ADR 0224) : visible et
+reprenable dans Mémoire › Consolidation, reprise ici — une par passage, de plus en plus espacée —, et ses messages ne
+l'attendent plus (``memory.relayed_read``). Une conversation reçue ailleurs garde la taille de son lot
+(``LINES_MAX``) : ses reprises ne la réduisent pas.
 """
 
 from __future__ import annotations
@@ -38,7 +41,6 @@ from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, par
 from mika.faculties.memory.kept import kept_from
 from mika.faculties.memory.shown import extract_request, shown_of
 from mika.faculties.memory.speakers import People
-from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -52,11 +54,6 @@ log = logging.getLogger(__name__)
 
 #: une conversation relue d'un coup, au plus (la suite attend le passage d'après)
 LINES_MAX = 60
-#: une panne du fournisseur est retentée autant de fois (le compte est celui du processus) ; si elle dure, la
-#: conversation va dans la file des reprises (ADR 0224)
-ATTEMPTS_MAX = 3
-#: après une panne, pas de nouvel essai avant
-RETRY_US = 10 * MINUTE
 NAME_MAX = 60
 
 
@@ -221,10 +218,12 @@ class Relay:
                 continue
             got = await self._read(ctx, frame, state, store, vectors, directory, conv, her, system, p, n)
             if got.failure == c.PROVIDER_ERROR:
+                # retentée au délai et autant de fois que ses conversations (``retry_us``, ``max_attempts``) ; le
+                # compte est celui du processus
                 tries = self.failures.get(seqs[0], 0) + 1
                 self.failures[seqs[0]] = tries
-                if tries < ATTEMPTS_MAX:
-                    self.retry_at = frame.now + RETRY_US * 2 ** (tries - 1)
+                if tries < p.max_attempts:
+                    self.retry_at = frame.now + p.retry_us * 2 ** (tries - 1)
                     continue
                 log.warning("relecture d'une conversation reçue ailleurs : %d pannes, mise en file de reprise", tries)
             self.failures.pop(seqs[0], None)

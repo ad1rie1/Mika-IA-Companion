@@ -81,12 +81,14 @@ class MemoryParams(BaseModel):
     retry_us: Annotated[int, Knob(
         label="Délai avant de réessayer", group="Consolidation", lo=MINUTE, hi=6 * HOUR,
         help="Après un appel d'extraction qui échoue (panne, réponse illisible), pas de nouvel essai avant ce "
-             "délai : aucune rafale d'appels quand le fournisseur ne répond pas.")] = 10 * MINUTE
+             "délai : aucune rafale d'appels quand le fournisseur ne répond pas. Vaut pour la relecture de ses "
+             "conversations et pour celle des messages reçus sur un téléphone.")] = 10 * MINUTE
     max_attempts: Annotated[int, Knob(
         label="Essais avant de réduire les lots", group="Consolidation", lo=1, hi=10,
         help="Après autant de réponses illisibles, les conversations sont relues en lots plus petits. Une panne "
-             "du fournisseur fait attendre la fenêtre au plus autant de passages, puis la met en file. Les passages "
-             "en échec restent dans une file durable, sans bloquer les conversations suivantes.")] = 3
+             "du fournisseur fait attendre la fenêtre au plus autant de passages, puis la met en file ; de même "
+             "pour les messages reçus sur un téléphone, dont les lots, eux, ne se réduisent pas. Les passages en "
+             "échec restent dans une file durable, sans bloquer les conversations suivantes.")] = 3
     dedup_similarity: Annotated[float, Knob(
         label="Seuil de doublon", group="Consolidation", lo=0.5, hi=1.0, step=0.01,
         help="Seuil pour rechercher un doublon candidat (similarité centrée : 0 sans rapport, 1 identique). "

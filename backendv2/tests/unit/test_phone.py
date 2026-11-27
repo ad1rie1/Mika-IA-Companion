@@ -14,7 +14,8 @@
 - une relecture qu'une panne qui dure, une réponse illisible ou une sortie en partie invalide empêche attend dans la
   file des reprises, comme une des siennes (ADR 0224) : sa source dit d'où viennent ses messages, la mémoire du
   téléphone la reprend (d'elle-même, ou à la demande d'un opérateur), ce qui était valide est gardé, et l'oubli d'un
-  expéditeur l'efface.
+  expéditeur l'efface ; une panne se retente, et la conversation va dans la file, selon les mêmes réglages que ses
+  conversations (« Délai avant de réessayer », « Essais avant de réduire les lots »).
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from mika.contracts import phone as c
 from mika.contracts import runtime as rt
 from mika.faculties.identity import audience_for
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.relayed import ATTEMPTS_MAX
+from mika.faculties.memory.faculty import MemoryParams, params
 from mika.kernel.clock import HOUR, MINUTE
 from mika.plugins.phone import app_name
 from mika.plugins.phone import inspect as phone_inspect
@@ -337,6 +338,22 @@ class Down(Model):
         return super().__call__(req)
 
 
+class Noted(Down):
+    """``Down``, qui note l'heure de chaque relecture (``clock`` : l'horloge du noyau, que le scénario lui donne)."""
+
+    def __init__(self, extract=None, down: int = 0) -> None:
+        super().__init__(extract, down)
+        self.clock = None
+        self.at: list[int] = []
+
+    def __call__(self, req):
+        if req.role == "extract":
+            self.at.append(int(self.clock.now()))
+        return super().__call__(req)
+
+
+#: les pannes de suite avant la file des reprises, par défaut (« Essais avant de réduire les lots »)
+ATTEMPTS_MAX = MemoryParams().max_attempts
 QUEUE = ("key", "source", "messages", "about", "attempts", "status", "reason")
 
 
@@ -380,6 +397,45 @@ def test_a_reading_the_provider_keeps_failing_waits_in_the_queue_then_is_read(tm
     assert b.data.text.text == "Léa déménage à Lyon en novembre" and lea in b.data.about
     assert [(d.data.source, d.data.status) for d in deferred] == [(mc.FROM_RELAYED, "queued"),
                                                                  (mc.FROM_RELAYED, "resolved")]
+
+
+def test_the_retry_settings_reach_the_phone(tmp_path):
+    """« Délai avant de réessayer » (``retry_us``) et « Essais avant de réduire les lots » (``max_attempts``), réglés
+    autrement que par défaut, valent pour ce qu'on lui montre d'un téléphone comme pour ses conversations : une panne
+    est retentée au délai réglé, la conversation va dans la file des reprises après le nombre d'essais réglé, et sa
+    reprise vient au délai réglé."""
+    retry, tries = 4 * MINUTE, 2
+    assert retry != MemoryParams().retry_us and tries != ATTEMPTS_MAX
+    model = Noted(lea_moves, down=tries)
+
+    async def scenario(kernel, desk, phone, model):
+        model.clock = kernel.mind.clock
+        frame = kernel.mind.frame()
+        settings = params(frame.env.params_of("memory", frame.root))
+        await desk.inbox("user_1", {"messages": [message(1, "Je déménage à Lyon en novembre !")]})
+        await sleep(20 * MINUTE + retry + MINUTE)  # posée à 20 min : en panne à 20 min, puis à 24, et dans la file
+        waiting = (queue(kernel), journal(kernel, mc.EXTRACTION_DEFERRED), len(extracts(model)))
+        await sleep(retry)  # sa reprise, 4 min après sa mise en file
+        return (settings, waiting, queue(kernel), journal(kernel, mc.EXTRACTION_DEFERRED),
+                journal(kernel, mc.BELIEVED), list(model.at))
+
+    settings, (rows, queued, tried), after, deferred, believed, at = live(
+        tmp_path, scenario, model=model, overrides={"memory": {"retry_us": retry, "max_attempts": tries}})
+    assert (settings.retry_us, settings.max_attempts) == (retry, tries)  # les réglages sont pris
+    # dans la file après le nombre d'essais réglé : deux pannes, pas trois
+    assert tried == tries
+    assert [(r["source"], r["status"], r["reason"], r["attempts"]) for r in rows] == [
+        (mc.FROM_RELAYED, "queued", "provider_error", 1)]
+    # chaque essai au délai réglé : le second après la première panne, la reprise après la mise en file
+    assert len(at) == tries + 1 and retry - MINUTE < at[1] - at[0] < retry + MINUTE
+    assert [d.data.status for d in queued] == ["queued"]
+    assert retry - MINUTE < queued[0].data.retry_at - queued[0].at <= retry
+    assert retry - MINUTE < at[2] - at[1] < retry + MINUTE
+    # relue, elle est faite
+    assert after == [] and [(d.data.source, d.data.status) for d in deferred] == [
+        (mc.FROM_RELAYED, "queued"), (mc.FROM_RELAYED, "resolved")]
+    [b] = believed
+    assert b.data.text.text == "Léa déménage à Lyon en novembre"
 
 
 def lea_moves_and_a_broken_belief(prompt: str) -> dict:
