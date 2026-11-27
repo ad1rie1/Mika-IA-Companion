@@ -518,7 +518,7 @@ def scored(near: dict[int, float], wider: dict[int, float], texts: Mapping[int, 
     return out
 
 
-def kept(sims: dict[int, float], p: MemoryParams) -> dict[int, float]:
+def above_floor(sims: dict[int, float], p: MemoryParams) -> dict[int, float]:
     """Le seuil absolu, et l'écart au meilleur : le rappel suit le sujet."""
     if not sims:
         return {}
@@ -635,7 +635,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     # l'écart au meilleur se mesure parmi ce qui peut se dire ici (et à part, parmi ce qui se tait) : un secret
     # d'un autre, tout proche de la question, ne relève pas le seuil au-dessus de ce qu'elle peut répondre
     sayable = {i: v for i, v in sims.items() if i in verdicts and verdicts[i].ok}
-    candidates = {**kept({i: v for i, v in sims.items() if i not in sayable}, p), **kept(sayable, p)}
+    candidates = {**above_floor({i: v for i, v in sims.items() if i not in sayable}, p), **above_floor(sayable, p)}
     for item in about_named(frame, store, named, p):
         found.setdefault(item.id, item)
         candidates[item.id] = max(candidates.get(item.id, 0.0), p.recall_floor)
@@ -867,7 +867,7 @@ async def _exchanges_for(frame: Frame, store: Any, vectors: Any, query: str, con
     hits = tuple(sorted({*near, *wider}))
     found = exchanges(store.query_mind(select(*columns).where(t.c.id.in_(hits), *scope).order_by(t.c.id)))
     ok = {e.id for e in found}
-    sims = kept(scored({k: v for k, v in near.items() if k in ok}, {k: v for k, v in wider.items() if k in ok},
+    sims = above_floor(scored({k: v for k, v in near.items() if k in ok}, {k: v for k, v in wider.items() if k in ok},
                        {e.id: f"{e.user_text}\n{e.reply_text}" for e in found}, query, context), p)
     found = [e for e in found if e.id in sims]
     # le plus proche d'abord ; entre deux fois le même échange, le plus récent

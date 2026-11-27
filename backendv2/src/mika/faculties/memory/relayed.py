@@ -118,7 +118,7 @@ def conversation(frame: Frame, recipient: str, thread: str, messages: list[dict[
 
 
 @dataclass(frozen=True, slots=True)
-class Reading:
+class RelayedReading:
     """Une relecture : ce que le code en garde, l'appel, le modèle. ``failure`` : pourquoi elle va dans la file des
     reprises (le ``failure_code`` de ``ExtractionDeferred`` ; vide, elle est menée à bout) ; ``issues`` et ``output``,
     ce qui n'allait pas et la réponse brute, son détail (le format de la consolidation, que la console lit)."""
@@ -131,7 +131,7 @@ class Reading:
     output: str = ""
 
 
-def _queued(conv: Conversation, seqs: tuple[int, ...], attempt: int, got: Reading, frame: Frame,
+def _queued(conv: Conversation, seqs: tuple[int, ...], attempt: int, got: RelayedReading, frame: Frame,
             p: MemoryParams) -> Draft[c.ExtractionDeferred]:
     """La conversation dans la file des reprises, comme une des siennes (``consolidation.deferral``, ADR 0224) : ses
     messages sont le lot entier, ce qui en est oublié compris ; ses personnes (la personne qui l'a reçue, les clés
@@ -263,7 +263,7 @@ class Relay:
     @staticmethod
     async def _read(ctx: Any, frame: Frame, state: MemoryState, store: Any, vectors: Any,
                     directory: dict[str, tuple[str, ...]], conv: Conversation, her: str, system: str, p: Any,
-                    n: int) -> Reading:
+                    n: int) -> RelayedReading:
         """Une conversation relue : ce que le code en garde, l'appel, le modèle, et ce qui l'envoie dans la file des
         reprises — une panne, une réponse illisible, trop longue pour le contexte, une sortie en partie invalide
         (ce qui en est valide est gardé)."""
@@ -276,16 +276,16 @@ class Relay:
             response = await ctx.llm.call(request)
         except PromptBudgetError:
             log.warning("relecture d'une conversation reçue ailleurs : trop longue pour le contexte")
-            return Reading(failure=c.BUDGET_EXCEEDED, issues=("PromptBudgetError",))
+            return RelayedReading(failure=c.BUDGET_EXCEEDED, issues=("PromptBudgetError",))
         except Exception as exc:  # noqa: BLE001 — une panne : retentée, puis mise en file de reprise
             log.warning("relecture d'une conversation reçue ailleurs : %s", type(exc).__name__)
-            return Reading(failure=c.PROVIDER_ERROR, issues=(type(exc).__name__,))
+            return RelayedReading(failure=c.PROVIDER_ERROR, issues=(type(exc).__name__,))
         raw = json.dumps([dict(call.args) for call in response.tool_calls], ensure_ascii=False) \
             if response.tool_calls else response.text
         extraction = x.parse(response)
         if extraction is None:
             log.warning("relecture d'une conversation reçue ailleurs : réponse illisible")
-            return Reading(call_id=request.call_id, model=response.model, failure=c.INVALID_OUTPUT,
+            return RelayedReading(call_id=request.call_id, model=response.model, failure=c.INVALID_OUTPUT,
                            issues=(c.INVALID_OUTPUT,), output=raw)
         kept = await kept_from(extraction, frame, state, store, conv, people, shown.shrunk(times), vectors, p,
                                request.call_id)
@@ -293,9 +293,9 @@ class Relay:
             # leur nombre seulement : leurs textes sont dans le détail de l'entrée, qui s'oublie
             log.warning("relecture d'une conversation reçue ailleurs : %d éléments invalides écartés",
                         len(extraction.issues))
-            return Reading(tuple(kept), request.call_id, response.model, c.INVALID_ITEMS, tuple(extraction.issues),
+            return RelayedReading(tuple(kept), request.call_id, response.model, c.INVALID_ITEMS, tuple(extraction.issues),
                            raw)
-        return Reading(tuple(kept), request.call_id, response.model)
+        return RelayedReading(tuple(kept), request.call_id, response.model)
 
 
-__all__ = ["Reading", "Relay", "conversation", "gather"]
+__all__ = ["RelayedReading", "Relay", "conversation", "gather"]

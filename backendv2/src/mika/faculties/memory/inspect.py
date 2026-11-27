@@ -142,7 +142,7 @@ def _table_exists(store: Any) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class Kept:
+class KeptLine:
     """Un élément retenu, avec ce que ``Item`` ne garde pas (d'où il vient)."""
 
     item: Item
@@ -151,16 +151,16 @@ class Kept:
     life: c.LifeEvent | None = None
 
 
-def _kept(row: Sequence[Any]) -> Kept:
+def _kept(row: Sequence[Any]) -> KeptLine:
     d = dict(zip(ITEM_COLUMNS, row, strict=True))
     try:
         sources = tuple(int(x) for x in json.loads(d["sources"] or "[]"))
     except (ValueError, TypeError):
         sources = ()
-    return Kept(Item.of(d), sources, None if d["replaces"] is None else int(d["replaces"]))
+    return KeptLine(Item.of(d), sources, None if d["replaces"] is None else int(d["replaces"]))
 
 
-def _select(store: Any, where: Sequence[Any], limit: int, offset: int = 0) -> list[Kept]:
+def _select(store: Any, where: Sequence[Any], limit: int, offset: int = 0) -> list[KeptLine]:
     t = tb.items()
     rows = store.query_mind(select(*(t.c[n] for n in ITEM_COLUMNS)).where(*where).order_by(t.c.id.desc())
                             .limit(limit).offset(offset))
@@ -224,7 +224,7 @@ def _about(frame: Frame, about: tuple[str, ...], names: dict[str, str]) -> Cell:
 # ── Cellules communes ─────────────────────────────────────────────────────
 
 
-def _n(k: Kept) -> Ref:
+def _n(k: KeptLine) -> Ref:
     return Ref("event", str(k.item.id), f"#{k.item.id}")
 
 
@@ -257,7 +257,7 @@ def _meter(value: float | None) -> Cell:
     return None if value is None else Meter(value, pct_fr(value))
 
 
-def _detail(k: Kept, frame: Frame, names: dict[str, str]) -> tuple[Block, ...]:
+def _detail(k: KeptLine, frame: Frame, names: dict[str, str]) -> tuple[Block, ...]:
     item = k.item
     pairs: list[tuple[str, Cell]] = [("sorte", KIND_FR.get(item.kind, item.kind))]
     pairs += [("concerne", _person_ref(frame, a, names)) for a in item.about] or [("concerne", "personne")]
@@ -310,17 +310,17 @@ class Listing:
     nothing: str
     statuses: tuple[tuple[str, str], ...]
     columns: tuple[Column, ...]
-    cells: Callable[[Kept, Frame, dict[str, str], MemoryParams], tuple[Cell, ...]]
+    cells: Callable[[KeptLine, Frame, dict[str, str], MemoryParams], tuple[Cell, ...]]
 
 
-def _episode_memory(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
+def _episode_memory(k: KeptLine, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
     it = k.item
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it), _meter(it.importance),
             _meter(salience(it, frame.now, p)), emotion_cell(it.emotion) if it.emotion else None,
             _status(it, frame, p), When(it.born_at))
 
 
-def _belief(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
+def _belief(k: KeptLine, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
     it = k.item
     said = ORIGIN_FR.get(it.origin or "", it.origin or "—")
     if it.source:
@@ -331,7 +331,7 @@ def _belief(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tu
             _meter(it.importance), origin, _status(it, frame, p), When(it.born_at))
 
 
-def _event(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams,
+def _event(k: KeptLine, frame: Frame, names: dict[str, str], p: MemoryParams,
            s: MemoryState | None = None) -> tuple[Cell, ...]:
     """Un moment ; une date qui revient chaque année (la tranche le sait) se montre à sa prochaine occurrence."""
     it = k.item
@@ -359,7 +359,7 @@ def _outcome(ev: c.LifeEvent | None) -> Badge | None:
     return Badge(word, tone, key=ev.outcome)
 
 
-def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
+def _promise(k: KeptLine, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
     it = k.item
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it),
             When(it.due) if it.due else Text("sans échéance", kind="muted"), _status(it, frame, p),
@@ -403,7 +403,7 @@ def _events_of(s: MemoryState) -> Listing:
     return replace(EVENTS, cells=lambda k, frame, names, p: _event(k, frame, names, p, s))
 
 
-def _rows(listing: Listing, kept: Sequence[Kept], frame: Frame) -> tuple[Row, ...]:
+def _rows(listing: Listing, kept: Sequence[KeptLine], frame: Frame) -> tuple[Row, ...]:
     p = _p(frame)
     names = names_of(frame, {a for k in kept for a in (*k.item.about, *k.item.told_by, *k.item.heard_by)}
                      | {k.item.source for k in kept if k.item.source})

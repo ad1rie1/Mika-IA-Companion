@@ -28,7 +28,7 @@ from mika.faculties.memory.extraction import (
     kind_of_genre,
 )
 from mika.faculties.memory.faculty import MemoryParams
-from mika.faculties.memory.inspect import Kept, _detail
+from mika.faculties.memory.inspect import KeptLine, _detail
 from mika.faculties.memory.salience import Item, salience
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import ITEM_COLUMNS
@@ -149,7 +149,7 @@ def test_the_console_says_what_lasts():
     db.put(anecdote, 6)
 
     def shown(seq: int) -> str:
-        return dict(_detail(Kept(item(db, seq), (), None), FRAME, {})[1].pairs)["sur elle"]
+        return dict(_detail(KeptLine(item(db, seq), (), None), FRAME, {})[1].pairs)["sur elle"]
 
     assert "tient des mois" in shown(5) and "s'efface en quelques jours" in shown(6)
 

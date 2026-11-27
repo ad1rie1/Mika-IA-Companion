@@ -33,7 +33,7 @@ from mika.adapters.vectors import SqliteVectorIndex  # noqa: E402
 from mika.adapters.vectors.embedders import SentenceEmbedder  # noqa: E402
 from mika.contracts import memory as c  # noqa: E402
 from mika.faculties.memory.faculty import MemoryParams  # noqa: E402
-from mika.faculties.memory.recall import _merged, kept, scored, search  # noqa: E402
+from mika.faculties.memory.recall import _merged, above_floor, scored, search  # noqa: E402
 from mika.faculties.memory.salience import Item, dormant, rank  # noqa: E402
 from mika.ports.vectors import VectorItem  # noqa: E402
 from tests.fixtures.sqldb import SqlDB  # noqa: E402
@@ -170,7 +170,7 @@ async def recall(idx: SqliteVectorIndex, items: dict[int, Item], msg: Message, p
     near, wider = _merged(near, own_near), _merged(wider, own_wider)
     took = time.perf_counter() - t0
     sims = scored(near, wider, {i: items[i].text for i in {*near, *wider}}, msg.text, "")
-    candidates = kept(sims, p)
+    candidates = above_floor(sims, p)
     ranked = []
     for i, sim in candidates.items():
         it = items[i]
@@ -188,7 +188,7 @@ async def world_recall(idx: SqliteVectorIndex, items: dict[int, Item], msg: Mess
     t0 = time.perf_counter()
     near, wider = await search(idx, msg.text, "", p.recall_k)
     took = time.perf_counter() - t0
-    sims = kept(scored(near, wider, {i: items[i].text for i in {*near, *wider}}, msg.text, ""), p)
+    sims = above_floor(scored(near, wider, {i: items[i].text for i in {*near, *wider}}, msg.text, ""), p)
     ranked = sorted(((rank(items[i], s, NOW, p, interlocutor=None, mood_valence=0.0), i) for i, s in sims.items()),
                     key=lambda r: (-r[0], r[1]))
     return [i for _s, i in ranked[:quota]], took
