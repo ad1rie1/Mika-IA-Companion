@@ -9,9 +9,9 @@ fond de carte, les lieux, les fiches, les événements, les photos, les adresses
 part du direct (``live.py``), leur commande (``cli.py`` : ``mika carte``), leur part du port d'entrée (``port.py`` :
 la position que donne un téléphone et la case de la carte qui se précharge, les bulles de ses messages) et leur part
 de la console (``console/`` : leurs rubriques de Réglages › Carte et téléphone, l'onglet Voyages et l'onglet Sa
-position de la fiche d'une personne, le GPX d'un voyage). Leur dossier du dossier de données est ``cartes/``
-(``places``, ADR 0193 : ce qu'il garde, que la sauvegarde ne le prend pas, sauf ses compteurs du mois). Ils lisent
-ses sens : Sa position reprend les morceaux de Ses sens › Localisation.
+position de la fiche d'une personne, le GPX d'un voyage, et les morceaux des pages de la localisation, que Ses sens ›
+Localisation lit ici). Leur dossier du dossier de données est ``cartes/`` (``places``, ADR 0193 : ce qu'il garde, que
+la sauvegarde ne le prend pas, sauf ses compteurs du mois). Ils ne lisent aucun autre domaine.
 
 Restent au cadre : l'aperçu de la console (``app/preview/`` : les voyages de Béa), et, dans le même onglet de
 Réglages, les notifications du téléphone (``app/settings_sections/map_phone.py``) ; Ses sens › Localisation est
@@ -24,7 +24,6 @@ from mika.app.domains.domain import Domain, Place
 
 MAPS = Domain(
     "maps",
-    needs=("senses",),
     # jamais archivé : la carte de sa position (ADR 0193) — quelques Go qui se réextraient ; gardés quand même : les
     # compteurs des services de la carte (quelques Ko, R3-08) — ce qui empêche la facture de Google ; une machine neuve
     # ne repart pas d'un mois à zéro (``adapters/maps/quota.py::QUOTAS_FILE`` : une fiche n'importe pas d'adaptateur,

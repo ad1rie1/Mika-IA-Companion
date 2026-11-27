@@ -11,8 +11,8 @@ la personne de la fiche pour objet. Le GPX se sert ici (``gpx``, opérateurs seu
 Carte donne à la personne (``app/domains/maps/api.py::gpx_document``), dans la même borne, celle du compte de
 l'opérateur.
 
-**Sa position** (ADR 0119, 0123) : sa dernière position, téléphone par téléphone, et son journal — les mêmes
-morceaux que Ses sens › Localisation (``app/domains/senses/console/tabs.py``), restreints à cette personne.
+**Sa position** (ADR 0119, 0123) : sa dernière position, téléphone par téléphone, et son journal — les morceaux des
+pages de la localisation (``location.py``), que Ses sens › Localisation dessine aussi, restreints à cette personne.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from starlette.routing import Route
 from mika.adapters.web.gate import SlidingWindow
 from mika.app.domains.domain import PersonPart
 from mika.app.domains.maps.api import gpx_document, gpx_response
-from mika.app.domains.senses.console.tabs import fix_of, said_of, slice_of
+from mika.app.domains.maps.console.location import fix_of, said_of
 from mika.app.handmade import Look
 from mika.app.handmade.person.common import Who, state_slice
 from mika.app.me import ROUTES_BUSY, spend
@@ -138,7 +138,7 @@ def position_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, st
                  forms: Mapping[str, Any] | None = None) -> Markup | None:
     """La fiche d'une personne › Sa position : sa dernière position, téléphone par téléphone, et son journal."""
     look = Look.of(ui, DAY)
-    s = slice_of(look, "location")
+    s = state_slice(look, "location")
     if s is None:
         return None
     fixes = by_person(s).get(key, [])

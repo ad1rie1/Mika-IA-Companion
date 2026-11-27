@@ -1,6 +1,6 @@
 """La part du téléphone dans la fiche d'une personne (ADR 0310) : l'onglet Son téléphone (ADR 0120, 0123), ses
-conversations et les réponses qu'elle a proposées. Les mêmes morceaux que Ses sens › Messages du téléphone
-(``app/domains/senses/console/tabs.py``), restreints à cette personne.
+conversations et les réponses qu'elle a proposées. Les morceaux des pages du téléphone (``messages.py``), que Ses
+sens › Messages du téléphone dessine aussi, restreints à cette personne.
 """
 
 from __future__ import annotations
@@ -11,13 +11,9 @@ from typing import Any
 from markupsafe import Markup
 
 from mika.app.domains.domain import PersonPart
-from mika.app.domains.senses.console.tabs import (
-    conversation_of,
-    offers_of,
-    reader_of,
-    slice_of,
-)
+from mika.app.domains.phone.console.messages import conversation_of, offers_of, reader_of
 from mika.app.handmade import Look
+from mika.app.handmade.person.common import state_slice
 from mika.inspector.ui import UI, env
 from mika.kernel.clock import DAY
 from mika.plugins.phone.inspect import PER_THREAD, threads
@@ -27,7 +23,7 @@ def phone_tab(ui: UI, key: str, blocks: Sequence[Any], query: Mapping[str, str],
               forms: Mapping[str, Any] | None = None) -> Markup | None:
     """La fiche d'une personne › Son téléphone : ses conversations, les réponses qu'elle a proposées."""
     look = Look.of(ui, DAY)
-    s = slice_of(look, "phone")
+    s = state_slice(look, "phone")
     if s is None:
         return None
     convs = threads([m for m in s.messages.values() if m.person == key])

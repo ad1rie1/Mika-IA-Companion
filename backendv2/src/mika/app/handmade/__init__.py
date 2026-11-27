@@ -6,7 +6,9 @@ Une telle page croise les facultés là où une vue déclarée n'en montre qu'un
 instant, le journal, les textes et les séries de la journée, par un ``Look`` ; chacune de ses parties se lit à part
 (``read_parts``) — une lecture qui échoue tait sa carte, jamais la page. Elles partagent leurs gabarits
 (``inspector/templates/handmade/``) et leurs feuilles (``inspector/static/handmade/``, classes ``now-…``,
-``person-…``, ``hm-…``) : une même façon de dire une humeur, une jauge, une personne, un fil.
+``person-…``, ``hm-…``) : une même façon de dire une humeur, une jauge, une personne, un fil — et, dans les pages du
+téléphone et de la localisation que dessinent trois domaines, un instant et une personne (``moment_fr``,
+``person_link``).
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.inspect import Badge, Ref, Text, pct_fr
 from mika.runtime.boundary import Failed, call
 from mika.vocab import affect as A
-from mika.vocab.people import is_identifiable
+from mika.vocab.people import is_identifiable, is_internal
 
 #: l'adresse courte d'une personne : elle mène à sa fiche (``person/``)
 PERSON_BASE = f"{PREFIX}/personne"
@@ -212,6 +214,26 @@ class Look:
         if 1 < days < 7:
             return WEEKDAYS[local.weekday()] + hour
         return f"{local.day} {MONTHS[local.month - 1]}"
+
+
+# ── un instant et une personne, dans les pages du téléphone et de la localisation ──
+# Ses sens, la carte et le téléphone les dessinent chacun (ses onglets, ceux de la fiche d'une personne) : ce qu'ils
+# partagent sans lire ni le téléphone ni la localisation est ici, comme leurs morceaux de gabarit restent à
+# l'inspecteur (``handmade/sens/macros.html``)
+
+
+def moment_fr(look: Look, at: int) -> str:
+    """Quand : « aujourd'hui à 14:02 », « hier à 9:10 », sinon « mardi 14 oct. à 18:30 »."""
+    said = look.day(at)
+    return said if said.startswith(("aujourd'hui", "hier")) else f"{look.date(at)} à {look.hm(at)}"
+
+
+def person_link(look: Look, person: str) -> dict[str, str]:
+    """Une personne, son nom et sa fiche ; « personne », sans fiche, pour une clé vide ou qui n'est pas une personne
+    (``is_internal`` : sa tuyauterie)."""
+    if not person or is_internal(person):
+        return {"name": "personne", "href": ""}
+    return {"name": look.name(person), "href": look.href(person)}
 
 
 def read_parts(look: Look, parts: Sequence[tuple[str, Callable[[Look], Any]]], page: str) -> dict[str, Any]:
