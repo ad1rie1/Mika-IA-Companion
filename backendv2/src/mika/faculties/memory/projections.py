@@ -66,7 +66,6 @@ from mika.contracts import memory as c
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
-from mika.faculties.memory.extraction import IMPORTANCE
 from mika.faculties.memory.faculty import MEMORY
 from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.tables import (
@@ -491,7 +490,7 @@ class Items:
             if d.about_self and d.durable:
                 # une anecdote redite comme ce qui la définit le devient (ADR 0087)
                 sql.execute(update(t).where(t.c.id == d.item, t.c.about_self == 1).values(
-                    about_self=2, importance=greatest(t.c.importance, IMPORTANCE[3]),
+                    about_self=2, importance=greatest(t.c.importance, c.DEFINING_IMPORTANCE),
                     knowledge_kind=func.coalesce(d.knowledge_kind, t.c.knowledge_kind)))
             sql.execute(update(t).where(t.c.id == d.item).values(
                 touched_at=at, importance=least(1.0, t.c.importance + 0.05),

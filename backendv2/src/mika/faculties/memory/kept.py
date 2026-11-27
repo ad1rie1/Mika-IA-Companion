@@ -646,7 +646,7 @@ def _about_self(b: x.XSouvenir | x.XCroyance, store: Any, provenance: Provenance
                                  call_id=call_id)]
     return [c.BELIEVED.draft(
         text=Content.of(b.texte, level=sens), about=(), sensitivity=sens,
-        importance=x.IMPORTANCE[3 if durable else 1], confidence=confidence,
+        importance=c.DEFINING_IMPORTANCE if durable else x.IMPORTANCE[1], confidence=confidence,
         origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable,
         knowledge_kind=nature, secret=secret)]
 

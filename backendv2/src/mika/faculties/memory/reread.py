@@ -461,7 +461,7 @@ def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any, p: M
                            about_self=True)
         out.append(c.BELIEVED.draft(
             text=Content.of(a.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
-            importance=x.IMPORTANCE[3], confidence=x.born_confidence(0.9, c.OBSERVED, "opinion"), origin=c.OBSERVED,
+            importance=c.DEFINING_IMPORTANCE, confidence=x.born_confidence(0.9, c.OBSERVED, "opinion"), origin=c.OBSERVED,
             sources=tuple(by_n[n].seq for n in a.lectures if n in by_n)
             or tuple(read_item.seq for read_item in read_items),
             call_id=call_id, about_self=True, durable=True,

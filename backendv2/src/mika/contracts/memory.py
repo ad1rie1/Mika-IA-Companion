@@ -103,6 +103,10 @@ IMPORTANT_MOMENT = 0.7
 #: lourde** : ce jour-là, chaque année, quelque chose de grave la touche (``HARD_TIMES``) — ni fête, ni « comment ça
 #: s'est passé ? ».
 HEAVY_DATE = 0.9
+#: Ce qui la définit — ses goûts, ses avis, ce qu'elle dit d'elle et qui dure (``about_self`` 2, ADR 0087) — pèse au
+#: moins autant, qu'elle le dise d'abord, qu'elle se le forme en lisant ou qu'une anecdote redite le devienne (le 3 de
+#: l'échelle que lit la relecture, ``faculties.memory.extraction.IMPORTANCE``).
+DEFINING_IMPORTANCE = 0.7
 
 #: Raison de preuve d'initiative : tenir une promesse datée au moment dit (« je te demanderai jeudi soir comment
 #: ça s'est passé » : jeudi soir, elle le demande). C'est **dû** (``agency.OWED``), jamais une relance.
