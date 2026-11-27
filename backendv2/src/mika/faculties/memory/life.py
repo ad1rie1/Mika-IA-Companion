@@ -25,9 +25,16 @@ son occurrence de cette année : ses vœux de l'an dernier ne la reprennent pas.
 avec ce qu'elle en attendait et de qui elle l'apprend (ADR 0086) : la
 consolidation et la relecture de la nuit le disent pareil.
 
-Ses promesses — les tenir au moment dit, les laisser filer — sont dans ``promises.py`` ; ce qui dit que deux phrases
-parlent de la même chose à faire (``same_task``) ou du même jour (``same_day``) est ici, que les moments et les
-promesses partagent.
+**Le temps d'un moment.** Ce module dit aussi, pour tous ceux qui le lisent — le rappel et ses sections, ce que le
+code garde d'une relecture, les promesses —, depuis quand un moment passé peut être repris (``opens_at``), s'il peut
+encore l'être (``open_moment``), si deux instants tombent le même jour (``same_day``), si elles viennent d'en reparler
+ou si la personne vient de le dire fini (``followed_lately``, ``ended_lately``), s'il se passe aujourd'hui
+(``happens_today``) et quand il est, dit comme on le dit (``moment_when``). Le moment tel qu'il se présente à un
+instant — sa prochaine occurrence, sa fin — est dans ``faculty.py`` (``occurrence``, ``over``, ``events_at``,
+``day_of``), que lisent aussi les faits.
+
+Ses promesses — les tenir au moment dit, les laisser filer — sont dans ``promises.py``, qui lit d'ici ``same_task``
+(deux phrases qui parlent de la même chose à faire) et ``same_day``.
 """
 
 from __future__ import annotations
@@ -44,6 +51,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import likelihood as lk
+from mika.faculties.memory import timespan
 from mika.faculties.memory.faculty import (
     MEMORY,
     MemoryParams,
@@ -52,7 +60,8 @@ from mika.faculties.memory.faculty import (
     events_at,
     params,
 )
-from mika.kernel.clock import DAY
+from mika.faculties.memory.lines import when_words
+from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -63,6 +72,9 @@ from mika.vocab.words import fold, stems
 #: des vœux (replié, sans accents) : « joyeux anniv ! », « bon anniversaire », « félicitations », « tous mes vœux »
 _WISHES = re.compile(r"\b(?:joyeux|joyeuse|bon|bonne|happy)\s+(?:anniv\w*|fete|birthday|mariage|noel)\b|"
                      r"\bfelicit\w*|\b(?:tous\s+)?mes\s+(?:meilleurs\s+)?voeux\b|\bjoyeux\s+\d+\s+ans\b")
+#: un moment dont elles viennent de reparler (``moment_followed`` : en mots, pas seulement montré) reste sous ses
+#: yeux le temps de la conversation — sans la consigne de demander, c'est fait
+FOLLOWED_KEEP_US = 2 * HOUR
 #: les mots d'une tâche, de sa date, du rappel lui-même (des radicaux) : deux tâches ne se ressemblent pas pour
 #: avoir le même jour ou le même verbe
 _TASK_STEMS = frozenset({"rappel", "penser", "oublie", "noubli", "prendr", "lundi", "mardi", "mercre", "jeudi",
@@ -121,6 +133,28 @@ def open_moment(ev: c.LifeEvent, now: int, p: MemoryParams, opens: int | None = 
 def same_day(frame: Frame, a: int | None, b: int | None) -> bool:
     """Le même jour (heure locale) — ou l'un des deux sans date : rien ne les distingue."""
     return a is None or b is None or frame.local(a).date() == frame.local(b).date()
+
+
+def followed_lately(ev: c.LifeEvent, now: int) -> bool:
+    """Elles viennent d'en reparler (en mots) : le moment reste sous ses yeux, sans la consigne de demander."""
+    return bool(ev.followed_at) and now - ev.followed_at < FOLLOWED_KEEP_US
+
+
+def ended_lately(ev: c.LifeEvent, now: int) -> bool:
+    """La personne vient de dire que cette situation est finie : elle reste sous ses yeux le temps de la
+    conversation, au passé — plus jamais « en ce moment »."""
+    return bool(ev.ended_at) and now - ev.ended_at < FOLLOWED_KEEP_US
+
+
+def happens_today(ev: c.LifeEvent, frame: Frame) -> bool:
+    return frame.local(ev.when).date() == frame.local().date()
+
+
+def moment_when(ev: c.LifeEvent, frame: Frame) -> str:
+    """Quand, comme on le dit : une période (« en novembre », ADR 0084), sinon le jour (« jeudi », « demain »)."""
+    if ev.vague:
+        return timespan.period_words(ev.when, ev.ends, ev.precision, frame.now, frame.env.tz_of(frame.root))
+    return when_words(ev.when, frame, all_day=ev.all_day)
 
 
 def _names(frame: Frame, person: str) -> tuple[str, ...]:

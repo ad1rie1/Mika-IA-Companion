@@ -7,8 +7,8 @@ promesses, la vie de la personne en face (``life``), ce qui vient (``ahead``), c
 
 Ce qu'il partage avec l'enrichisseur et les outils, il le lit de là où ça vit, jamais l'inverse : le nom d'une clé
 (``names_of``) dans ``hearing.py``, où vit le verdict ; les mots d'une ligne (``knowledge_label``, ``when_words``) dans
-``lines.py`` ; les formes que rend le rappel (``Recall``, ``Recalled``, ``Moment``) et le temps d'un moment
-(``happens_today``, ``followed_lately``) dans ``recall.py``.
+``lines.py`` ; les formes que rend le rappel (``Recall``, ``Recalled``, ``Moment``) dans ``recall.py`` ; le temps
+d'un moment (``happens_today``, ``followed_lately``, ``moment_when``) dans ``life.py``.
 """
 
 from __future__ import annotations
@@ -18,19 +18,12 @@ from typing import Any
 
 from mika.contracts import memory as c
 from mika.contracts import social as social_c
-from mika.faculties.memory import timespan
 from mika.faculties.memory.faculty import MEMORY, MemoryState, params
 from mika.faculties.memory.hearing import names_of
+from mika.faculties.memory.life import followed_lately, happens_today, moment_when
 from mika.faculties.memory.likelihood import cautious, likely_words, nature_of
 from mika.faculties.memory.lines import knowledge_label, when_words
-from mika.faculties.memory.recall import (
-    OWNER,
-    Moment,
-    Recall,
-    Recalled,
-    followed_lately,
-    happens_today,
-)
+from mika.faculties.memory.recall import OWNER, Moment, Recall, Recalled
 from mika.faculties.memory.salience import Item, age_words
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import Zone
@@ -202,13 +195,6 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
                        tied=any(m.verdict.tied for m in recall.moments))
 
 
-def moment_when(ev: c.LifeEvent, frame: Frame) -> str:
-    """Quand, comme on le dit : une période (« en novembre », ADR 0084), sinon le jour (« jeudi », « demain »)."""
-    if ev.vague:
-        return timespan.period_words(ev.when, ev.ends, ev.precision, frame.now, frame.env.tz_of(frame.root))
-    return when_words(ev.when, frame, all_day=ev.all_day)
-
-
 @MEMORY.section("ahead", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=50,
                 title=phrase("memory.ahead.title"))
 def _ahead(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
@@ -283,7 +269,7 @@ def _festive_line(m: Moment, frame: Frame, when: str) -> str:
     ev = m.event
     if ev.followed_at:
         return f"- {when} : {m.label}" + phrase("memory.life.festive_wished")
-    if frame.local(ev.when).date() == frame.local().date():
+    if happens_today(ev, frame):
         return phrase("memory.life.festive_today", label=m.label)
     if ev.when > frame.now:
         return f"- {when} : {m.label}" + (phrase("memory.life.already_said") if m.mentioned else "")

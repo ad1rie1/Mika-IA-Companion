@@ -53,7 +53,8 @@ revient de la vie de la personne, de ses échanges passés et de ce qu'elle voit
 - les mots d'une ligne — ce qui en fait douter, ce qu'on en ressent, qui elle concerne, un jour dit comme on le dit —
   dans ``lines.py``.
 
-Le temps d'un moment que les sections lisent aussi (``happens_today``, ``followed_lately``) reste ici.
+Le temps d'un moment — s'il se passe aujourd'hui, si elles viennent d'en reparler, si la personne vient de le dire
+fini (``happens_today``, ``followed_lately``, ``ended_lately``) — est dans ``life.py``, que ses sections lisent aussi.
 
 La règle des sujets délicats — ce qui en devient une confidence (ADR 0099) — est dans ``delicate.py`` ; comment se lit
 une ligne de ``memory_items`` ou de ``memory_testimonies`` (ses colonnes, ``item_columns``, ``testimony_of``), dans
@@ -90,7 +91,7 @@ from mika.faculties.memory.hearing import (
     presumer,
     verdict_of,
 )
-from mika.faculties.memory.life import takes_up_moment
+from mika.faculties.memory.life import ended_lately, followed_lately, happens_today, takes_up_moment
 from mika.faculties.memory.lines import (
     concerned_name,
     contested_line,
@@ -146,9 +147,6 @@ CONTEXT_SPAN_US = HOUR
 LEXICAL_BONUS = 0.35
 #: un échange encore à l'écran (sans fil connu) ne se répète pas
 RECENT_EXCHANGE_US = 10 * MINUTE
-#: un moment dont elles viennent de reparler (``moment_followed`` : en mots, pas seulement montré) reste sous ses
-#: yeux le temps de la conversation — sans la consigne de demander, c'est fait
-FOLLOWED_KEEP_US = 2 * HOUR
 #: on lui parle d'elle : « tu », « ton plat préféré », « t'as »… (replié, sans accents)
 _TO_HER = re.compile(r"\b(?:tu|toi|ton|ta|tes)\b|\bt'")
 #: au premier mot d'une conversation, ce qui la concerne, cherché parmi au plus tant d'éléments récents
@@ -900,17 +898,6 @@ def _already_mentioned(moments: list[Moment], frame: Frame, store: Any, handle: 
         takes_up_moment(m.event, m.label, line, names) for line in said) else m for m in moments]
 
 
-def followed_lately(ev: c.LifeEvent, now: int) -> bool:
-    """Elles viennent d'en reparler (en mots) : le moment reste sous ses yeux, sans la consigne de demander."""
-    return bool(ev.followed_at) and now - ev.followed_at < FOLLOWED_KEEP_US
-
-
-def ended_lately(ev: c.LifeEvent, now: int) -> bool:
-    """La personne vient de dire que cette situation est finie : elle reste sous ses yeux le temps de la
-    conversation, au passé — plus jamais « en ce moment »."""
-    return bool(ev.ended_at) and now - ev.ended_at < FOLLOWED_KEEP_US
-
-
 def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams,
              memo: dict[str, str], *, hard: bool = False) -> list[Moment]:
     """Ce qui se passe dans sa vie : à venir bientôt, tout juste passé et dont
@@ -1015,7 +1002,3 @@ def _ahead_moments(frame: Frame, store: Any, person: str | None, aud: Audience, 
         out.append(Moment(ev, text, verdict, text + tag(verdict, names) + feelings(ev.felt, ev.empathy, concerned) +
                           (phrase("memory.ahead.shared", who=concerned) if ev.shared and concerned else "")))
     return out
-
-
-def happens_today(ev: c.LifeEvent, frame: Frame) -> bool:
-    return frame.local(ev.when).date() == frame.local().date()
