@@ -326,7 +326,7 @@ def test_what_carries_more_than_the_project_never_leaves_without_accord_whatever
     assert issues.reasons(p, plain) == () and issues.reasons(p, high) == (issues.LEVEL,)
     assert issues.reasons(p, asked) == (issues.OTHER_PROJECT,)
     reading = replace(p, read_about=("user_9",))
-    assert issues.reasons(reading, plain) == (issues.INHERITED,)
+    assert issues.reasons(reading, plain) == (issues.INHERITED_SUBJECTS,)
 
     def approvals(project: Project, *items: Item) -> dict[int, bool]:
         drafts = issues.leaving(replace(project, board=Board(items=items)), None, None)

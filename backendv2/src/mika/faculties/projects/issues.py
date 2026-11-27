@@ -55,8 +55,8 @@ from mika.contracts import self_ as self_c
 from mika.faculties.projects import tracker
 from mika.faculties.projects.atelier import SEEN_KEY
 from mika.faculties.projects.capability_common import effect_project, pin_of, project_refusal
-from mika.faculties.projects.faculty import INHERITED as READ_ABOUT
 from mika.faculties.projects.faculty import (
+    INHERITED,
     ISSUE_CAPABILITY,
     ISSUE_NOTE_CAPABILITY,
     ISSUE_STATE_CAPABILITY,
@@ -112,7 +112,7 @@ _TICKET_MARK = re.compile(r"p(\d+)-t(\d+)")
 # ── Les règles, pures ─────────────────────────────────────────────────────
 
 #: pourquoi un texte ne part jamais sans accord (les clés de ``inspect_issues.WHY``)
-LEVEL, OTHER_PROJECT, INHERITED, HERS = "level", "project", "inherited", "hers"
+LEVEL, OTHER_PROJECT, INHERITED_SUBJECTS, HERS = "level", "project", "inherited", "hers"
 #: …et pourquoi la publication d'un ticket ne part jamais sans accord (ADR 0278) : c'est elle qui l'a ouvert ; son
 #: titre ou son texte nomme une personne du projet
 OWN, NAMED = "own", "named"
@@ -153,7 +153,7 @@ def reasons(p: Project, item: Item) -> tuple[str, ...]:
     if c.asking_project(item.author):
         out.append(OTHER_PROJECT)
     if p.read_about:
-        out.append(INHERITED)
+        out.append(INHERITED_SUBJECTS)
     return tuple(out)
 
 
@@ -255,7 +255,7 @@ class IssueAsked(Payload):
     read_about: tuple[str, ...] = ()
 
 
-ISSUE_ASKED = PROJECTS.event("issue_asked", IssueAsked, subjects=("owner", "about", "by", READ_ABOUT))
+ISSUE_ASKED = PROJECTS.event("issue_asked", IssueAsked, subjects=("owner", "about", "by", INHERITED))
 
 
 @PROJECTS.reducer(ISSUE_ASKED)
