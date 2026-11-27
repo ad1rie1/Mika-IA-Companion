@@ -59,10 +59,10 @@ class _KindGrants:
         self._grants = grants
         self._kind = kind
 
-    def mail_grant(self, account: str) -> Grant | None:
+    def grant(self, account: str) -> Grant | None:
         return self._grants.agenda_grant(account, self._kind)
 
-    async def save_mail_grant(self, account: str, grant: Grant) -> None:
+    async def save_grant(self, account: str, grant: Grant) -> None:
         await self._grants.save_agenda_grant(account, grant, self._kind)
 
 

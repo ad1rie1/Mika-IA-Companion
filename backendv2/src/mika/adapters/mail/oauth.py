@@ -14,9 +14,9 @@ les connexions de ses boîtes (``mail_signin``). Leurs jetons sont gardés dans 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
-from mika.adapters.signin.grants import GrantStore
+from mika.adapters.signin.grants import Grant
 from mika.adapters.signin.microsoft import MicrosoftSignIn
 
 #: lire et ranger (IMAP), envoyer (SMTP), et un jeton de renouvellement (``offline_access``)
@@ -47,9 +47,31 @@ def answer(user: str, token: str) -> Callable[..., str]:
     return respond
 
 
-def mail_signin(grants: GrantStore | None = None, application: Callable[[], str] = lambda: "",
+class MailGrants(Protocol):
+    """Où les connexions des boîtes se gardent, scellées (les réglages du courrier), par boîte."""
+
+    def mail_grant(self, account: str) -> Grant | None: ...
+
+    async def save_mail_grant(self, account: str, grant: Grant) -> None: ...
+
+
+class _BoxGrants:
+    """Les connexions des boîtes, sous la forme que lisent les connexions du cadre
+    (``adapters/signin/grants.py::GrantStore``)."""
+
+    def __init__(self, grants: MailGrants) -> None:
+        self._grants = grants
+
+    def grant(self, account: str) -> Grant | None:
+        return self._grants.mail_grant(account)
+
+    async def save_grant(self, account: str, grant: Grant) -> None:
+        await self._grants.save_mail_grant(account, grant)
+
+
+def mail_signin(grants: MailGrants | None = None, application: Callable[[], str] = lambda: "",
                 **more: Any) -> MicrosoftSignIn:
     """Les connexions Microsoft des boîtes : le code d'appareil du cadre, à la portée d'IMAP et de SMTP, dans les mots
     du courrier (``start(boîte, compte)``, ``state``, ``token``, ``drop``) ; ``application`` : celle de l'instance."""
-    return MicrosoftSignIn(grants, application=application, scopes=SCOPES, not_signed_in=NOT_SIGNED_IN,
-                           no_application=NO_APPLICATION, label="courrier", **more)
+    return MicrosoftSignIn(_BoxGrants(grants) if grants is not None else None, application=application, scopes=SCOPES,
+                           not_signed_in=NOT_SIGNED_IN, no_application=NO_APPLICATION, label="courrier", **more)

@@ -25,13 +25,13 @@ class Grant:
 
 
 class GrantStore(Protocol):
-    """Où les connexions se gardent, scellées (les réglages). Ses deux méthodes gardent le nom qu'elles avaient quand
-    seul le courrier s'en servait : ``app/domains/mail/settings.py::MailSettings`` les porte telles quelles ; un
-    autre domaine les prête par une enveloppe (``adapters/agenda/oauth.py::_KindGrants``)."""
+    """Où les connexions se gardent, scellées (les réglages d'un domaine), par compte. Chaque domaine prête les
+    siennes sous cette forme, par une enveloppe : celles de ses boîtes (``adapters/mail/oauth.py::_BoxGrants``),
+    celles d'une sorte de compte d'agenda (``adapters/agenda/oauth.py::_KindGrants``)."""
 
-    def mail_grant(self, account: str) -> Grant | None: ...
+    def grant(self, account: str) -> Grant | None: ...
 
-    async def save_mail_grant(self, account: str, grant: Grant) -> None: ...
+    async def save_grant(self, account: str, grant: Grant) -> None: ...
 
 
 __all__ = ["Grant", "GrantStore"]

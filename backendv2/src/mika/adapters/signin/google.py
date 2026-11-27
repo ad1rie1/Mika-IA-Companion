@@ -199,7 +199,7 @@ class GoogleSignIn:
 
     def _grant(self, key: str) -> Grant | None:
         app = self._application()
-        grant = self._grants.mail_grant(key) if self._grants is not None else None
+        grant = self._grants.grant(key) if self._grants is not None else None
         return grant if grant is not None and app is not None and grant.fits(app.client_id, "") else None
 
     def state(self, key: str) -> SignIn:
@@ -214,7 +214,7 @@ class GoogleSignIn:
         if grant is not None and (revoked is None or revoked[0] != grant):
             return SignIn(SIGNED_IN)
         stale = revoked[1] if grant is not None and revoked is not None else ""
-        if grant is None and self._grants is not None and self._grants.mail_grant(key) is not None:
+        if grant is None and self._grants is not None and self._grants.grant(key) is not None:
             stale = GOOGLE_OTHER_APPLICATION
         return SignIn(SIGNIN_NEEDED, error=self._failed.get(key) or stale)
 
@@ -306,7 +306,7 @@ class GoogleSignIn:
                 raise self._refused("Google n'a pas rendu de jeton de renouvellement : recommence")
             grant = Grant(refresh, app.client_id, "")
             assert self._grants is not None
-            await self._grants.save_mail_grant(account, grant)
+            await self._grants.save_grant(account, grant)
             self._hold(account, grant, got)
             self._revoked.pop(account, None)
             self._failed.pop(account, None)
@@ -353,7 +353,7 @@ class GoogleSignIn:
                 raise self._needed(self._not_signed_in)
             grant = self._grant(key)
             if grant is None:
-                stored = self._grants.mail_grant(key)
+                stored = self._grants.grant(key)
                 raise self._needed(GOOGLE_OTHER_APPLICATION if stored is not None else self._not_signed_in)
             revoked = self._revoked.get(key)
             if revoked is not None and revoked[0] == grant:  # Google ne la renouvelle plus : pas représentée
@@ -372,7 +372,7 @@ class GoogleSignIn:
                 raise self._refused(why)
             if got.get("refresh_token") and got["refresh_token"] != grant.refresh:  # Google l'a remplacé
                 grant = Grant(str(got["refresh_token"]), grant.client_id, "")
-                await self._grants.save_mail_grant(key, grant)
+                await self._grants.save_grant(key, grant)
             return self._hold(key, grant, got)
 
     def drop(self, key: str) -> None:
@@ -382,7 +382,7 @@ class GoogleSignIn:
     async def revoke(self, key: str) -> bool:
         """La connexion de ce compte retirée chez Google (on le déconnecte) ; vrai si Google l'a retirée. La garder
         ou l'effacer des réglages est l'affaire de qui l'appelle."""
-        grant = self._grants.mail_grant(key) if self._grants is not None else None
+        grant = self._grants.grant(key) if self._grants is not None else None
         self._access.pop(key, None)
         if grant is None:
             return False

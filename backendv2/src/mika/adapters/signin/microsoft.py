@@ -189,7 +189,7 @@ class MicrosoftSignIn:
         return account.oauth_client_id or self._application()
 
     def _grant(self, key: str, account: OAuthAccount) -> Grant | None:
-        grant = self._grants.mail_grant(key) if self._grants is not None else None
+        grant = self._grants.grant(key) if self._grants is not None else None
         fits = grant is not None and grant.fits(self._client_id(account), account.oauth_tenant)
         return grant if fits else None
 
@@ -247,7 +247,7 @@ class MicrosoftSignIn:
         grant = Grant(refresh, client_id, tenant)
         if grant != previous:
             assert self._grants is not None
-            await self._grants.save_mail_grant(key, grant)
+            await self._grants.save_grant(key, grant)
         try:
             lasts = float(got.get("expires_in") or 3600)
         except (TypeError, ValueError):
