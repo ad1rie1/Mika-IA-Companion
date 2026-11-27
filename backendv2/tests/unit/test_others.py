@@ -35,12 +35,12 @@ from mika.faculties.others.faculty import (
     Model,
     OthersParams,
     OthersState,
-    _check_in,
     brief,
     current,
     learn,
     receptivity,
 )
+from mika.faculties.others.initiative import _check_in
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin

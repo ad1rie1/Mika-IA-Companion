@@ -34,7 +34,7 @@ from mika.faculties.memory import extraction as x
 from mika.faculties.memory.life import same_task, wishes
 from mika.faculties.needs import NeedsParams
 from mika.faculties.needs.matter import _lead
-from mika.faculties.others.faculty import _follow_up
+from mika.faculties.others.initiative import _follow_up
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse, ToolCall

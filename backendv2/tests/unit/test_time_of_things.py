@@ -25,7 +25,8 @@ from mika.faculties.memory.lines import expected_line
 from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.recall import Recall, _ahead_moments
 from mika.faculties.memory.recall_sections import _ahead as ahead_section
-from mika.faculties.others.faculty import OthersParams, _cheer_window
+from mika.faculties.others.faculty import OthersParams
+from mika.faculties.others.initiative import _cheer_window
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
 from mika.vocab.privacy import Sensitivity

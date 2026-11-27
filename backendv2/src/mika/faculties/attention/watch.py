@@ -121,7 +121,7 @@ def mostly_curt(texts: list[str]) -> bool:
     """La personne répondait à peine, sur l'échange passé d'où naît la pensée (tous ses messages de l'échange,
     ``gist``) : au moins trois messages, les deux tiers brefs (``others_c.few_words`` : « ouais », « bof », « je sais
     pas » — un bonjour ou une question n'en est pas un), aucun au-delà de ``LONG_WORDS`` mots. La même règle d'un
-    message bref que la conversation en cours, sur une autre fenêtre (``others/faculty.py::curt_run``)."""
+    message bref que la conversation en cours, sur une autre fenêtre (``others/prompt.py::curt_run``)."""
     return (len(texts) >= 3 and 3 * sum(1 for t in texts if others_c.few_words(t)) >= 2 * len(texts)
             and max(len(t.split()) for t in texts) <= LONG_WORDS)
 

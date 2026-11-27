@@ -33,7 +33,7 @@ from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.goals.faculty import Goal
 from mika.faculties.goals.work import confidant as goal_confidant
-from mika.faculties.others.faculty import _check_in
+from mika.faculties.others.initiative import _check_in
 from mika.faculties.projects.faculty import Project
 from mika.faculties.projects.work import confidant as project_confidant
 from mika.kernel.clock import HOUR as ONE_HOUR

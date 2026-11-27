@@ -210,7 +210,7 @@ def few_words(text: str) -> bool:
     pas » sont brefs ; « salut », « ça va ? » ne le sont pas). Sa forme, pas son sens.
 
     La seule règle d'un message bref, pour les deux fenêtres qui la lisent : la conversation en cours
-    (``faculties/others/faculty.py::curt_run``) et l'échange passé d'où naît une pensée
+    (``faculties/others/prompt.py::curt_run``) et l'échange passé d'où naît une pensée
     (``faculties/attention/watch.py::mostly_curt``)."""
     tokens = re.findall(r"\w+", fold(text))
     return bool(tokens) and len(tokens) <= FEW_WORDS and not text.strip().endswith("?") and tokens[0] not in SALUTATIONS

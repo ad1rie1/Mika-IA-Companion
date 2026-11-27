@@ -553,7 +553,7 @@ def test_what_is_owed_is_declared_once_and_every_restraint_reads_it():
     """Un rappel promis n'est retenu par aucune retenue — rancune, budget d'initiatives, heure où la personne
     répond d'habitude : toutes lisent la même déclaration (``agency.OWED``), aucune ne la redit."""
     from mika.faculties.agency import _budget
-    from mika.faculties.others.faculty import _receptive
+    from mika.faculties.others.initiative import _receptive
     from mika.faculties.social.initiative import _restraint
 
     row = RowView("INITIATIVE", "user_9", 12.0, (goals_c.REMIND,))

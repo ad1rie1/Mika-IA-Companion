@@ -26,7 +26,7 @@ from mika.faculties.memory.life_archive import recall_life
 from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.speakers import People
 from mika.faculties.needs import NeedsParams
-from mika.faculties.others.faculty import _cheer
+from mika.faculties.others.initiative import _cheer
 from mika.kernel.clock import DAY, US
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse, ToolCall

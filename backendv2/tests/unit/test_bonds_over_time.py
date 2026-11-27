@@ -26,7 +26,7 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.attention.faculty import params as attention_params
 from mika.faculties.attention.watch import alone_due, missing_tranche
-from mika.faculties.others.faculty import _celebrate, _cheer, _follow_up
+from mika.faculties.others.initiative import _celebrate, _cheer, _follow_up
 from mika.faculties.self import SelfParams
 from mika.faculties.social.initiative import _reach_out, _rekindle
 from mika.kernel.clock import DAY, HOUR, MINUTE, US

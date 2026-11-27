@@ -12,7 +12,7 @@ import pytest
 
 from mika.contracts import others as others_c
 from mika.faculties.attention.watch import LONG_WORDS, mostly_curt
-from mika.faculties.others.faculty import CURT_RUN, curt_run
+from mika.faculties.others.prompt import CURT_RUN, curt_run
 
 BRIEF = ["ouais", "bof", "je sais pas", "laisse tomber", "ok.", "Mouais…"]
 NOT_BRIEF = [

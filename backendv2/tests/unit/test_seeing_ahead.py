@@ -45,7 +45,8 @@ from mika.faculties.memory.reread import expired
 from mika.faculties.memory.shown import _behind, _forecasts
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import life
-from mika.faculties.others.faculty import OthersParams, _cheer_window
+from mika.faculties.others.faculty import OthersParams
+from mika.faculties.others.initiative import _cheer_window
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
