@@ -32,13 +32,13 @@ from mika.contracts import memory as c
 from mika.contracts import self_ as self_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.consolidation import people_directory
+from mika.faculties.memory.consolidation import deferral, people_directory
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
-from mika.faculties.memory.faculty import MEMORY, MemoryState, params
+from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
 from mika.faculties.memory.kept import kept_from
 from mika.faculties.memory.shown import extract_request, shown_of
 from mika.faculties.memory.speakers import People
-from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -134,20 +134,14 @@ class Reading:
     output: str = ""
 
 
-def deferral(key: int, conv: Conversation, seqs: tuple[int, ...], attempt: int, got: Reading, frame: Frame,
-             p: Any) -> Draft[Any]:
-    """La conversation dans la file des reprises (ADR 0224), comme une des siennes : une sortie partielle, ou trop
-    longue pour le contexte, attend un opérateur ; le reste revient de lui-même, de plus en plus espacé. Ses
-    personnes (la personne qui l'a reçue, les clés ``phone:`` des expéditeurs) font que l'oubli l'atteint."""
-    review = got.failure in (c.INVALID_ITEMS, c.BUDGET_EXCEEDED)
-    delay = min(DAY, p.retry_us * 2 ** min(attempt - 1, 16))
-    about = tuple(sorted({*conv.persons, *([conv.relayed] if conv.relayed else [])}))
-    return c.EXTRACTION_DEFERRED.draft(
-        key=key, source=c.FROM_RELAYED, messages=seqs, about=about, attempts=attempt,
-        retry_at=0 if review else frame.now + delay, status=c.RETRY_REVIEW if review else c.RETRY_QUEUED,
-        failure_code=got.failure,
-        detail=Content.of(json.dumps({"issues": list(got.issues), "output": got.output}, ensure_ascii=False),
-                          level=3))
+def _queued(conv: Conversation, seqs: tuple[int, ...], attempt: int, got: Reading, frame: Frame,
+            p: MemoryParams) -> Draft[c.ExtractionDeferred]:
+    """La conversation dans la file des reprises, comme une des siennes (``consolidation.deferral``, ADR 0224) : ses
+    messages sont le lot entier, ce qui en est oublié compris ; ses personnes (la personne qui l'a reçue, les clés
+    ``phone:`` des expéditeurs) font que l'oubli l'atteint."""
+    return deferral(frame, p, key=seqs[0], source=c.FROM_RELAYED, messages=seqs,
+                    about=tuple(sorted({*conv.persons, *([conv.relayed] if conv.relayed else [])})), attempt=attempt,
+                    failure=got.failure, issues=got.issues, output=got.output)
 
 
 @MEMORY.process("memory.relayed", wake_on=[c.RELAYED_READ, c.EXTRACTION_DEFERRED], wake_on_shapes=[c.Relayed],
@@ -237,7 +231,7 @@ class Relay:
             drafts += got.kept
             if got.failure:
                 # la file porte désormais ses messages : ils ne l'attendent plus
-                drafts.append(deferral(seqs[0], conv, seqs, 1, got, frame, p))
+                drafts.append(_queued(conv, seqs, 1, got, frame, p))
             failed = bool(got.failure) and not got.kept  # rien n'en est gardé : tout attend la reprise
             drafts.append(c.RELAYED_READ.draft(seqs=seqs, produced=len(got.kept), failed=failed, call_id=got.call_id,
                                                model=got.model, dedupe_key=f"relu:{seqs[0]}:{seqs[-1]}"))
@@ -256,7 +250,7 @@ class Relay:
                 got = await self._read(ctx, frame, state, store, vectors, directory, conv, her, system, p, n)
                 drafts += got.kept
                 if got.failure:
-                    drafts.append(deferral(seqs[0], conv, seqs, attempts + 1, got, frame, p))
+                    drafts.append(_queued(conv, seqs, attempts + 1, got, frame, p))
         if drafts:
             await ctx.emit(*drafts)
         self._next_job(store)
@@ -305,4 +299,4 @@ class Relay:
         return Reading(tuple(kept), request.call_id, response.model)
 
 
-__all__ = ["Reading", "Relay", "conversation", "deferral", "gather"]
+__all__ = ["Reading", "Relay", "conversation", "gather"]

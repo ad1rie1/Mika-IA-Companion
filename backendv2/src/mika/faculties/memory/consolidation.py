@@ -9,8 +9,9 @@ un fil privé par personne, un salon d'un seul tenant — et le modèle (rôle
 à ce que Bob dit ailleurs. Tout part en un seul ajout gardé par le point de contrôle. Les échecs sont inscrits dans
 une file durable, sans retenir les conversations suivantes ; les reprises s'espacent et réduisent leurs lots.
 
-Ce module ne porte que le processus et sa fenêtre. Le reste vit à côté, en fonctions de module que lisent aussi la
-relecture de la nuit (``reread.py``) et celle des conversations d'un téléphone (``relayed.py``, ADR 0153) :
+Ce module porte le processus, sa fenêtre, et la mise en file des reprises (``deferral``) : la relecture des
+conversations d'un téléphone (``relayed.py``) y met les siennes par la même fonction (ADR 0224). Le reste vit à côté, en
+fonctions de module que lisent aussi la relecture de la nuit (``reread.py``) et celle d'un téléphone (ADR 0153) :
 
 - ``shown.py`` : ce qu'on montre au modèle d'une conversation ;
 - ``kept.py`` : ce que le code garde d'une relecture — les règles de ce qu'elle retient ;
@@ -37,7 +38,7 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.conversation import Conversation, Line, Piece, Speaker
-from mika.faculties.memory.faculty import MEMORY, MemoryState, params
+from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
 from mika.faculties.memory.kept import kept_from
 from mika.faculties.memory.shown import extract_request, shown_of
 from mika.faculties.memory.speakers import People
@@ -182,20 +183,13 @@ class Consolidate:
                     self.extracted[(conv.key, conv.seqs)] = (extraction, raw, model, last_call)
             if extraction is None or extraction.issues:
                 failed = True
-                attempt = attempts + 1
-                delay = min(DAY, p.retry_us * 2 ** min(attempt - 1, 16))
                 halfway = extraction is not None
-                # Une sortie partielle, ou une paire qui ne tiendra jamais dans le contexte, attend un opérateur ;
-                # le reste revient de lui-même, de plus en plus espacé.
-                review = halfway or reason == "PromptBudgetError"
-                drafts.append(c.EXTRACTION_DEFERRED.draft(
-                    key=conv.seqs[0], messages=conv.seqs, aside=tuple(ln.seq for ln in conv.lines if ln.aside),
-                    about=tuple(labels), attempts=attempt,
-                    retry_at=0 if review else frame.now + delay, status=c.RETRY_REVIEW if review else c.RETRY_QUEUED,
-                    failure_code=c.INVALID_ITEMS if halfway else (c.INVALID_OUTPUT if reason == c.INVALID_OUTPUT else
+                drafts.append(deferral(
+                    frame, p, key=conv.seqs[0], source=c.FROM_THREAD, messages=conv.seqs,
+                    aside=tuple(ln.seq for ln in conv.lines if ln.aside), about=tuple(labels), attempt=attempts + 1,
+                    failure=c.INVALID_ITEMS if halfway else (c.INVALID_OUTPUT if reason == c.INVALID_OUTPUT else
                         c.BUDGET_EXCEEDED if reason == "PromptBudgetError" else c.PROVIDER_ERROR),
-                    detail=Content.of(json.dumps({"issues": extraction.issues if halfway else [reason],
-                                                  "output": raw}, ensure_ascii=False), level=3)))
+                    issues=extraction.issues if extraction is not None else [reason], output=raw))
             if extraction is not None:
                 drafts += await kept_from(extraction, frame, state, store, conv, people, shown, vectors, p, last_call)
         if rows:
@@ -226,6 +220,27 @@ class Consolidate:
         for handle, seen in self.seen_rooms.items():
             out.setdefault(frame.get(identity_c.PERSON(handle)) or handle, set()).update(seen)
         return out
+
+
+# ── la file des reprises ──
+def deferral(frame: Frame, p: MemoryParams, *, key: int, source: str, messages: tuple[int, ...],
+             about: tuple[str, ...], attempt: int, failure: str, issues: Sequence[str], output: str,
+             aside: tuple[int, ...] = ()) -> Draft[c.ExtractionDeferred]:
+    """Une relecture dans la file des reprises (ADR 0224), d'où que viennent ses messages : de son fil (``source``
+    « thread », la consolidation) ou reçus ailleurs (« relayed », ``relayed.py``). Une sortie partielle, ou trop longue
+    pour le contexte, attend un opérateur ; le reste revient de lui-même, de plus en plus espacé (``retry_us`` doublé
+    à chaque essai, au plus un jour).
+
+    ``attempt`` : l'essai qui vient d'échouer ; ``failure`` : son code (``failure_code``) ; ``issues`` et ``output`` :
+    ce qui n'allait pas et la réponse brute, le détail que la console relit. ``about`` : ses personnes, pour que l'oubli
+    de l'une l'atteigne ; ``aside`` : parmi ses messages, ce qui ne lui était pas adressé (la reprise le relit pareil)."""
+    review = failure in (c.INVALID_ITEMS, c.BUDGET_EXCEEDED)
+    delay = min(DAY, p.retry_us * 2 ** min(attempt - 1, 16))
+    return c.EXTRACTION_DEFERRED.draft(
+        key=key, source=source, messages=messages, aside=aside, about=about, attempts=attempt,
+        retry_at=0 if review else frame.now + delay, status=c.RETRY_REVIEW if review else c.RETRY_QUEUED,
+        failure_code=failure,
+        detail=Content.of(json.dumps({"issues": list(issues), "output": output}, ensure_ascii=False), level=3))
 
 
 # ── qui est qui ──
