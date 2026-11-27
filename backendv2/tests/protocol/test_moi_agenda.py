@@ -32,7 +32,7 @@ from mika.kernel.events import Content
 from mika.plugins.agenda import CAPABILITY, DONE, OWNER, SYNC_ASKED, AgendaParams
 from mika.plugins.agenda.sync import sync_account
 from mika.ports.agenda import Calendar, EventDraft, Participant, Span, calendar_key, us_of
-from mika.ports.mail import SIGNED_IN
+from mika.ports.signin import SIGNED_IN
 from tests.contract.test_agenda_caldav import INVITE
 from tests.fixtures.caldav_server import FakeCalDav
 from tests.fixtures.google_calendar import FakeGoogle

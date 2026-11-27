@@ -10,9 +10,9 @@ du haut), ses comptes (``account_settings.py`` : leurs routes, leurs réglages, 
 › Agendas) et ce qu'une personne a de ses agendas (``reach.py`` : lesquels elle voit, ce qu'elle peut y faire — ce
 que l'API, les partages et le direct lisent), ce qu'il partage (``sharing.py`` : ses agendas, avec qui), sa part du
 direct (``live.py`` : ce qui change un agenda, et à qui il est), sa part de la console (``console/`` : ses onglets, la
-fiche d'un agenda, l'onglet « Agendas » de la fiche d'une personne, ce qu'ils lisent, sa rubrique de réglages, leurs gabarits et leur script) et sa commande (``cli.py`` : ``mika agenda``). Il lit le courrier : son API dit où en est une connexion dans les mots de celles des boîtes
-(``ports.mail.SIGNED_IN``), et Microsoft entre par l'application du courrier (ADR 0238), que sa rubrique de réglages
-vérifie et enregistre.
+fiche d'un agenda, l'onglet « Agendas » de la fiche d'une personne, ce qu'ils lisent, sa rubrique de réglages, leurs gabarits et leur script) et sa commande (``cli.py`` : ``mika agenda``). Son API dit où en est une connexion dans les mots du cadre
+(``ports.signin``, ADR 0318). Il lit le courrier : Microsoft entre par l'application du courrier (ADR 0238), que sa
+rubrique de réglages vérifie et enregistre.
 
 Reste au cadre « qui peut quoi » — une page qui croise les domaines, où sa console règle le tableau d'un agenda
 (``console/rights.py``).

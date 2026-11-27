@@ -34,7 +34,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from mika.ports.mail import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
+from mika.ports.signin import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 
 log = logging.getLogger("mika.mail")
 

@@ -46,7 +46,8 @@ from mika.plugins.email.inspect.common import (
     owner_name,
 )
 from mika.plugins.email.voice import voice_text
-from mika.ports.mail import SIGNED_IN, SIGNIN_PENDING, AccountInfo, SignIn
+from mika.ports.mail import AccountInfo
+from mika.ports.signin import SIGNED_IN, SIGNIN_PENDING, SignIn
 from mika.vocab.access import PERSON
 from mika.vocab.canals import mail_rule
 

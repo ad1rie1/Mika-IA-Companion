@@ -103,7 +103,7 @@ from mika.ports.agenda import (
     split_calendar_key,
     system_person,
 )
-from mika.ports.mail import SIGNED_IN, SIGNIN_PENDING
+from mika.ports.signin import SIGNED_IN, SIGNIN_PENDING
 from mika.vocab.access import KEEP_WORDS, PERSON, SHARES, canal_words, when_words, who_words
 from mika.vocab.ownership import OWNED
 from mika.vocab.people import ACCOUNT_PREFIX

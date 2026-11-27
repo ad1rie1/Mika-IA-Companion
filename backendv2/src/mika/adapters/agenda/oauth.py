@@ -43,7 +43,7 @@ import httpx
 from mika.adapters.agenda.cloud import TIMEOUT, USER_AGENT, SignInNeeded
 from mika.adapters.mail.oauth import Grant, MicrosoftSignIn
 from mika.ports.agenda import GOOGLE, MICROSOFT, AgendaError
-from mika.ports.mail import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
+from mika.ports.signin import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 
 log = logging.getLogger("mika.agenda")
 

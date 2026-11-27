@@ -43,6 +43,7 @@ from email.headerregistry import Address
 from typing import Literal, Protocol
 
 from mika.ports.paging import Page
+from mika.ports.signin import SignIn
 
 #: les trois façons d'écrire depuis une boîte
 Voice = Literal["elle", "assistante", "proprietaire"]
@@ -422,25 +423,6 @@ class AccountStatus:
     #: la dernière erreur (vide : tout va bien)
     error: str = ""
     error_at: int = 0
-
-
-#: les états d'une connexion Microsoft : faite, un code qui attend d'être entré chez Microsoft, à faire (jamais faite,
-#: ou qui ne vaut plus)
-SIGNED_IN, SIGNIN_PENDING, SIGNIN_NEEDED = "connectee", "en_attente", "a_faire"
-
-
-@dataclass(frozen=True, slots=True)
-class SignIn:
-    """Où en est la connexion d'une boîte qui entre par un compte Microsoft (OAuth2, ADR 0166)."""
-
-    #: ``SIGNED_IN``, ``SIGNIN_PENDING`` ou ``SIGNIN_NEEDED``
-    state: str
-    #: en attente : le code à entrer, la page de Microsoft où l'entrer, jusqu'à quand (µs)
-    code: str = ""
-    url: str = ""
-    until: int = 0
-    #: pourquoi elle n'est pas (ou plus) connectée, en français (vide : rien à dire)
-    error: str = ""
 
 
 class MailPort(Protocol):

@@ -79,11 +79,11 @@ from mika.ports.mail import (
     Moved,
     Preview,
     Sent,
-    SignIn,
     forwarded_text,
     split_ref,
 )
 from mika.ports.paging import written_words
+from mika.ports.signin import SignIn
 
 log = logging.getLogger("mika.mail")
 

@@ -28,8 +28,8 @@ from mika.faculties.goals import inspect as goals_inspect
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import Badge, Meter
 from mika.plugins.teams import WRITTEN, params_of
-from mika.ports.mail import SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from mika.ports.mail import Draft as MailDraft
+from mika.ports.signin import SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from mika.ports.teams import Draft as TeamsDraft
 from mika.sim.outside import FakeMail
 from tests.fixtures.console_html import ConsoleHTML

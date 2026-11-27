@@ -58,7 +58,7 @@ from mika.ports.agenda import (
     system_account,
     system_person,
 )
-from mika.ports.mail import SIGNED_IN
+from mika.ports.signin import SIGNED_IN
 from mika.runtime.operations import audit
 from mika.vocab.access import PERSON
 from mika.vocab.ownership import OWNED

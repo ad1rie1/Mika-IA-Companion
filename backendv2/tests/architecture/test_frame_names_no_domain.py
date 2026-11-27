@@ -162,10 +162,16 @@ FRAME_OWNED: dict[str, str] = {
     "ports.paging": "une page de données, que les ports découpent",
     "ports.preprocess": "le prétraitement de ce qu'on lui envoie, au bord du cœur",
     "ports.shares": OFF_JOURNAL,
+    "ports.signin": "où en est une connexion à un compte Microsoft ou Google, que plusieurs domaines disent (ADR 0318)",
     "ports.sql": STORAGE,
     "ports.store": STORAGE,
     "ports.vectors": "les vecteurs, que lit la mémoire",
 }
+
+#: ce que le cadre porte pour que plusieurs domaines s'en servent sans s'emprunter l'un l'autre — se connecter à un
+#: compte Microsoft ou Google (ADR 0318) : un de ces paquets qui nommerait un domaine ferait de nouveau dépendre les
+#: autres de lui (``test_what_the_domains_share_names_none_of_them``)
+SHARED_BY_DOMAINS = ("ports.signin",)
 
 #: ce que le cadre nomme exprès, pour toujours, et pourquoi
 FOREVER: dict[str, str] = {
@@ -315,6 +321,26 @@ def test_the_frame_names_no_domain():
     found = offences(_sources(), packages=PACKAGES, forever=FOREVER, needs={d.name: d.needs for d in DOMAINS},
                      below=below)
     assert not found, "\n".join([*found, "(ARCHITECTURE.md, « Écrire un domaine » ; ADR 0310)"])
+
+
+def test_what_the_domains_share_names_none_of_them():
+    """Ce que le cadre porte pour plusieurs domaines (``SHARED_BY_DOMAINS`` : se connecter à Microsoft ou à Google,
+    ADR 0318) n'importe rien d'aucun d'eux — ni son adaptateur, ni son port, ni son contrat, ni son plugin : le
+    courrier et l'agenda s'en servent, un Drive s'en servira, sans qu'aucun lise les entrailles d'un autre. Le
+    contrôle lit les imports (``named``), qu'on essaie d'abord sur un source qui nomme le courrier."""
+    assert named("from mika.adapters.mail.oauth import Grant\n", PACKAGES, where="adapters/signin/x.py",
+                 root=()) == {"mail"}
+    assert set(SHARED_BY_DOMAINS) <= set(FRAME_OWNED), "ce que les domaines partagent est au cadre"
+
+    def shared(path: str) -> bool:
+        module = path.removesuffix(".py").replace("/", ".")
+        return any(_within(module, p) for p in SHARED_BY_DOMAINS)
+
+    read = {path: sorted(named(text, PACKAGES, where=path, root=())) for path, text in _below().items()
+            if shared(path)}
+    assert {p.split("/")[0] + "." + p.split("/")[1].removesuffix(".py") for p in read} == set(SHARED_BY_DOMAINS)
+    found = {path: domains for path, domains in read.items() if domains}
+    assert not found, found
 
 
 def test_every_package_of_a_domain_exists():

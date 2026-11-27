@@ -52,7 +52,7 @@ from mika.ports.agenda import (
     occurrence_key,
     us_of,
 )
-from mika.ports.mail import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING
+from mika.ports.signin import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING
 from tests.fixtures import backend
 from tests.fixtures.google_calendar import CLIENT_ID, SECRET, FakeGoogle
 

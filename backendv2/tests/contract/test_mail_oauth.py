@@ -26,7 +26,7 @@ from mika.adapters.mail.oauth import DEVICE_GRANT, EXPIRED, REVOKED, Grant, Micr
 from mika.adapters.store_sql import SqlStore
 from mika.app.domains.mail.settings import MAIL_GRANTS_KEY, MailSettings
 from mika.app.settings import SecretBox, Settings
-from mika.ports.mail import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
+from mika.ports.signin import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 from tests.fixtures.mail_servers import Imap, Smtp, raw_mail, serve
 
 NOW = datetime(2026, 10, 31, 12, tzinfo=UTC)

@@ -30,13 +30,13 @@ from mika.ports.mail import (
     Moved,
     Preview,
     Sent,
-    SignIn,
     addresses,
     forwarded_text,
     reference_key,
     split_ref,
 )
 from mika.ports.paging import Page, fold_text, has_words, words_of
+from mika.ports.signin import SignIn
 
 #: la boîte simulée par défaut : un compte sans clé (les références restent les Message-ID)
 DEFAULT_ACCOUNT = AccountInfo(key="", label="Sa boîte", address="mika@exemple.fr", ready=True, can_send=True)
