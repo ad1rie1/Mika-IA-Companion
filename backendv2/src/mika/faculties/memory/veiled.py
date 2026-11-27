@@ -139,13 +139,14 @@ def _told(store: Any, handles: tuple[str, ...], since: int, share: float) -> dic
 
 def _told_persons(frame: Frame, store: Any, told: Mapping[int, int]) -> Counter[str]:
     """Combien d'éléments de chaque personne elle a déjà racontés sans nom à cet auditeur (budget par personne)."""
+    resolve, _ = identity_c.resolvers(frame.get)
     out: Counter[str] = Counter()
     if not told:
         return out
     ab = about()
     for chunk in batches(sorted(told)):
         for _item, key in store.query_mind(select(ab.c.item, ab.c.person).where(ab.c.item.in_(chunk))):
-            out[frame.get(identity_c.PERSON(key)) or key] += 1
+            out[resolve(key)] += 1
     return out
 
 

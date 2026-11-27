@@ -160,12 +160,13 @@ async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: s
              label=phrase("memory.tools.promise_done.label"), args=PromiseArgs,
              bundle="memory", episodes=CONVERSATIONAL)
 async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
+    resolve, _ = identity_c.resolvers(ctx.frame.get)
     state = ctx.frame.state("memory")
     promise = state.promises.get(args.promise)
     ep = ctx.frame.episode
     person = ctx.frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     # une promesse faite à une adresse reliée depuis à cette personne lui a été faite
-    if promise is None or (person is not None and (ctx.frame.get(identity_c.PERSON(promise.to)) or promise.to) != person):
+    if promise is None or (person is not None and resolve(promise.to) != person):
         return phrase("memory.tools.promise_done.not_found")
     if args.status == c.HONORED and promise.due is not None and kept_too_early(promise, ctx.frame.now, ctx.frame):
         # la règle de la consolidation (ADR 0052) : la veille, « je te le rappellerai » n'est pas la tenir

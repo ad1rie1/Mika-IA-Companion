@@ -159,8 +159,9 @@ def _promises(frame: Frame, store: Any, state: MemoryState,
     l'anodin, ou ce qu'elle a promis dans ce salon même ; une promesse
     faite en privé, recopiée par le modèle dans ce que le salon a
     « entendu », ferait de chacun un témoin."""
+    resolve, _ = identity_c.resolvers(frame.get)
     persons = set(conv.persons)
-    pending = [(pr, frame.get(identity_c.PERSON(pr.to)) or pr.to) for pr in state.promises.values()]
+    pending = [(pr, resolve(pr.to)) for pr in state.promises.values()]
     pending = [(pr, to) for pr, to in pending if to in persons]
     if not pending:
         return []
@@ -193,16 +194,17 @@ def _situations(frame: Frame, store: Any, state: MemoryState, conv: Conversation
     """Les situations en cours des personnes de cette conversation (numéro, qui, texte) : la relecture peut dire
     lesquelles la personne dit finies. Comme les croyances connues, jamais ce qu'un autre a confié au-delà de
     l'anodin, et dans un salon l'anodin seulement (le modèle pourrait le recopier ici)."""
+    resolve, _ = identity_c.resolvers(frame.get)
     persons = set(conv.persons)
     live: list[tuple[c.LifeEvent, str]] = []
     archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
     for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
         if not ev.ongoing or ev.ended_at or not ev.text_ref or ev.when > frame.now:
             continue
-        whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+        whom = next((k for k in (resolve(a) for a in ev.about) if k in persons), None)
         if whom is None:
             continue
-        tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+        tellers = {resolve(t) for t in ev.told_by}
         anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
         if not (anodyne or (tellers <= persons and not conv.room)):
             continue
@@ -222,16 +224,17 @@ def _moments(frame: Frame, store: Any, state: MemoryState, conv: Conversation,
     entretien est reporté à lundi » notait un second entretien à côté du premier, et l'ancien, resté non secret,
     trahissait ce que le nouveau gardait (sonde réelle du 2026-10-09). Les mêmes règles que les situations :
     jamais ce qu'un autre a confié au-delà de l'anodin, et dans un salon l'anodin seulement."""
+    resolve, _ = identity_c.resolvers(frame.get)
     persons = set(conv.persons)
     archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
     live: dict[int, tuple[c.LifeEvent, str]] = {}
     for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
         if ev.ongoing or ev.yearly or not ev.text_ref or over(ev) < frame.now or ev.outcome:
             continue  # passé : il est parmi les moments à constater (ADR 0086)
-        whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+        whom = next((k for k in (resolve(a) for a in ev.about) if k in persons), None)
         if whom is None:
             continue
-        tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+        tellers = {resolve(t) for t in ev.told_by}
         anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
         if anodyne or (tellers <= persons and not conv.room):
             live[ev.id] = (ev, whom)
@@ -253,6 +256,7 @@ def _ended_situations(frame: Frame, store: Any, state: MemoryState, conv: Conver
     du chat de Carol, elle n'a noté qu'un souvenir, et Mika ne suivait plus rien (sonde réelle du 2026-10-09).
     Les mêmes règles que les situations en cours : jamais ce qu'un autre a confié au-delà de l'anodin, et dans
     un salon l'anodin seulement."""
+    resolve, _ = identity_c.resolvers(frame.get)
     persons = set(conv.persons)
     archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
     latest: dict[int, c.LifeEvent] = {}
@@ -262,10 +266,10 @@ def _ended_situations(frame: Frame, store: Any, state: MemoryState, conv: Conver
     for ev in latest.values():
         if not (ev.ongoing and ev.ended_at and ev.text_ref) or frame.now - ev.ended_at > p.recurrence_days * DAY:
             continue
-        whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+        whom = next((k for k in (resolve(a) for a in ev.about) if k in persons), None)
         if whom is None:
             continue
-        tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+        tellers = {resolve(t) for t in ev.told_by}
         anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
         if anodyne or (tellers <= persons and not conv.room):
             live[ev.id] = (ev, whom)
@@ -286,6 +290,7 @@ def _passed(frame: Frame, store: Any, state: MemoryState, conv: Conversation, p:
     pas comment ils ont tourné (numéro, qui, « le jour : texte ») : si la personne le dit, la relecture le constate
     (ADR 0086). Les mêmes règles que les moments à venir : jamais ce qu'un autre a confié au-delà de l'anodin, et
     dans un salon l'anodin seulement."""
+    resolve, _ = identity_c.resolvers(frame.get)
     persons = set(conv.persons)
     archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
     since = frame.now - round(p.resolve_days * DAY)
@@ -293,10 +298,10 @@ def _passed(frame: Frame, store: Any, state: MemoryState, conv: Conversation, p:
     for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
         if ev.ongoing or ev.yearly or ev.outcome or not ev.text_ref or not since <= over(ev) < frame.now:
             continue
-        whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+        whom = next((k for k in (resolve(a) for a in ev.about) if k in persons), None)
         if whom is None:
             continue
-        tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+        tellers = {resolve(t) for t in ev.told_by}
         anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
         if anodyne or (tellers <= persons and not conv.room):
             live[ev.id] = (ev, whom)
@@ -326,6 +331,7 @@ def _forecasts(frame: Frame, store: Any, conv: Conversation, p: MemoryParams,
     passée depuis moins de ``resolve_days`` et qu'on n'a pas encore constatées : montrées avec les moments passés,
     pour que la relecture dise si elles se sont réalisées (ADR 0099). Les mêmes règles de discrétion que les
     moments : dans un salon, l'anodin seulement ; jamais ce qu'un autre a confié au-delà."""
+    resolve, _ = identity_c.resolvers(frame.get)
     persons = set(conv.persons)
     since = frame.now - round(p.resolve_days * DAY)
     t = tb.items()
@@ -339,11 +345,11 @@ def _forecasts(frame: Frame, store: Any, conv: Conversation, p: MemoryParams,
     found: dict[int, Forecast] = {}
     for (item, text, about, holder, told_by, likely, importance, due, until, sens, secret, felt,
          empathy) in rows:
-        concerned = {frame.get(identity_c.PERSON(k)) or k for k in (*keys_of(about), *([holder] if holder else []))}
+        concerned = {resolve(k) for k in (*keys_of(about), *([holder] if holder else []))}
         whom = next((k for k in sorted(concerned) if k in persons), None)
         if whom is None or not text:
             continue
-        tellers = {frame.get(identity_c.PERSON(t)) or t for t in keys_of(told_by)}
+        tellers = {resolve(t) for t in keys_of(told_by)}
         if not (int(sens) <= Sensitivity.ANODYNE and not secret) and (conv.room or not tellers <= persons):
             continue
         found[int(item)] = Forecast(int(item), keys_of(about), holder or "", likely, float(importance or 0.5),

@@ -188,7 +188,8 @@ def _about_clause(keys: Sequence[str]) -> Any:
 def person_keys(frame: Frame, key: str) -> set[str]:
     """Toutes les clés sous lesquelles cette personne peut figurer : la clé
     donnée, la personne pour laquelle elle parle, et ses adresses."""
-    person = frame.get(identity_c.PERSON(key)) or key
+    resolve, _ = identity_c.resolvers(frame.get)
+    person = resolve(key)
     return {key, person, *frame.get(identity_c.HANDLES(person)), *frame.get(identity_c.HANDLES(key))}
 
 

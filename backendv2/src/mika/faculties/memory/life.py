@@ -151,7 +151,8 @@ def _names(frame: Frame, person: str) -> tuple[str, ...]:
 def _concerns(frame: Frame, ev: c.LifeEvent, person: str) -> bool:
     """Ce moment est-il de la vie de cette personne ? Une clé notée alors (une adresse, un nom) parle pour elle
     quand elle lui a été reliée depuis — comme pour ``LIFE_EVENTS`` (ADR 0035, 0048)."""
-    return any(k == person or (frame.get(identity_c.PERSON(k)) or k) == person for k in ev.about)
+    resolve, _ = identity_c.resolvers(frame.get)
+    return any(k == person or resolve(k) == person for k in ev.about)
 
 
 # ── Ce que la personne en dit elle-même : jugé à l'arrivée du message ─────
@@ -161,12 +162,13 @@ def _concerns(frame: Frame, ev: c.LifeEvent, person: str) -> bool:
 def _told_about(s: MemoryState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
     """La personne parle elle-même d'un moment de sa vie, une fois passé (« l'entretien s'est super bien passé »)
     : elles en ont reparlé — sa réponse le sait déjà."""
+    resolve, _ = identity_c.resolvers(frame.get)
     d = ev.data
     text = d.text.text or ""
     if not d.addressed or not is_identifiable(d.handle) or not text.strip() or not s.events:
         return []
     p = params(frame.env.params_of("memory", frame.root))
-    person = frame.get(identity_c.PERSON(d.handle)) or d.handle
+    person = resolve(d.handle)
     # ce qui se fête n'est « repris » que par ses vœux à elle : « c'est mon anniv aujourd'hui ! » ne le lui souhaite pas
     mine = [e for e in events_at(s, ev.at, frame.env.tz_of(frame.root), p)
             if _concerns(frame, e, person) and e.id < ev.seq and not e.festive
@@ -222,8 +224,9 @@ class Follow:
         texts = store.content([e.text_ref for e in moments if e.text_ref])
         drafts: list[Draft[Any]] = []
         done: set[int] = set()
+        resolve, _ = identity_c.resolvers(frame.get)
         for seq, at, handle, said in rows:
-            person = frame.get(identity_c.PERSON(handle)) or handle
+            person = resolve(handle)
             names = _names(frame, person)
             for e in moments:
                 if e.id in done or not _concerns(frame, e, person) or int(seq) < e.id or int(at) < opens[e.id]:
@@ -299,6 +302,7 @@ def kept_too_early(pr: c.PendingPromise, at: int, frame: Frame) -> bool:
 def _keep(s: MemoryState, frame: Frame) -> list[Candidate]:
     """Une promesse datée, au moment dit : elle la tient d'elle-même. Pas si elles se sont parlé depuis le début
     de la fenêtre (la conversation en était l'occasion), ni après trop d'essais."""
+    resolve, _ = identity_c.resolvers(frame.get)
     p = params(frame.env.params_of("memory", frame.root))
     now = frame.now
     out: list[Candidate] = []
@@ -310,7 +314,7 @@ def _keep(s: MemoryState, frame: Frame) -> list[Candidate]:
         tries = s.tries.get(pr.id) or Keeping()
         if not start <= now <= end or tries.retry_at > now or tries.attempts >= p.keep_attempts:
             continue
-        to = frame.get(identity_c.PERSON(pr.to)) or pr.to  # une adresse reliée depuis à quelqu'un parle pour lui
+        to = resolve(pr.to)  # une adresse reliée depuis à quelqu'un parle pour lui
         if identity_c.last_heard(frame, to) >= max(start, pr.at):
             continue  # elles se sont parlé depuis : c'était l'occasion, le prompt le lui montrait
         address = identity_c.reach_now(frame, to)
@@ -376,7 +380,8 @@ class LetGo:
         return sorted((pr.due + grace, pr.id) for pr in state.promises.values() if pr.due is not None)
 
     def _fresh_reminders(self, state: MemoryState, frame: Frame) -> bool:
-        owners = {frame.get(identity_c.PERSON(pr.to)) or pr.to for pr in state.promises.values()}
+        resolve, _ = identity_c.resolvers(frame.get)
+        owners = {resolve(pr.to) for pr in state.promises.values()}
         return any(g.kind == goals_c.REMINDER and g.owner in owners and g.id not in self.seen
                    for g in frame.get(goals_c.LIVE))
 
@@ -406,6 +411,7 @@ class LetGo:
     def _carried(self, store: Any, state: MemoryState, frame: Frame) -> list[int]:
         """Les promesses qu'un rappel programmé après elles porte désormais : la même chose, pour la même
         personne, le même jour."""
+        resolve, _ = identity_c.resolvers(frame.get)
         self.seen = {g.id for g in frame.get(goals_c.LIVE) if g.kind == goals_c.REMINDER}
         reminders = reminders_of(frame, store)
         pending = [pr for pr in state.promises.values() if pr.id not in state.kept]
@@ -415,5 +421,5 @@ class LetGo:
         texts = {int(i): said for chunk in batches(sorted({pr.id for pr in pending}))
                  for i, said in store.query_mind(select(t.c.id, t.c.text).where(t.c.id.in_(chunk)))}
         return sorted(pr.id for pr in pending if any(
-            r.owner == (frame.get(identity_c.PERSON(pr.to)) or pr.to) and r.opened_at >= pr.at and same_task(texts.get(pr.id) or "", r.title)
+            r.owner == resolve(pr.to) and r.opened_at >= pr.at and same_task(texts.get(pr.id) or "", r.title)
             and same_day(frame, None if pr.implicit_due else pr.due, r.due) for r in reminders))

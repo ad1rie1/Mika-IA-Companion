@@ -98,6 +98,7 @@ class Reflect:
 
 def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclosure, ...], bool]:
     """Remonte les preuves, jamais le contenu voisin ; une origine inconnue reste intérieure."""
+    resolve, _ = identity_c.resolvers(frame.get)
     pending, seen, rules = [thought], set(), []
     unknown = False
     while pending and len(seen) < 64:
@@ -137,7 +138,7 @@ def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclos
             pending.extend(refs)
         elif event.type == rt.PERCEPTION_RECEIVED.name:
             handle = data["handle"]
-            person = frame.get(identity_c.PERSON(handle)) or handle
+            person = resolve(handle)
             ref = (data.get("text") or {}).get("ref")
             text = store.content([ref]).get(ref) if ref else None
             if text is None:
@@ -151,7 +152,7 @@ def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclos
             if data.get("unkept") or floor:
                 # ce qu'elle a lu pour l'écrire (ADR 0128) : une confidence de la personne pour qui elle l'a lu
                 target = str(data.get("target") or "")
-                person = str(frame.get(identity_c.PERSON(target)) or target) if target else ""
+                person = str(resolve(target)) if target else ""
                 who = (person,) if person else ()
                 strong = bool(data.get("unkept")) or floor >= int(Sensitivity.CONFIDENCE)
                 rules.append(c.Disclosure(about=who, told_by=who, heard_by=who,

@@ -209,6 +209,7 @@ class Consolidate:
     def _rooms(self, frame: Frame, store: Any) -> dict[str, set[str]]:
         """Les salons où elle a vu chaque personne : les adresses lues jusqu'ici, plus la suite du fil, rangées sous
         la personne qu'elles désignent maintenant (une adresse reliée depuis parle pour elle)."""
+        resolve, _ = identity_c.resolvers(frame.get)
         thread = transcript_c.thread_table()
         for seq, handle, room in store.query_mind(
                 select(thread.c.id, thread.c.person, thread.c.room)
@@ -218,7 +219,7 @@ class Consolidate:
                 self.seen_rooms.setdefault(str(handle), set()).add(str(room))
         out: dict[str, set[str]] = {}
         for handle, seen in self.seen_rooms.items():
-            out.setdefault(frame.get(identity_c.PERSON(handle)) or handle, set()).update(seen)
+            out.setdefault(resolve(handle), set()).update(seen)
         return out
 
 
@@ -248,6 +249,7 @@ def people_directory(frame: Frame, store: Any) -> dict[str, tuple[str, ...]]:
     """Toutes les personnes qu'elle connaît (celles à qui elle a parlé),
     par nom et par prénom repliés : un nom porté par une seule personne
     désigne cette personne, même quand elle n'est pas de la conversation."""
+    resolve, _ = identity_c.resolvers(frame.get)
     found: dict[str, set[str]] = {}
     thread = transcript_c.thread_table()
     for (handle,) in store.query_mind(select(thread.c.person).distinct().order_by(thread.c.person)):
@@ -257,7 +259,7 @@ def people_directory(frame: Frame, store: Any) -> dict[str, tuple[str, ...]]:
         folded = " ".join(fold(name).split())
         if not folded:
             continue
-        key = frame.get(identity_c.PERSON(handle)) or handle
+        key = resolve(handle)
         for k in {folded, folded.split()[0]}:
             found.setdefault(k, set()).add(key)
     return {k: tuple(sorted(v)) for k, v in found.items()}
@@ -323,6 +325,7 @@ def _conversations(frame: Frame, rows: list[tuple[Any, ...]], state: MemoryState
     seul tenant. Dans un salon, ce qui ne lui était pas adressé ne compte
     que s'il nomme quelqu'un qu'elle connaît. ``aside`` : ce qu'une reprise
     sait ne pas lui avoir été adressé (la tranche l'a oublié depuis)."""
+    resolve, _ = identity_c.resolvers(frame.get)
     aside = {*state.unaddressed, *aside}
     her = self_c.name_of(frame.get(self_c.PERSONA))
     known_names = {k for k in directory if " " not in k and len(k) >= 3}
@@ -334,7 +337,7 @@ def _conversations(frame: Frame, rows: list[tuple[Any, ...]], state: MemoryState
         if not handle:
             continue
         if handle not in person_of:
-            person_of[handle] = frame.get(identity_c.PERSON(handle)) or handle
+            person_of[handle] = resolve(handle)
             name_of[handle] = clean_display_name(frame.get(identity_c.IDENTITY(handle)).name) or handle
         key = f"room:{room}" if room else f"private:{person_of[handle]}"
         groups.setdefault(key, []).append(row)

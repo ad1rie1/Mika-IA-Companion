@@ -7,7 +7,8 @@ ressent peut-il s'entendre ici (``felt_here``) ? Ce que le verdict lit pour en j
 
 - les clés telles qu'elles valent maintenant (``canon`` : une adresse reliée depuis à quelqu'un parle pour lui) et la
   personne qu'une mention désigne présumément (``presumed_of``, ``presumer``, ADR 0075 : de quoi y penser, jamais de
-  quoi la traiter comme elle) ;
+  quoi la traiter comme elle) — lues par le contrat de l'identité (``contracts.identity.resolvers``), comme partout
+  dans sa mémoire, ces deux-là n'y ajoutant qu'un mémo ;
 - un élément relu par son numéro, ses témoignages compris (``items_by_id``) ;
 - et, pour le dire, le nom d'une clé (``names_of``).
 
@@ -42,21 +43,25 @@ from mika.vocab.privacy import Sensitivity, Verdict, admissible
 def canon(frame: Frame, keys: Sequence[str], memo: dict[str, str]) -> tuple[str, ...]:
     """Les clés telles qu'elles valent maintenant : une adresse reliée depuis
     à quelqu'un parle pour lui (ce qu'elle a confié sous son autre compte est à elle) ; un nom qu'un opérateur a
-    relié à une personne (« l'Alice dont Bob parlait », c'était elle) la désigne — sinon il reste ce qu'il est."""
+    relié à une personne (« l'Alice dont Bob parlait », c'était elle) la désigne — sinon il reste ce qu'il est. Lue
+    par le contrat de l'identité (``resolvers``), une fois par clé (``memo``)."""
     out = set()
     for k in keys:
         if k not in memo:
-            memo[k] = frame.get(identity_c.PERSON(k)) or k
+            resolve, _ = identity_c.resolvers(frame.get)
+            memo[k] = resolve(k)
         out.add(memo[k])
     return tuple(sorted(out))
 
 
 def presumed_of(frame: Frame, key: str, memo: dict[str, str]) -> str:
     """La personne qu'une mention non reliée désigne présumément (ADR 0075), ``""`` sinon : de quoi y penser
-    quand on la nomme, jamais de quoi la traiter comme elle (le verdict ne suit pas une présomption)."""
+    quand on la nomme, jamais de quoi la traiter comme elle (le verdict ne suit pas une présomption). Lue par le
+    contrat de l'identité (``resolvers``), une fois par clé (``memo``)."""
     slot = "?" + key  # rangée à côté de ``canon`` sans s'y mêler
     if slot not in memo:
-        memo[slot] = frame.get(identity_c.PRESUMED(key)) if key.startswith("name:") else ""
+        _, presumed = identity_c.resolvers(frame.get)
+        memo[slot] = presumed(key)
     return memo[slot]
 
 

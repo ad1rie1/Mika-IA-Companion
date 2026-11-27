@@ -473,6 +473,7 @@ def _foreseen(ex: x.Extraction, frame: Frame, foreseen: dict[int, Forecast], pro
     """Une prévision passée, constatée par une personne qu'elle concerne (« j'ai été prise ! ») : réalisée (« a eu
     lieu ») ou non (« annulé ») — ce qu'elle apprend de qui l'avait prévu, et de ses propres pronostics (sa
     calibration, la sorte « prévision »). Ce qu'un autre en dit ne constate rien (ADR 0099)."""
+    resolve, _ = identity_c.resolvers(frame.get)
     drafts: list[Draft[Any]] = []
     for k in ex.constats:
         f = foreseen.get(k.numero)
@@ -480,7 +481,7 @@ def _foreseen(ex: x.Extraction, frame: Frame, foreseen: dict[int, Forecast], pro
         if f is None or outcome not in (c.HAPPENED, c.CANCELLED) or not k.messages:
             continue
         sources, told_by, _cited = provenance(k.messages)
-        by = next((t for t in told_by if (frame.get(identity_c.PERSON(t)) or t) in f.concerned), None)
+        by = next((t for t in told_by if resolve(t) in f.concerned), None)
         if by is None:
             continue
         drafts.append(c.RESOLVED.draft(
@@ -500,6 +501,7 @@ def _outcomes(ex: x.Extraction, frame: Frame, store: Any, conv: Conversation, pe
     mon IRM de demain est annulée ») ; il n'a pas encore eu lieu. Un moment qu'elle vivait à travers elle (« je te
     montrerai tout »), qui a eu lieu, devient un souvenir à elle, plus marquant avec sa propriétaire — avec, quand
     rien n'en est secret ni confié, ce que c'était en bref et sans personne (« un concert de jazz », ADR 0087)."""
+    resolve, _ = identity_c.resolvers(frame.get)
     drafts: list[Draft[Any]] = []
     done: set[int] = set()
     for k in ex.constats:
@@ -510,8 +512,8 @@ def _outcomes(ex: x.Extraction, frame: Frame, store: Any, conv: Conversation, pe
         if ev is None or outcome is None or ev.id in done:
             continue
         sources, told_by, _cited = provenance(k.messages)
-        concerned = {frame.get(identity_c.PERSON(a)) or a for a in ev.about}
-        by = next((t for t in told_by if (frame.get(identity_c.PERSON(t)) or t) in concerned), None)
+        concerned = {resolve(a) for a in ev.about}
+        by = next((t for t in told_by if resolve(t) in concerned), None)
         if by is None or not k.messages:
             continue
         done.add(ev.id)
@@ -522,7 +524,7 @@ def _outcomes(ex: x.Extraction, frame: Frame, store: Any, conv: Conversation, pe
                 continue
             name = next((sp.name for sp in conv.speakers if sp.person == by), "") or \
                 frame.get(identity_c.IDENTITY(by)).name or phrase("memory.names.someone")
-            owner = bool(frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(by)) or by)))
+            owner = bool(frame.get(identity_c.IS_OWNER(resolve(by))))
             lived = phrase("memory.lived.souvenir", name=name, text=text)
             gist = cues.gist_of(k.en_bref, people) if not ev.secret and ev.sensitivity < Sensitivity.CONFIDENCE \
                 else None
@@ -980,6 +982,7 @@ def _closed_memories(frame: Frame, store: Any, conv: Conversation, items: Sequen
     boîte »), noté avant le « garde-le pour toi », restait dicible à toute amie, et nourrissait le portrait (sonde
     réelle du 2026-10-09). Une autre croyance née du même message ne se ferme pas : la relecture la voit, et la
     désigne si elle laisse deviner le secret."""
+    resolve, _ = identity_c.resolvers(frame.get)
     if not items:
         return []
     t, thread = tb.items(), transcript_c.thread_table()
@@ -990,7 +993,7 @@ def _closed_memories(frame: Frame, store: Any, conv: Conversation, items: Sequen
     askers = set(conv.persons)
     theirs = sorted(int(i) for chunk in batches(sorted(cited)) for i, who in store.query_mind(
         select(thread.c.id, thread.c.person).where(thread.c.role == "user", thread.c.id.in_(chunk)))
-        if who and (frame.get(identity_c.PERSON(who)) or who) in askers)
+        if who and resolve(who) in askers)
     if not theirs:
         return []
     # un souvenir né de l'un de ces messages (``sources`` : une liste JSON, lue par ``json_has`` — ``json_each``

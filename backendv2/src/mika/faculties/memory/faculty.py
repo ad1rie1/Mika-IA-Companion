@@ -615,7 +615,8 @@ def _uttered(s: MemoryState, e, cx) -> MemoryState:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         floor = params(cx.params).hard_reply_from
         if declared is not None and any(e_ == Emotion.SAD.value and x >= floor for e_, x in declared.all):
-            s = _hard(s, cx.facts.get(identity_c.PERSON(d.target)) or d.target, e.at)
+            resolve, _ = identity_c.resolvers(cx.facts.get)
+            s = _hard(s, resolve(d.target), e.at)
     return replace(s, last_message_at=e.at, chunks=s.chunks + (1 if d.target and d.reply_to else 0))
 
 
@@ -933,7 +934,8 @@ def _checkpoint(s: MemoryState, cx) -> int:
 def _speaks_for(cx, key: str, person: str) -> bool:
     """Une clé notée alors (une adresse, ``name:…``) désigne cette personne maintenant : une adresse reliée depuis à
     quelqu'un, un nom qu'un opérateur a relié à une personne parlent pour elle (ADR 0035, 0048)."""
-    return key == person or (cx.facts.get(identity_c.PERSON(key)) or key) == person
+    resolve, _ = identity_c.resolvers(cx.facts.get)
+    return key == person or resolve(key) == person
 
 
 @MEMORY.fact(c.PROMISES_TO, reads=[identity_c.PERSON])

@@ -128,10 +128,11 @@ def for_people(store, people, limit=256):
 
 @MEMORY.interpret(rt.PERCEPTION_RECEIVED)
 def recall_life(s, frame, ev, ports):
+    resolve, _ = identity_c.resolvers(frame.get)
     store = ports.get("store") if ports else None
     if store is None:
         return []
-    person = frame.get(identity_c.PERSON(ev.data.handle)) or ev.data.handle
+    person = resolve(ev.data.handle)
     keys = tuple(sorted({person, ev.data.handle, *frame.get(identity_c.HANDLES(person))}))
     # seulement ce que la tranche garderait : un moment passé depuis longtemps, rechargé, en sortirait au prochain
     # moment noté — et reviendrait dans le journal au message suivant

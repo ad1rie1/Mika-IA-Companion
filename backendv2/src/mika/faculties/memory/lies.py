@@ -84,6 +84,7 @@ class Lies:
 
     @staticmethod
     def _episode_memory(frame: Frame, store: Any, seq: int, event: Any) -> Any:
+        resolve, _ = identity_c.resolvers(frame.get)
         if event is None or event.type != rt.UTTERANCE.name:
             return None
         data = json.loads(event.data)
@@ -94,7 +95,7 @@ class Lies:
             return None
         span = next((v for k, v in data.get("annotations") or () if k == expression_c.LIE_ANNOTATION), None)
         said = clip(false_part(said, span))
-        person = frame.get(identity_c.PERSON(handle)) or handle
+        person = resolve(handle)
         who = clean_display_name(frame.get(identity_c.IDENTITY(person)).name) or phrase("memory.lie.someone")
         asked = ""
         if data.get("reply_to"):

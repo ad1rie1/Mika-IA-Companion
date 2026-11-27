@@ -45,8 +45,9 @@ def person_of(frame: Frame, key: str) -> str:
     protège pas moins) — vide sinon."""
     if not key.startswith("name:"):
         return key
-    key = frame.get(identity_c.PERSON(key)) or key
-    return (frame.get(identity_c.PRESUMED(key)) or "") if key.startswith("name:") else key
+    resolve, presumed = identity_c.resolvers(frame.get)
+    key = resolve(key)
+    return presumed(key) if key.startswith("name:") else key
 
 
 def delicate_topics(frame: Frame, person: str, store: Any = None) -> tuple[str, ...]:

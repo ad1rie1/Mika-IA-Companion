@@ -246,11 +246,12 @@ def readings(store: Any, p: MemoryParams, limit: int | None = None) -> tuple[lis
 def _persons(frame: Frame, keys: Sequence[str]) -> set[str]:
     """Qui ces clés désignent : une adresse reliée parle pour la personne, un prénom pour celle qu'il désigne
     présumément (ADR 0075) — de quoi confronter, jamais de quoi dire."""
+    resolve, presumed = identity_c.resolvers(frame.get)
     out = set()
     for k in keys:
-        person = frame.get(identity_c.PERSON(k)) or k
+        person = resolve(k)
         if person.startswith("name:"):
-            person = frame.get(identity_c.PRESUMED(person)) or person
+            person = presumed(person) or person
         out.add(person)
     return out
 

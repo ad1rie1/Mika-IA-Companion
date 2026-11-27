@@ -161,6 +161,47 @@ def test_forgetting_alice_takes_what_was_presumed_of_her(tmp_path):
     assert run(tmp_path, scenario) == []
 
 
+def test_the_person_a_key_names_is_read_once_through_the_identity_contract(tmp_path):
+    """La mémoire lit la personne qu'une clé désigne maintenant par le contrat de l'identité (``resolvers``), plus
+    par une écriture redite dans chacun de ses modules : sur un cadre qui a une adresse reliée après coup, une clé
+    nue, une mention présumée, une mention que personne ne porte, une adresse inconnue et une clé vide, l'ancienne
+    écriture (``frame.get(PERSON(k)) or k``, et ``PRESUMED`` d'une mention) et la nouvelle rendent la même personne —
+    ``canon`` et ``presumed_of`` aussi, mémo compris."""
+    paul = f"name:{SCOPE}:paul"
+
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await connect(kernel, "user_2", "Alice")
+        await connect(kernel, "user_3", "Bob")
+        await say(kernel, said("ext_5", "coucou, c'est moi depuis mon autre compte", channel="external"))
+        linked = await perform(kernel, "identity.relier", form(person="user_2", confirmed="on"), by="user_1",
+                               subject="ext_5", nonce="a")
+        await _mention(kernel)
+        frame = kernel.mind.frame()
+        resolve, presumed = identity_c.resolvers(frame.get)
+        memo: dict[str, str] = {}
+        rows = []
+        for k in ("ext_5", "user_2", "user_3", MENTION, paul, "ext_9", ""):
+            person = frame.get(identity_c.PERSON(k)) or k
+            guess = frame.get(identity_c.PRESUMED(k)) if k.startswith("name:") else ""
+            rows.append((k, person, resolve(k), canon(frame, (k,), memo), guess, presumed(k),
+                         presumed_of(frame, k, memo)))
+        twice = canon(frame, ("ext_5", "user_2", MENTION), memo), presumed_of(frame, MENTION, memo)
+        return linked.ok, rows, twice
+
+    linked, rows, twice = run(tmp_path, scenario)
+    assert linked
+    for k, person, resolved, canonical, guess, guessed, presumed in rows:
+        assert resolved == person and canonical == (person,), k
+        assert guessed == guess and presumed == guess, k
+    found = {k: (person, guess) for k, person, _resolved, _canonical, guess, _guessed, _presumed in rows}
+    # le cadre n'est pas trivial : l'adresse reliée parle pour Alice, la mention présumée reste la sienne
+    assert found["ext_5"] == ("user_2", "") and found[MENTION] == (MENTION, "user_2")
+    assert found[paul] == (paul, "") and found["ext_9"] == ("ext_9", "") and found[""] == ("", "")
+    # relu par le mémo, la même chose
+    assert twice == (tuple(sorted(("user_2", MENTION))), "user_2")
+
+
 # ── le rappel : y penser, avec son doute ─────────────────────────────────
 
 
