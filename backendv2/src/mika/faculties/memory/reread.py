@@ -26,7 +26,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import AliasChoices, Field, ValidationError, field_validator
 from sqlalchemy import func, select
 
 from mika.contracts import body as body_c
@@ -37,6 +37,7 @@ from mika.faculties.memory import cues, timespan
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
+from mika.faculties.memory.extraction import Lenient
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
 from mika.faculties.memory.hearing import items_by_id, names_of, verdict_of
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
@@ -68,14 +69,10 @@ KNOWN_SHOWN, OPINIONS_SHOWN = 15, 8
 # ── Ce que le modèle répond ─────────────────────────────────────────────────
 
 
-class _Lenient(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-
 _TEXT = AliasChoices("texte", "text", "contenu")
 
 
-class XLu(_Lenient):
+class XLu(Lenient):
     texte: str = Field(min_length=3, max_length=500, validation_alias=_TEXT,
                        description=phrase("memory.reread.fields.texte"))
     lecture: int = Field(description=phrase("memory.reread.fields.lecture"))
@@ -85,7 +82,7 @@ class XLu(_Lenient):
     remplace: int | None = Field(default=None, description=phrase("memory.reread.fields.remplace"))
 
 
-class XMonde(_Lenient):
+class XMonde(Lenient):
     texte: str = Field(min_length=3, max_length=300, validation_alias=_TEXT,
                        description=phrase("memory.extraction.fields.event_text"))
     lecture: int = Field(description=phrase("memory.reread.fields.lecture"))
@@ -94,7 +91,7 @@ class XMonde(_Lenient):
     probabilite: str | float | None = Field(default=None, description=phrase("memory.extraction.fields.probabilite"))
 
 
-class XAvis(_Lenient):
+class XAvis(Lenient):
     texte: str = Field(min_length=3, max_length=400, validation_alias=_TEXT,
                        description=phrase("memory.reread.fields.avis"))
     remplace: int | None = Field(default=None, description=phrase("memory.reread.fields.avis_remplace"))
@@ -107,12 +104,12 @@ class XAvis(_Lenient):
         return [int(i) for i in items if isinstance(i, int) or (isinstance(i, str) and i.strip().isdigit())]
 
 
-class XLien(_Lenient):
+class XLien(Lenient):
     paire: int = Field(description=phrase("memory.reread.fields.paire"))
     relation: str = Field(description=phrase("memory.reread.fields.relation"))
 
 
-class XConstatLu(_Lenient):
+class XConstatLu(Lenient):
     moment: int = Field(validation_alias=AliasChoices("moment", "numero", "numéro", "id"),
                         description=phrase("memory.reread.fields.constat_moment"))
     lecture: int = Field(description=phrase("memory.reread.fields.lecture"))
@@ -122,7 +119,7 @@ class XConstatLu(_Lenient):
 # les noms de ces classes (``Relecture``, ``XLu``, ``XMonde``, ``XAvis``, ``XLien``, ``XConstatLu``) et de leurs
 # champs restent en français, à l'écart de la règle des identifiants anglais : le schéma de l'outil les montre au
 # modèle (``schema_of(Relecture)``, son titre et ses ``$defs``), ils sont du prompt. Ne pas les renommer.
-class Relecture(_Lenient):
+class Relecture(Lenient):
     croyances: list[XLu] = Field(default_factory=list)
     moments: list[XMonde] = Field(default_factory=list)
     avis: list[XAvis] = Field(default_factory=list)

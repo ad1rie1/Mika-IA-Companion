@@ -88,7 +88,10 @@ def _names(value: Any) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-class _Lenient(BaseModel):
+class Lenient(BaseModel):
+    """Une forme que le modèle remplit : ce qu'elle ne connaît pas s'ignore (les formes de la consolidation, et
+    celles de la relecture de ce qu'elle a lu, ``reread.py``)."""
+
     model_config = ConfigDict(extra="ignore")
 
 
@@ -121,7 +124,7 @@ def kind_of_genre(genre: str | None) -> str:
 # ``XPrevision``, ``XConstat``) et de leurs champs restent en français, à l'écart de la règle des identifiants
 # anglais : le schéma de l'outil les montre au modèle (``schema_of(Extraction)['$defs']`` les nomme), ils sont du
 # prompt. Ne pas les renommer.
-class _Item(_Lenient):
+class _Item(Lenient):
     texte: str = Field(min_length=3, max_length=600, validation_alias=_TEXT)
     sur_elle: bool = Field(default=False, description=phrase("memory.extraction.fields.sur_elle"))
     genre: str | None = Field(default=None, description=phrase("memory.extraction.fields.genre"))
@@ -200,7 +203,7 @@ class XCroyance(_Item):
                                description=phrase("memory.extraction.fields.jusqua"))
 
 
-class XPromesse(_Lenient):
+class XPromesse(Lenient):
     texte: str = Field(min_length=3, max_length=400, validation_alias=_TEXT,
                        description=phrase("memory.extraction.fields.promise_text"))
     envers: str
@@ -220,7 +223,7 @@ class XPromesse(_Lenient):
         return clean_tokens(v)
 
 
-class XTenue(_Lenient):
+class XTenue(Lenient):
     id: int
     statut: str
 
@@ -259,7 +262,7 @@ class XPrevision(_Item):
     point_de_vue: str | None = Field(default=None, description=phrase("memory.extraction.fields.point_de_vue"))
 
 
-class XConstat(_Lenient):
+class XConstat(Lenient):
     """Comment un moment passé a tourné, d'après ce que la personne concernée en dit (ADR 0086)."""
 
     numero: int = Field(validation_alias=AliasChoices("numero", "numéro", "id", "moment"),
@@ -288,7 +291,7 @@ def outcome_of(issue: str) -> str | None:
     return next((outcome for word, outcome in _ISSUES if word in text), None)
 
 
-class Extraction(_Lenient):
+class Extraction(Lenient):
     issues: list[str] = Field(default_factory=list, exclude=True)
     souvenirs: list[XSouvenir] = Field(default_factory=list)
     croyances: list[XCroyance] = Field(default_factory=list)
