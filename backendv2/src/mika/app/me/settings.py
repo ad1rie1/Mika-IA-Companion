@@ -110,8 +110,9 @@ async def account_password(call: Call) -> dict[str, Any]:
 
 def _canal_table(canals: Canals, canal: str) -> tuple[CanalTable, bool, bool]:
     """Le tableau qui vaut pour un de ses comptes (``courrier:<clé>``, ``teams:<clé>``), tel que le courrier et Teams
-    le lisent (``mail_verdict``, ``teams_verdict``) : le sien s'il est réglé, sinon celui de tout son canal, sinon le
-    minimum vital ; s'il est à lui (``set``) ; s'il est celui de tout son canal, réglé dans la console (``common``)."""
+    le lisent (``plugins/email/sending.py::mail_verdict``, ``plugins/teams/sending.py::teams_verdict``) : le sien
+    s'il est réglé, sinon celui de tout son canal, sinon le minimum vital ; s'il est à lui (``set``) ; s'il est celui
+    de tout son canal, réglé dans la console (``common``)."""
     kind, key = canal_key(canal)
     table, used = canals.table_of(Canal(kind, key))
     return table, used == canal, used == kind and kind in canals.tables

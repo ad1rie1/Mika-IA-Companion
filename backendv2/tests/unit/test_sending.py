@@ -8,8 +8,9 @@ from pydantic import ValidationError
 
 from mika.adapters.store_sql import SqlStore
 from mika.app.settings import CANALS_KEY, FAMILIES_KEY, SecretBox, Settings
+from mika.plugins.email.sending import mail_rule
 from mika.vocab.access import ALONE, EVERYONE, OWNER, Table, ToolRule
-from mika.vocab.canals import CanalRule, Canals, CanalTable, mail_rule, vital
+from mika.vocab.canals import CanalRule, Canals, CanalTable, vital
 
 
 async def test_canal_tables_are_kept_apart_and_a_missing_one_has_its_vital_minimum(tmp_path):

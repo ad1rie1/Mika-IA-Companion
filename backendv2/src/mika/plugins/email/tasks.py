@@ -30,8 +30,8 @@ from mika.plugins.email import (
     keepers,
     params_of,
 )
+from mika.plugins.email.sending import mail_rule
 from mika.vocab.access import SELF
-from mika.vocab.canals import mail_rule
 from mika.vocab.episodes import AWAITED_FOR_US, Kind, task_target
 from mika.vocab.phrasebook import phrase
 

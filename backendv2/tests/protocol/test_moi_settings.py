@@ -9,7 +9,9 @@ from mika.app.domains.mail.settings import MailSettings
 from mika.app.domains.teams.settings import TeamsSettings
 from mika.app.me import common as common_me
 from mika.plugins import email as email_p
-from mika.vocab.canals import CanalRule, CanalTable, mail_rule, teams_rule
+from mika.plugins.email.sending import mail_rule
+from mika.plugins.teams.sending import teams_rule
+from mika.vocab.canals import CanalRule, CanalTable
 from tests.protocol.test_moi_mail import API, login, post, second_person
 from tests.protocol.test_web import bootstrap, csrf, world  # noqa: F401 — fixture partagée
 

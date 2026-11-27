@@ -45,11 +45,11 @@ from mika.plugins.email.inspect.common import (
     fold,
     owner_name,
 )
+from mika.plugins.email.sending import mail_rule
 from mika.plugins.email.voice import voice_text
 from mika.ports.mail import AccountInfo
 from mika.ports.signin import SIGNED_IN, SIGNIN_PENDING, SignIn
 from mika.vocab.access import PERSON
-from mika.vocab.canals import mail_rule
 
 #: où se règle le tableau d'une boîte (ADR 0134)
 CANALS_PAGE = "canaux"

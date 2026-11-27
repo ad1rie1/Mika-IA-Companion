@@ -55,9 +55,10 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
+from mika.plugins.teams.sending import teams_rule
 from mika.ports.teams import DEFAULT_ACCOUNT, conversation_key
 from mika.vocab.access import PERSON, SELF, SHARE_PREPARE, SHARE_READ, SHARE_USE
-from mika.vocab.canals import Canals, teams_rule
+from mika.vocab.canals import Canals
 from mika.vocab.episodes import Kind, gave_way, task_of
 from mika.vocab.ownership import best_handle, must_approve, owns_one, reach, shared_with
 from mika.vocab.phrasebook import phrase

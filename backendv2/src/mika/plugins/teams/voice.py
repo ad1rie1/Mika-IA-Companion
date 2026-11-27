@@ -49,10 +49,10 @@ from mika.plugins.teams import (
     writer_of,
 )
 from mika.plugins.teams.reactions import quote_said, reactions_said
+from mika.plugins.teams.sending import teams_rule
 from mika.ports.preprocess import inert
 from mika.ports.teams import Voice, conversation_key
 from mika.vocab.access import SELF, SHARE_PREPARE, SHARE_READ
-from mika.vocab.canals import teams_rule
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity

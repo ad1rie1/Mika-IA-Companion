@@ -67,13 +67,13 @@ from mika.plugins.email import (
     reach_of,
 )
 from mika.plugins.email.boxes import Boxes
+from mika.plugins.email.sending import mail_rule_for_all, mail_send
 from mika.plugins.email.voice import voice_text
 from mika.ports.drafts import to_fill
 from mika.ports.mail import ASIDE, Draft, MailQuery, addresses, reply_recipients, reply_subject
 from mika.ports.preprocess import cite, inert
 from mika.vocab import flows
 from mika.vocab.access import SHARE_PREPARE, SHARE_READ, SHARE_USE
-from mika.vocab.canals import mail_rule_for_all, mail_send
 from mika.vocab.episodes import WORKING, Kind, is_work_target, task_of
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import family, phrase

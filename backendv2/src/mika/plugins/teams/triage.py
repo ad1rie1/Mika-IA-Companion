@@ -18,11 +18,12 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsParams, TeamsState, her, owner_of, params_of
 from mika.plugins.teams.reactions import quote_said, reactions_said
+from mika.plugins.teams.sending import teams_rule
 from mika.ports.llm import LLMRequest, Message, json_object
 from mika.ports.preprocess import cite, inert
 from mika.vocab.access import SELF
 from mika.vocab.affect import Emotion, felt_schema, named_feeling
-from mika.vocab.canals import CanalRule, teams_rule
+from mika.vocab.canals import CanalRule
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 

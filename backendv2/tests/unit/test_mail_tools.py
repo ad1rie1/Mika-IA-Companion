@@ -35,6 +35,7 @@ from mika.plugins.email import EMAIL, POLL_ASKED, READ, SENT_KEPT, answered
 from mika.plugins.email import params_of as email_params
 from mika.plugins.email.inspect.common import mail_key
 from mika.plugins.email.keep import KEEP_EVERY, KEEP_IDLE, Keep
+from mika.plugins.email.sending import mail_rule_for_all, mail_send
 from mika.plugins.email.tasks import _prepare
 from mika.ports.llm import LLMRequest, LLMResponse
 from mika.ports.mail import AccountInfo, Attachment, Found, Mail, addresses
@@ -45,7 +46,7 @@ from mika.runtime.tools import ToolContext, checked_args
 from mika.sim.clock import run_virtual
 from mika.sim.outside import FakeMail
 from mika.vocab.access import ALONE, EVERYONE, NO
-from mika.vocab.canals import CanalRule, Canals, CanalTable, mail_rule_for_all, mail_send
+from mika.vocab.canals import CanalRule, Canals, CanalTable
 from mika.vocab.episodes import Kind, task_target
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust

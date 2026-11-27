@@ -7,7 +7,9 @@ qu'elle en garde — la ressource qu'une demande touche a son propre tableau, lu
 Sur **tes comptes** (une boîte de courrier, ton compte Teams), elle écrit à ta place : ses colonnes sont alors
 « préparer d'elle-même » et comment ça part (brouillon, ton accord, seule) ; qui est en face s'y dit par une
 adresse ou un @domaine (le courrier), un morceau du nom d'une conversation ou de qui écrit (Teams), ou tout le
-monde. Un canal qu'on n'a pas réglé a son **minimum vital** (``vital``), écrit ici.
+monde (``designated``, que le courrier et Teams partagent ; la ligne qui décide d'un envoi, chacun la lit chez lui :
+``plugins/email/sending.py``, ``plugins/teams/sending.py``). Un canal qu'on n'a pas réglé a son **minimum vital**
+(``vital``), écrit ici.
 
 Rangés dans les réglages, passés en paramètre à qui en lit (journalisés : sa vie se rejoue) ; une valeur, pas une
 faculté.
@@ -149,9 +151,10 @@ def addressed(motif: str, address: str) -> bool:
     return motif == address or (motif.startswith("@") and motif == domain)
 
 
-def _designated(line: CanalRule, hay: Iterable[str], by_address: bool) -> bool:
+def designated(line: CanalRule, hay: Iterable[str], by_address: bool) -> bool:
     """Une ligne d'un de tes comptes désigne-t-elle ce correspondant ? Tout le monde, ou une de ses adresses (le
-    courrier : exacte ou @domaine ; Teams : un morceau de la conversation ou de qui écrit)."""
+    courrier : exacte ou @domaine ; Teams : un morceau de la conversation ou de qui écrit). La ligne qui décide d'un
+    envoi se lit chez son plugin (``plugins/email/sending.py``, ``plugins/teams/sending.py``), qui l'appelle."""
     if not line.who or EVERYONE in line.who:
         return True
     text = "\n".join(h.lower() for h in hay if h)
@@ -162,37 +165,3 @@ def _designated(line: CanalRule, hay: Iterable[str], by_address: bool) -> bool:
         if (addressed(motif, text) if by_address else motif.lower() in text):
             return True
     return False
-
-
-def mail_verdict(canals: Canals, account: str, address: str) -> Verdict[CanalRule]:
-    """La ligne d'un courrier de (ou vers) cette adresse, depuis cette boîte, et sa place : le tableau de la boîte
-    (``courrier:<clé>``), sinon celui du courrier, sinon le minimum vital."""
-    table = canals.table(f"{MAIL}:{account}") if f"{MAIL}:{account}" in canals.tables else canals.table(MAIL)
-    return decide(table.lines, table.default, lambda r: _designated(r, (address,), True))
-
-
-def mail_rule(canals: Canals, account: str, address: str) -> CanalRule:
-    return mail_verdict(canals, account, address).line
-
-
-def mail_rule_for_all(canals: Canals, account: str, addresses: Iterable[str]) -> CanalRule:
-    """La ligne la plus serrée d'un envoi à plusieurs destinataires : il ne part seul que si chacun le permet."""
-    found = [mail_rule(canals, account, a) for a in addresses] or [mail_rule(canals, account, "")]
-    return next((r for r in found if mail_send(r) != "seule"), found[0])
-
-
-def mail_send(rule: CanalRule) -> str:
-    """Comment un courrier part sous cette ligne : pas de brouillon que tu envoies toi-même (il vaut ton accord)."""
-    return "accord" if rule.reply == "brouillon" else rule.reply
-
-
-def teams_verdict(canals: Canals, account: str, *about: str) -> Verdict[CanalRule]:
-    """La ligne d'un message Teams et sa place : ``about`` — l'identifiant de la conversation, son nom, qui écrit ;
-    le tableau du compte (``teams:<clé>``), sinon celui de Teams, sinon le minimum vital."""
-    key = f"{TEAMS}:{account}" if account and f"{TEAMS}:{account}" in canals.tables else TEAMS
-    table = canals.table(key)
-    return decide(table.lines, table.default, lambda r: _designated(r, about, False))
-
-
-def teams_rule(canals: Canals, account: str, *about: str) -> CanalRule:
-    return teams_verdict(canals, account, *about).line
