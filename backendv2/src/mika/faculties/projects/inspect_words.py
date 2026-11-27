@@ -2,7 +2,8 @@
 
 Le mode d'un projet, son statut ; la sorte d'un objectif et son état ; le verdict d'une exécution ; le statut d'une
 décision technique ; le ton d'une priorité ; qui a écrit ; où en est une pull request et ses vérifications ; où en est
-son plan ; qui valide le plan d'un ticket, et la publication de ses tickets en issues. Les vues (``inspect.py``,
+son plan ; qui valide le plan d'un ticket, et la publication de ses tickets en issues ; pourquoi ce qu'une personne a
+écrit sur une pull request n'est pas parti (``WRITE_WORDS``, sur les raisons de ``merge.py``). Les vues (``inspect.py``,
 ``inspect_git.py``), le fil d'un projet (``feed.py``), l'API par personne et les pages dessinées de la console les
 lisent ici, sans tirer les vues.
 
@@ -14,6 +15,7 @@ reprend les choix du formulaire (``actions.PRIORITY_CHOICES``).
 from __future__ import annotations
 
 from mika.contracts import projects as c
+from mika.faculties.projects import merge
 from mika.ports.workshop import (
     CHECKS_FAILED,
     CHECKS_PASSED,
@@ -49,3 +51,11 @@ PLAN_FR = {c.TO_FRAME: ("à cadrer", "info"), c.PROPOSED: ("plan proposé, il at
 REVIEW_FR = {c.REVIEW_ALWAYS: "toujours par toi", c.REVIEW_LARGE: "par toi, sauf pour un petit ticket"}
 ISSUES_FR = {c.ISSUES_NEVER: "jamais", c.ISSUES_ASK: "sur ton accord, ticket par ticket",
              c.ISSUES_ALWAYS: "toujours (la synchronisation)"}
+#: pourquoi ce qu'une personne a écrit sur une pull request n'est pas parti (``PullWriteAnswered.why``)
+WRITE_WORDS = {
+    merge.STALE: "la pull request avait changé entre-temps",
+    merge.NO_HOST: "aucun hôte ne sait l'écrire sur ce dépôt",
+    merge.FORGOTTEN: "son texte ne se lit plus",
+    merge.REFUSED: "l'hôte a refusé, ou n'a pas répondu",
+    merge.CUT: "la demande a été interrompue — relis la pull request chez l'hôte",
+}

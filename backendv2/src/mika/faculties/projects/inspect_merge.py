@@ -90,14 +90,6 @@ CONFIRM = ("Fusionner cette pull request dans la branche de base du dépôt dist
 NOT_WRITER = ("Seul le propriétaire du projet, ou qui s'occupe d'elle, écrit chez l'hôte sur une pull request : elle, "
               "jamais.")
 NOT_WRITABLE = "Cet objectif n'a pas de pull request ouverte chez l'hôte."
-#: pourquoi ce qu'une personne a écrit sur une pull request n'est pas parti (``PullWriteAnswered.why``)
-WRITE_WORDS = {
-    merge.STALE: "la pull request avait changé entre-temps",
-    merge.NO_HOST: "aucun hôte ne sait l'écrire sur ce dépôt",
-    merge.FORGOTTEN: "son texte ne se lit plus",
-    merge.REFUSED: "l'hôte a refusé, ou n'a pas répondu",
-    merge.CUT: "la demande a été interrompue — relis la pull request chez l'hôte",
-}
 EDIT_ASKED = "Modification demandée chez l'hôte, à ton nom : la pull request se relit dans un instant."
 COMMENT_ASKED = "Commentaire demandé chez l'hôte : il part du compte du jeton, et dit qu'il est de toi."
 
