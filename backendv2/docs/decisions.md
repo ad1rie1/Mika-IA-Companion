@@ -33,7 +33,7 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 | Les fournisseurs de modèles | 0026, 0072, 0073, 0127, 0136, 0142, 0157, 0158, 0239, 0267, 0285 |
 | Sa voix, sa persona, la genèse | 0070, 0071, 0112, 0114, 0115, 0124, 0138, 0139, 0140, 0141, 0146, 0152, 0154, 0156, 0159, 0261 |
 | Les clients, le fil, le monde | 0041, 0049, 0050, 0051, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116, 0162, 0164, 0165, 0170, 0187, 0200, 0208, 0209, 0215, 0233, 0235, 0242, 0252, 0282, 0284, 0286, 0287, 0288, 0290, 0291, 0292, 0293, 0294, 0296, 0308, 0312 |
-| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295, 0297, 0310 |
+| La console et l'exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103, 0121, 0122, 0123, 0125, 0126, 0169, 0173, 0174, 0175, 0176, 0177, 0178, 0179, 0180, 0181, 0182, 0183, 0197, 0201, 0202, 0203, 0204, 0205, 0206, 0210, 0216, 0217, 0218, 0219, 0225, 0230, 0231, 0232, 0234, 0237, 0241, 0281, 0295, 0297, 0310, 0317 |
 | Ce que les sondes et les audits ont fixé | 0043, 0048, 0054, 0102, 0135, 0266, 0314 |
 
 ## Le noyau : journal, arbitrage, pipeline
@@ -4077,7 +4077,19 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 
 *Pourquoi :* l'agenda (ADR 0309) a demandé de retoucher dix-sept fichiers partagés, et chaque domaine de sa taille refaisait le même tour — ces fichiers sont aussi ceux où deux sessions se heurtent.
 
-*Révise 0177 (en partie : le module qui déclare les onglets d'un domaine, leurs gabarits et leur feuille vivent dans son dossier).*
+*Révise 0177 (en partie : le module qui déclare les onglets d'un domaine, leurs gabarits et leur feuille vivent dans son dossier). Révisée par 0317.*
+
+### 0317 — Une passerelle qu'un seul plugin sert est un domaine
+
+- **La passerelle des modèles sert tout le moteur : elle reste au cadre**, avec son rechargement, sa rubrique de réglages et sa commande.
+- **Une passerelle qu'un seul plugin sert est un domaine** : les dessins (`app/domains/imaging/`) portent leurs réglages (leurs fournisseurs, qui dessine quoi, les clés scellées), leur câblage (la passerelle vivante, qui est le port `imaging` ; elle se branche sur ses réglages au démarrage et à chaque enregistrement, et se ferme en dernier), leur rubrique de réglages et leur commande (`mika images`). La synthèse vocale naîtra sur ce modèle.
+- **Le registre des appels reste commun** : un appel d'images s'y inscrit sous `image.<rôle>`, et ce qu'il coûte s'ajoute à ce que coûtent les modèles.
+- **La transcription reste au cadre** : elle prétraite ce qu'on lui envoie, au bord du cœur, pour tous.
+- **Sa place à côté des modèles est un ordre que le cadre garde en noms**, comme pour tout domaine : sa commande dans `mika --help` (`app/cli/models.py::BESIDE_MODELS`), sa ligne dans la page des plugins (`ORDER`).
+
+*Pourquoi :* le cadre « ne nomme aucun domaine » (ADR 0310), mais câblait les dessins à la main dans six fichiers — le serveur, les réglages, leur rubrique, la commande, la page des plugins, les libellés. La synthèse vocale est une passerelle du même genre : elle aurait refait le même tour.
+
+*Révise 0310 (en partie : les dessins sont un domaine, et la place d'une commande à côté de celle des modèles est un ordre de plus gardé au centre).*
 
 ## Ce que les sondes et les audits ont fixé
 
