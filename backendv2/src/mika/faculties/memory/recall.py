@@ -90,7 +90,7 @@ from mika.faculties.memory.hearing import (
     presumer,
     verdict_of,
 )
-from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
+from mika.faculties.memory.life import takes_up_moment
 from mika.faculties.memory.lines import (
     concerned_name,
     contested_line,
@@ -100,6 +100,7 @@ from mika.faculties.memory.lines import (
     mood_of,
     sensed,
 )
+from mika.faculties.memory.promises import due_now, due_today
 from mika.faculties.memory.salience import (
     Item,
     Verdict,
@@ -394,14 +395,6 @@ def about_named(frame: Frame, store: Any, named: Mapping[str, tuple[str, ...]], 
         items.sort(key=lambda it: (-it.importance * min(1.0, salience(it, frame.now, p)), -it.id))
         out += items[: max(1, p.max_person_items)]
     return out
-
-
-# ── Une promesse due aujourd'hui ──────────────────────────────────────────
-
-
-def due_today(pr: c.PendingPromise, frame: Frame) -> bool:
-    """Une promesse datée dont le jour est venu (ou passé) ; pas une promesse vague, ni celle de demain."""
-    return pr.due is not None and not pr.implicit_due and not kept_too_early(pr, frame.now, frame)
 
 
 # ── Ce qu'on cherche ──────────────────────────────────────────────────────

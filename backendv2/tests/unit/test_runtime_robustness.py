@@ -24,7 +24,7 @@ import pytest
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.faculties.memory.index import Index
-from mika.faculties.memory.life import LetGo
+from mika.faculties.memory.promises import LetGo
 from mika.kernel.arbitration import Anyone, Candidate, pool
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, instant
 from mika.kernel.events import Content, Origin, Payload

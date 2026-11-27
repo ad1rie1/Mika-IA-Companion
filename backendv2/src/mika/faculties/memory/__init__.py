@@ -7,7 +7,8 @@ Ses modules à contributions, importés ici pour qu'elles s'inscrivent :
 - l'index des vecteurs, un cache (``index``) ;
 - le rappel filtré par la divulgation (``recall``), ses sections (``recall_sections``) et le récit sans nom
   (``veiled``, ADR 0091) ;
-- la vie des autres et ses promesses (``life``), et l'archive des situations et des dates durables (``archive``) ;
+- la vie des autres (``life``), ses promesses (``promises``), et l'archive des situations et des dates durables
+  (``archive``) ;
 - la nuit : réfléchir, trier, joindre (``night``), et relire ce qu'elle a lu (``reread``, ADR 0085) ;
 - ses mensonges (``lies``, ADR 0076) et les sujets délicats (``delicate``, ADR 0099) ;
 - ses projections (``projections``), ses outils (``tools``), ses vues de la console (``inspect``) et ce que
@@ -27,6 +28,7 @@ from mika.faculties.memory import (  # noqa: F401 — contributions
     life,
     night,
     projections,
+    promises,
     recall,
     recall_sections,
     relayed,
