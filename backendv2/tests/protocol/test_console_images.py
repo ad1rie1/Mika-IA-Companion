@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from mika.app.domains.imaging.settings import ImagingSettings
+from mika.app.domains.imaging.wiring import NAME as IMAGING
 from tests.protocol.test_console_settings import BASE, html_of, post
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -27,19 +28,21 @@ def image_backend(name: str, **fields: str) -> dict:
 def test_images_are_off_until_a_provider_is_declared_then_live_without_restarting(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
+    # la passerelle vivante, que le câblage des dessins tient (``app/domains/imaging/wiring.py``, ADR 0317)
+    drawings = live.parts[IMAGING].gateway
     url = f"{BASE}/images-fournisseurs"
     page = html_of(client.get(url))
     assert "Fournisseurs d'images" in page and "désactivé : aucun fournisseur" in page
-    assert live.kernel.deps.ports["imaging"] is live.imaging and not live.imaging.configured
+    assert live.kernel.deps.ports["imaging"] is drawings and not drawings.configured
 
     refused = post(client, url, image_backend("oa", kind="openai", model="gpt-image-1"))
     assert refused.status_code == 400 and "pas de clé" in html_of(refused)
-    assert client.portal.call(live.settings.of(ImagingSettings).imaging).backends == {} and not live.imaging.configured
+    assert client.portal.call(live.settings.of(ImagingSettings).imaging).backends == {} and not drawings.configured
 
     saved = post(client, url, image_backend("oa", kind="openai", model="gpt-image-1", api_key=CANARY))
     assert saved.status_code == 200 and "« oa » enregistré" in html_of(saved) and CANARY not in saved.text
-    assert live.imaging.configured and live.imaging.serving("draw") == "oa"
-    assert not live.imaging.can("draw", adult=True)
+    assert drawings.configured and drawings.serving("draw") == "oa"
+    assert not drawings.can("draw", adult=True)
 
     edit = html_of(client.get(f"{url}?enregistrement=backends&cle=oa"))
     assert 'data-only="kind=openai_compatible|sdcpp"' in edit and CANARY not in edit
@@ -50,22 +53,22 @@ def test_images_are_off_until_a_provider_is_declared_then_live_without_restartin
     assert kept.status_code == 200
     cfg = client.portal.call(live.settings.of(ImagingSettings).imaging)
     assert cfg.backends["oa"].api_key == CANARY and cfg.backends["oa"].fallback == "maison"  # clé gardée
-    assert cfg.backends["maison"].adult and live.imaging.can("draw", adult=True)
+    assert cfg.backends["maison"].adult and drawings.can("draw", adult=True)
 
     roles = f"{BASE}/images-roles"
     routed = post(client, roles, {"_section": "images", "_champs": ["routes"], "routes.draw": "oa",
                                   "routes.own": "maison"})
     text = html_of(routed)
     assert routed.status_code == 200 and "Ce qui sert chaque rôle" in text and "par repli (dessiner)" in text
-    assert live.imaging.serving("own") == "maison" and live.imaging.serving("edit") == "oa"
+    assert drawings.serving("own") == "maison" and drawings.serving("edit") == "oa"
 
     gone = post(client, url, {"_section": "images", "_supprimer": "backends", "_cle": "maison"})
     assert "« maison » retiré" in html_of(gone)
     cfg = client.portal.call(live.settings.of(ImagingSettings).imaging)
     assert cfg.routes == {"draw": "oa"} and cfg.backends["oa"].fallback == ""
-    assert live.imaging.serving("own") == "oa"
+    assert drawings.serving("own") == "oa"
 
     post(client, url, {"_section": "images", "_supprimer": "backends", "_cle": "oa"})
-    assert not live.imaging.configured
+    assert not drawings.configured
     for path in (url, roles, f"{BASE}/fournisseurs"):
         assert CANARY not in client.get(path).text

@@ -6,6 +6,7 @@
 - une configuration qui a un problème (route vers un inconnu, repli sur soi, OpenAI sans clé,
   serveur sans adresse) est refusée en le disant, et rien n'est gardé ;
 - la clé est scellée dans ``mind.db``, jamais en clair, jamais réaffichée ;
+- les dessins en service se rebranchent sur leurs réglages, et chaque appel va au registre commun des appels ;
 - un serveur local a un créneau (la conversation interrompt un dessin de fond), un service
   hébergé deux ;
 - ``mika images`` déclare, montre et fait un essai qui écrit l'image ;
@@ -17,17 +18,20 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
+from types import SimpleNamespace
 
 import pytest
 
 from mika.adapters.imaging import config as config_mod
 from mika.adapters.imaging import pricing as pricing_mod
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig, LiveImaging, build_gateway
+from mika.adapters.imaging.gateway import ImageTrace
 from mika.adapters.imaging.pricing import price_usd
 from mika.adapters.imaging.sizes import dimensions, pixels, sniff
 from mika.adapters.store_sql import SqlStore
 from mika.app import cli
 from mika.app.domains.imaging.settings import IMAGING_KEY, ImagingSettings
+from mika.app.domains.imaging.wiring import ImagingService
 from mika.app.settings import SecretBox, Settings
 from mika.kernel.clock import ManualClock
 from mika.ports.imaging import ASPECTS, OK, UNCONFIGURED, ImageRequest, ImageResult, ImageUsage, Picture
@@ -117,6 +121,40 @@ async def test_settings_seal_the_key_and_refuse_a_broken_configuration(tmp_path)
         # un rôle qui n'existe plus est ignoré à la lecture, jamais bloquant
         await settings._put(IMAGING_KEY, {**settings._get(IMAGING_KEY), "routes": {"draw": "oa", "vieux": "oa"}})
         assert images.imaging().routes == {"draw": "oa"}
+    finally:
+        await store.close()
+
+
+async def test_the_drawings_in_service_follow_their_settings_and_trace_to_the_common_call_log(tmp_path):
+    """Les dessins en service (``app/domains/imaging/wiring.py``, ADR 0317) : sans fournisseur, la passerelle n'existe
+    pas ; rebranchée sur leurs réglages, elle sert « dessiner » ; une configuration qui a un problème la débranche, en
+    le disant. Chaque appel est gardé en mémoire et, une fois le serveur là (``bind``), va au registre des appels du
+    serveur — celui des modèles — sous ``image.<rôle>``, ce qu'il a lu (texte et images) compté en entrée."""
+    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+    await store.open()
+    try:
+        settings = Settings(store, SecretBox.for_data(tmp_path))
+        await settings.open()
+        service = ImagingService(settings.of(ImagingSettings), ManualClock())
+        assert await service.reload() == [] and not service.gateway.configured
+        await settings.of(ImagingSettings).save_imaging(ImagingConfig(backends={"oa": openai()}))
+        assert await service.reload() == [] and service.gateway.serving("draw") == "oa"
+        await settings._put(IMAGING_KEY, {"backends": {"oa": openai(api_key="").model_dump()}, "routes": {}})
+        problems = await service.reload()
+        assert any("pas de clé" in p for p in problems) and not service.gateway.configured
+
+        tr = ImageTrace(at=7, role="draw", backend="oa", model="gpt-image-1", lane="conversation", priority=0,
+                        latency_us=5, wait_us=1, outcome="ok", call_id="e1#0", cost_usd=0.04, text_tokens=10,
+                        image_tokens=3, output_tokens=20, correlation="e1")
+        service.trace(tr)  # avant ``bind`` : gardé en mémoire seulement
+        recorded: list = []
+        service.calls = SimpleNamespace(record=recorded.append)
+        service.trace(tr)
+        assert list(service.gateway.traces) == [tr, tr]
+        [got] = recorded
+        assert (got.role, got.backend, got.model, got.lane, got.outcome, got.call_id) == (
+            "image.draw", "oa", "gpt-image-1", "conversation", "ok", "e1#0")
+        assert (got.input_tokens, got.output_tokens, got.cost_usd, got.correlation) == (13, 20, 0.04, "e1")
     finally:
         await store.close()
 

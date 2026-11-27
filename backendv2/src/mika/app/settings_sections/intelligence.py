@@ -66,7 +66,7 @@ def _cost(usd: float) -> str:
 
 def sections(live: Live) -> tuple[SettingsSection, ...]:
     settings = live.settings
-    images = settings.named("imaging")
+    images, drawings = settings.named("imaging"), live.parts["imaging"]
 
     # ── modèles ──
     async def save_llm(cfg: LLMConfig) -> list[str]:
@@ -147,10 +147,10 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                          for n, s in cfg.backends.items()}})
         previous = images.imaging()
         await images.save_imaging(cfg)  # une configuration qui a un problème est refusée (ValueError), en le disant
-        problems = await live.reload_imaging()
+        problems = await drawings.reload()
         if problems:
             await images.save_imaging(previous)
-            await live.reload_imaging()
+            await drawings.reload()
         return problems
 
     async def image_models(values: Any) -> list[tuple[str, str]]:
@@ -167,9 +167,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         il tourne, ce qu'il sait aussi faire, et comment il y est arrivé. Sans fournisseur déclaré, elle ne génère pas
         d'images ; le premier déclaré sert « dessiner », les autres rôles y retombent."""
         cfg = images.imaging()
-        name = live.imaging.resolution().get(role, "")
+        name = drawings.gateway.resolution().get(role, "")
         spec = cfg.backends.get(name)
-        caps = next((row for row in live.imaging.status() if row["name"] == name), {}) if name else {}
+        caps = next((row for row in drawings.gateway.status() if row["name"] == name), {}) if name else {}
         how = "déclaré" if cfg.routes.get(role) == name else "par repli (dessiner)"
         return {"title": "Ce qui sert chaque rôle", "key_head": "Rôle", "choice_head": "Son fournisseur",
                 "cells": [{"head": "Ce qui le sert", "text": name or "aucun", "mono": bool(name),
@@ -184,7 +184,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def image_facts() -> list[tuple[str, str]]:
         cfg = images.imaging()
-        serving = live.imaging.serving(DRAW)
+        serving = drawings.gateway.serving(DRAW)
         return [("Dessiner", f"servi par « {serving} »" if serving else "désactivé : aucun fournisseur"),
                 ("Fournisseurs", str(len(cfg.backends)))]
 

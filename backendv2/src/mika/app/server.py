@@ -30,9 +30,6 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Mount, Route
 
 from mika.adapters.addresses import serving_on
-from mika.adapters.imaging.config import LiveImaging
-from mika.adapters.imaging.config import build_gateway as build_image_gateway
-from mika.adapters.imaging.gateway import ImageTrace
 from mika.adapters.llm.calls import CallLog
 from mika.adapters.llm.claude_code import runtime_dir
 from mika.adapters.llm.config import BackendSpec, LiveGateway, ModelLimits, build_gateway
@@ -125,11 +122,8 @@ class Live:
     world: WorldHub | None = None
     #: sa mémoire en une boule de points, et ce qui la parcourt (la console, ADR 0103)
     constellation: Constellation | None = None
-    #: la génération d'images (désactivée tant qu'aucun fournisseur n'est branché, ADR 0061)
-    imaging: LiveImaging = field(default_factory=LiveImaging)
-    #: une génération d'images fournie de l'extérieur (tests) n'est pas rechargée
-    imaging_fixed: bool = False
-    #: les objets vivants de chaque domaine qui a son câblage (ADR 0310), par son nom : les réveils par API
+    #: les objets vivants de chaque domaine qui a son câblage (ADR 0310), par son nom : les dessins (``imaging`` : la
+    #: passerelle d'images, le port du même nom, son rechargement et sa trace, ADR 0061, 0317), les réveils par API
     #: (``wakeup`` : le port du même nom et la porte de ``POST /api/wake/<nom>``), ses outils venus
     #: d'ailleurs (``tools`` : le client MCP, le port ``mcp``, ADR 0064), la carte (``maps`` : le port du même nom,
     #: ADR 0194 ; et ``tiles`` : les tuiles de la carte de sa position, lues ou relayées par ce serveur, ADR 0193),
@@ -142,17 +136,6 @@ class Live:
         self.gateway.traces.append(tr)
         if self.calls is not None:
             self.calls.record(tr)
-
-    def trace_image(self, tr: ImageTrace) -> None:
-        """Un appel d'images : gardé en mémoire, et au registre des appels sous le rôle ``image.<rôle>`` — ce
-        qu'il a coûté s'ajoute à celui des modèles."""
-        self.imaging.traces.append(tr)
-        if self.calls is not None:
-            self.calls.record(LLMTrace(
-                at=tr.at, role=f"image.{tr.role}", backend=tr.backend, model=tr.model, lane=tr.lane,
-                priority=tr.priority, latency_us=tr.latency_us, wait_us=tr.wait_us,
-                input_tokens=tr.text_tokens + tr.image_tokens, output_tokens=tr.output_tokens, outcome=tr.outcome,
-                call_id=tr.call_id, cost_usd=tr.cost_usd, correlation=tr.correlation))
 
     def persona(self) -> PersonaDoc:
         """La persona rédigée dans l'inspecteur si elle existe et se lit ; sinon le fichier ; un fichier qui ne
@@ -219,18 +202,6 @@ class Live:
             self.gateway.set(None)
         return problems
 
-    async def reload_imaging(self) -> list[str]:
-        """Rebranche la génération d'images sur ses réglages ; sans fournisseur, elle n'existe pas."""
-        if self.imaging_fixed:
-            return []
-        cfg = self.settings.named("imaging").imaging()
-        problems = cfg.problems()
-        if cfg.backends and not problems:
-            self.imaging.set(build_image_gateway(cfg, self.kernel.deps.clock, on_trace=self.trace_image))
-        else:
-            self.imaging.set(None)
-        return problems
-
 
 #: Ce qu'on attend au plus le modèle de plongements avant de la faire vivre (``kernel.live`` : reprises, premiers
 #: messages) — au-delà, elle vit sans, et le premier rappel l'attendra comme avant.
@@ -264,7 +235,7 @@ async def _warm(embedder: object) -> None:
 
 def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
           gateway: LiveGateway | None = None, embedder: Any = None, reports: Path | None = None,
-          imaging: LiveImaging | None = None, serving: bool = False, **deps: Any) -> tuple[Starlette, Live]:
+          serving: bool = False, **deps: Any) -> tuple[Starlette, Live]:
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
     cycle de vie ouvre, démarre et arrête. ``serving`` : le serveur sert pour de
     bon, ce que ``serve`` dit — un domaine peut alors joindre le dehors de
@@ -278,8 +249,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     clock = RealClock()
     fixed = gateway is not None
     gateway = gateway or LiveGateway()
-    imaging_fixed = imaging is not None
-    imaging = imaging or LiveImaging()
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
     vectors = SqliteVectorIndex(store, embedder or embeddings.embedder())
     # les pièces jointes reçues ont leur propre index (le rapprochement de celui de la mémoire retire toute clé qui
@@ -291,9 +260,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
         return name_of(kernel.mind.root.slices["self"].persona)
 
-    outside = {"imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
-    outside["shares"] = DiskShares(data / "partages")
+    outside: dict[str, Any] = {"shares": DiskShares(data / "partages")}
     # ce qu'on lui envoie (ADR 0106) : les octets des pièces jointes, leur index, et de quoi les relire de près
     outside[attachments_c.PORT] = DiskShares(data / "pieces")
     outside[attachments_c.VECTORS] = piece_vectors
@@ -322,8 +290,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
-                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed,
-                parts=wiring.parts, read_limits=None if fixed else model_limits)
+                persona_file=persona, data=data, parts=wiring.parts, read_limits=None if fixed else model_limits)
     # l'exemple de l'autrice « Message », quand le sien est vide : le fil de référence de sa persona (ADR 0124), lu au
     # journal (lu à chaque épisode : jamais le YAML)
     settings.reference_thread = lambda: kernel.mind.frame().get(self_c.PERSONA).reference_thread
@@ -381,8 +348,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                         "Réglages › Modèles de texte › Fournisseurs")
         for problem in problems:
             log.warning("configuration des modèles : %s", problem)
-        for problem in await live.reload_imaging():
-            log.warning("configuration des images : %s", problem)
         hub.start()
         live_changes.start()
         world_hub.start()
@@ -411,7 +376,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 for module in reversed(wired):  # ce que chaque domaine ferme, ses épisodes annulés (``release``)
                     await part(module, "release", _idle)(wiring)
                 await gateway.aclose()
-                await imaging.aclose()
                 await push_sender.aclose()
                 await live.calls.flush()
 
