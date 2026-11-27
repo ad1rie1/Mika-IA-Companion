@@ -30,6 +30,7 @@ from mika.adapters.imaging.pricing import price_usd
 from mika.adapters.imaging.sizes import dimensions, pixels, sniff
 from mika.adapters.store_sql import SqlStore
 from mika.app import cli
+from mika.app.domains.imaging import cli as imaging_cli
 from mika.app.domains.imaging.settings import IMAGING_KEY, ImagingSettings
 from mika.app.domains.imaging.wiring import ImagingService
 from mika.app.settings import SecretBox, Settings
@@ -176,7 +177,7 @@ def test_the_command_line_declares_shows_and_makes_a_trial_image(tmp_path, capsy
     assert code == 0 and out["backends"]["oa"]["api_key"] == "••••"
 
     real = config_mod.build_gateway
-    monkeypatch.setattr(cli.models, "build_image_gateway",
+    monkeypatch.setattr(imaging_cli, "build_image_gateway",
                         lambda cfg, clock: real(cfg, clock, make=lambda n, s: FakeImageBackend(n)))
     code, out = run("essai", "un chat roux", "--out", str(tmp_path / "essai"), "--aspect", "portrait")
     assert code == 0 and out["issue"] == "ok" and out["fournisseur"] == "oa"

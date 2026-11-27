@@ -99,8 +99,7 @@ PACKAGES: dict[str, tuple[str, ...]] = {
     "agenda": ("adapters.agenda", "plugins.agenda", "contracts.agenda", "ports.agenda"),
     "mail": ("adapters.mail", "plugins.email", "contracts.email", "ports.mail"),
     "projects": ("faculties.projects", "contracts.projects", "adapters.workshop", "ports.workshop"),
-    # les dessins (ADR 0317) : leurs quatre paquets restent au cadre (``FRAME_OWNED``) tant que le cadre les câble
-    "imaging": (),
+    "imaging": ("plugins.imaging", "adapters.imaging", "contracts.imaging", "ports.imaging"),
 }
 
 #: ce qui loge dans le paquet d'un domaine sans être à lui : le nommer, ce n'est pas nommer le domaine
@@ -118,7 +117,6 @@ CORE_FACULTY = "le cœur : une faculté qui n'est à aucun domaine — le cadre 
 MODELS = "la passerelle des modèles : elle sert tout le moteur"
 STORAGE = "le stockage : le magasin, ses bases et leurs moteurs (ADR 0101)"
 OFF_JOURNAL = "les octets hors du journal (ADR 0062) : les fichiers envoyés, les pièces reçues, la documentation"
-DRAWINGS = "passerelle de fournisseurs, comme celle des modèles ; en faire un domaine reste à décider"
 
 #: chaque paquet de ``CLAIMED_LAYERS`` qui n'est à aucun domaine, et pourquoi : le cadre peut le nommer
 FRAME_OWNED: dict[str, str] = {
@@ -128,11 +126,6 @@ FRAME_OWNED: dict[str, str] = {
                      "faculties.memory", "faculties.needs", "faculties.others", "faculties.place",
                      "faculties.presence", "faculties.self", "faculties.shares", "faculties.social",
                      "faculties.transcript", "faculties.world"), CORE_FACULTY),
-    # les dessins (ADR 0061, 0063)
-    "plugins.imaging": DRAWINGS,
-    "adapters.imaging": DRAWINGS,
-    "contracts.imaging": DRAWINGS,
-    "ports.imaging": DRAWINGS,
     # les adaptateurs
     "adapters.addresses": "la règle des adresses publiques (ADR 0228), que partagent plusieurs adaptateurs",
     "adapters.cage": "la cage bubblewrap commune (ADR 0020, 0039, 0064) : l'atelier, les apps, les serveurs MCP",

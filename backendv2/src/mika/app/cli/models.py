@@ -1,4 +1,6 @@
-"""Les fournisseurs de modèles : le texte (``llm``), les images (``images``), la CLI Claude Code (``claude-code``)."""
+"""Les fournisseurs de modèles : le texte (``llm``) et la CLI Claude Code (``claude-code``) ; entre les deux, la
+commande des domaines qui sont des passerelles de fournisseurs, comme les modèles (``BESIDE_MODELS`` : les images,
+``mika images``, la commande de leur domaine, ADR 0317)."""
 
 from __future__ import annotations
 
@@ -12,23 +14,33 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
-from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.llm.claude import AUTHS
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig
 from mika.adapters.mcp.relay import Relay
-from mika.adapters.system import RealClock
 from mika.app.cli.common import with_settings
+from mika.app.domains import DOMAINS, Domain, part
 from mika.app.settings import Settings
 from mika.kernel import forms
-from mika.ports.imaging import ASPECTS, QUALITIES, ImageRequest
-from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
-from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.llm import EFFORTS, LLMRequest, Message
 
 #: ``mika llm effort defaut <rôles>`` : le rôle n'a plus d'effort à lui, il suit la fiche de son fournisseur
 EFFORT_OF_BACKEND = "defaut"
+#: les domaines dont la commande vient juste après ``llm`` dans ``mika --help``, dans cet ordre : une passerelle de
+#: fournisseurs, comme les modèles (ADR 0317). Leur place, que le cadre garde en noms comme celle d'une ligne de la
+#: page des plugins (``ORDER``) ; la commande, elle, est à leur fiche (``Domain.cli``). Celle des autres domaines vient
+#: après les commandes du cadre, dans l'ordre des fiches (``app/cli/plugins.py``)
+BESIDE_MODELS: tuple[str, ...] = ("imaging",)
+
+
+def beside_models() -> tuple[Domain, ...]:
+    """Les fiches de ``BESIDE_MODELS``, dans son ordre ; un nom sans fiche ou sans commande est refusé
+    (``ValueError``) : il n'aurait pas de place, sans bruit."""
+    found = {d.name: d for d in DOMAINS if d.cli is not None}
+    lost = [name for name in BESIDE_MODELS if name not in found]
+    if lost:
+        raise ValueError(f"mika --help : {lost} n'ont pas de commande dans leur fiche (Domain.cli)")
+    return tuple(found[name] for name in BESIDE_MODELS)
 
 
 async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
@@ -105,71 +117,6 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
         return {"ok": False, "problems": list(forms.errors_fr(exc).values())}
 
 
-async def images_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
-    """Les fournisseurs d'images : montrer, déclarer, router, retirer — ou faire un essai avec la
-    configuration enregistrée (``essai`` n'écrit rien d'autre que l'image demandée)."""
-    async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
-        images = settings.named("imaging")
-        cfg = images.imaging()
-        if args.images_cmd == "essai":
-            return await _image_trial(cfg, args)
-        backends = dict(cfg.backends)
-        routes = dict(cfg.routes)
-        if args.images_cmd == "backend":
-            previous = backends.get(args.name)
-
-            def kept(value, attr, default):  # type: ignore[no-untyped-def]
-                return value if value is not None else (getattr(previous, attr) if previous else default)
-
-            backends[args.name] = ImageBackendSpec(
-                kind=args.kind, model=args.model, api_key=kept(args.api_key, "api_key", ""),
-                base_url=kept(args.base_url, "base_url", ""), fallback=kept(args.fallback, "fallback", ""),
-                adult=kept(args.adult, "adult", False), moderation=kept(args.moderation, "moderation", "auto"),
-                slots=kept(args.slots, "slots", 0))
-        elif args.images_cmd == "route":
-            for role in args.roles:
-                routes[role] = args.name
-        elif args.images_cmd == "remove":
-            backends.pop(args.name, None)
-            routes = {r: b for r, b in routes.items() if b != args.name}
-        if args.images_cmd != "show":
-            try:
-                cfg = await images.save_imaging(ImagingConfig(backends=backends, routes=routes))
-            except ValueError as exc:
-                return {"ok": False, "problems": [p.strip() for p in str(exc).split(";") if p.strip()]}
-        return {"ok": True, "activée": cfg.enabled, "backends": {n: b.redacted() for n, b in cfg.backends.items()},
-                "routes": cfg.routes, "problems": cfg.problems()}
-
-    return await with_settings(data, run)
-
-
-async def _image_trial(cfg: ImagingConfig, args: argparse.Namespace) -> dict[str, object]:
-    if not cfg.enabled:
-        return {"ok": False, "problems": ["aucun fournisseur d'images : déclare-en un (mika images backend …)"]}
-    gateway = build_image_gateway(cfg, RealClock())
-    try:
-        result = await gateway.generate(ImageRequest(role=args.role, call_id=f"essai-{os.getpid()}",
-                                                     prompt=args.prompt, aspect=args.aspect, quality=args.quality,
-                                                     lane="conversation", priority=0))
-    finally:
-        for backend in gateway.backends.values():
-            close = getattr(backend, "aclose", None)
-            if close is not None:
-                await close()
-    files = []
-    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
-    for i, picture in enumerate(result.images):
-        out: Path = args.out if args.out.suffix else args.out.with_suffix(ext.get(picture.mime, ".png"))
-        if i:
-            out = out.with_name(f"{out.stem}-{i + 1}{out.suffix}")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(picture.data)
-        files.append(str(out))
-    return {"ok": result.ok, "issue": result.outcome, "fournisseur": result.backend, "modèle": result.model,
-            "taille": result.size, "qualité": result.quality, "coût_usd": round(result.cost_usd, 4),
-            "raison": result.reason, "prompt_réécrit": result.revised_prompt, "fichiers": files, "problems": []}
-
-
 async def _claude_code_spec(data: Path, name: str | None) -> BackendSpec:
     """Le fournisseur Claude Code déclaré (le premier, ou celui nommé) ; à défaut, la CLI telle quelle."""
     async def run(settings: Settings, store) -> BackendSpec:  # type: ignore[no-untyped-def]
@@ -237,12 +184,6 @@ def _run_llm(args: argparse.Namespace) -> int:
     return 0 if not out["problems"] else 1
 
 
-def _run_images(args: argparse.Namespace) -> int:
-    out = asyncio.run(images_command(args.data, args))
-    print(json.dumps(out, ensure_ascii=False, indent=2))
-    return 0 if out.get("ok") and not out.get("problems") else 1
-
-
 def _run_claude_code(args: argparse.Namespace) -> int:
     if args.cc_cmd == "login":
         return claude_code_login(args.data, args.name)
@@ -274,32 +215,10 @@ def add_models(sub) -> None:  # type: ignore[no-untyped-def]
     lb.add_argument("--config-dir", default=None, help="claude_code : un dossier de CLI à part (vide : l'habituel)")
     lb.add_argument("--effort", default=None, choices=list(EFFORTS),
                     help="claude_code : l'effort de réflexion (vide : le défaut de la CLI ; omis : la valeur actuelle)")
-    im = sub.add_parser("images", help="fournisseurs d'images et rôles (aucun : elle n'en génère pas)")
-    isub = im.add_subparsers(dest="images_cmd", required=True)
-    isub.add_parser("show")
-    ib = isub.add_parser("backend", help="déclarer ou modifier un fournisseur d'images (le premier sert « draw »)")
-    ib.add_argument("name")
-    ib.add_argument("--kind", required=True, choices=["openai", "sdcpp", "openai_compatible"])
-    ib.add_argument("--model", required=True)
-    ib.add_argument("--api-key", default=None, help="laissé vide : la clé actuelle est gardée")
-    ib.add_argument("--base-url", default=None, help="sdcpp : http://127.0.0.1:8190 ; openai_compatible : jusqu'à /v1")
-    ib.add_argument("--fallback", default=None, help="le fournisseur qui prend le relais d'une panne")
-    ib.add_argument("--adult", action=argparse.BooleanOptionalAction, default=None,
-                    help="sdcpp, openai_compatible : le serveur accepte le contenu pour adultes")
-    ib.add_argument("--moderation", choices=["auto", "low"], default=None, help="openai : sévérité de la modération")
-    ib.add_argument("--slots", type=int, default=None, help="images en même temps (0 : 1 en local, 2 ailleurs)")
-    ir = isub.add_parser("route", help="associer des rôles à un fournisseur d'images",
-                         epilog="Les rôles : " + " ; ".join(f"{r} ({IMAGE_ROLE_LABELS[r]})" for r in IMAGE_ROLES))
-    ir.add_argument("name")
-    ir.add_argument("roles", nargs="+", choices=IMAGE_ROLES, metavar="rôle", help="draw, edit, own")
-    ix = isub.add_parser("remove")
-    ix.add_argument("name")
-    ie = isub.add_parser("essai", help="générer une image avec la configuration enregistrée")
-    ie.add_argument("prompt")
-    ie.add_argument("--out", type=Path, required=True, help="le fichier (l'extension suit le format rendu)")
-    ie.add_argument("--role", default="draw", choices=IMAGE_ROLES)
-    ie.add_argument("--aspect", default="square", choices=list(ASPECTS))
-    ie.add_argument("--quality", default="normal", choices=QUALITIES)
+    # juste après ``llm`` : la commande des domaines qui sont des passerelles de fournisseurs (``BESIDE_MODELS``,
+    # ADR 0317) — ``mika images``
+    for domain in beside_models():
+        part(domain.cli, "add")(sub)
     cc = sub.add_parser("claude-code", help="la CLI Claude Code comme moteur (son login, jamais un jeton)")
     ccsub = cc.add_subparsers(dest="cc_cmd", required=True)
     for name, text in (("check", "un appel d'essai : connectée ? quel modèle ? quel usage de l'abonnement ?"),
@@ -326,5 +245,4 @@ def add_models(sub) -> None:  # type: ignore[no-untyped-def]
     lc.add_argument("tokens", type=int)
     lc.add_argument("--name", default=None, help="fournisseur ; par défaut celui du rôle reply")
     lm.set_defaults(run=_run_llm)
-    im.set_defaults(run=_run_images)
     cc.set_defaults(run=_run_claude_code)

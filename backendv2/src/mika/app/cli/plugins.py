@@ -1,5 +1,6 @@
 """Ce qui se branche sans être à un domaine : ``stt`` (la transcription), ``sensors`` ; puis la commande de chaque
-domaine qui a la sienne (``Domain.cli``, ADR 0310 : ``mail``, ``teams``, ``agenda``…)."""
+domaine qui a la sienne (``Domain.cli``, ADR 0310 : ``mail``, ``teams``, ``agenda``…), sauf celle qui vient à côté
+des modèles (``app/cli/models.py::BESIDE_MODELS`` : ``images``, ADR 0317)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import json
 from pathlib import Path
 
 from mika.app.cli.common import with_settings
+from mika.app.cli.models import BESIDE_MODELS
 from mika.app.domains import DOMAINS, part
 from mika.app.settings import Settings
 
@@ -52,7 +54,8 @@ def add_plugins(sub) -> None:  # type: ignore[no-untyped-def]
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
     st.set_defaults(run=_run_outside)
     se.set_defaults(run=_run_sensors)
-    # puis la commande de chaque domaine qui a la sienne (``Domain.cli``, ADR 0310)
+    # puis la commande de chaque domaine qui a la sienne (``Domain.cli``, ADR 0310), sauf celles déjà posées à côté
+    # des modèles (``BESIDE_MODELS``)
     for domain in DOMAINS:
-        if domain.cli is not None:
+        if domain.cli is not None and domain.name not in BESIDE_MODELS:
             part(domain.cli, "add")(sub)
