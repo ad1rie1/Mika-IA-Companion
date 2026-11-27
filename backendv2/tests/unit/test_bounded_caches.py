@@ -6,8 +6,8 @@ from __future__ import annotations
 from types import SimpleNamespace as NS
 
 from mika.contracts import memory as mc
-from mika.faculties.memory.archive import LifeArchive, decode, for_people, recall_life
 from mika.faculties.memory.faculty import LIFE_CACHE_CAP, MemoryState, _life_recalled, _noted
+from mika.faculties.memory.life_archive import LifeArchive, decode, for_people, recall_life
 from mika.faculties.memory.projections import Items
 from mika.faculties.social.archive import Relations, recall_relations
 from mika.faculties.social.faculty import RELATION_CACHE_CAP, SocialState, _knit, _relations_recalled, _ties

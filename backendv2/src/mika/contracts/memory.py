@@ -764,7 +764,7 @@ class LifeRecalled(Payload):
 #: le dernier venu, compté à la suite des autres dans ``ALL``
 LIFE_RECALLED = event_type("memory.life_recalled", OWNER, LifeRecalled, public=True)
 ALL = (*ALL, LIFE_RECALLED)
-#: l'archive de leur vie, une ligne par moment (``faculties.memory.archive``)
+#: l'archive de leur vie, une ligne par moment (``faculties.memory.life_archive``)
 LIFE_TABLE = "memory_life"
 
 

@@ -18,7 +18,6 @@ from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.faculties.memory import kept, shown
-from mika.faculties.memory.archive import recall_life
 from mika.faculties.memory.conversation import Conversation, render
 from mika.faculties.memory.extraction import Extraction, XEvenement
 from mika.faculties.memory.faculty import (
@@ -30,6 +29,7 @@ from mika.faculties.memory.faculty import (
     moment_thread,
 )
 from mika.faculties.memory.life import Follow, _told_about
+from mika.faculties.memory.life_archive import recall_life
 from mika.faculties.memory.speakers import People
 from mika.faculties.needs import NeedsParams
 from mika.faculties.others.faculty import _cheer

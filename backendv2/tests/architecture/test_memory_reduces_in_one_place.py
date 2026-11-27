@@ -2,7 +2,7 @@
 
 La mémoire a son modèle, qui n'est pas celui des projets (ADR 0313) : ses événements sont publics, donc au contrat
 (``contracts/memory.py``) ; leurs réducteurs, ses faits et son appréciation sont dans ``faculty.py``, seul ; ses
-projections dans ``projections.py`` (``archive.py`` pour l'archive de sa vie). Ce qu'un sous-sujet a de propre — ses
+projections dans ``projections.py`` (``life_archive.py`` pour l'archive de sa vie). Ce qu'un sous-sujet a de propre — ses
 règles, son processus, son interprète, sa section — vit dans son module.
 
 Lu par l'AST : un décorateur ``@MEMORY.<sorte>`` ou un appel ``MEMORY.<sorte>(…)`` ; un commentaire ou une docstring
@@ -24,7 +24,7 @@ HOMES: dict[str, frozenset[str]] = {
     "reducer": frozenset({"faculty.py"}),
     "fact": frozenset({"faculty.py"}),
     "appraisal": frozenset({"faculty.py"}),
-    "projector": frozenset({"projections.py", "archive.py"}),
+    "projector": frozenset({"projections.py", "life_archive.py"}),
 }
 
 

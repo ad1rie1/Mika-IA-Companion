@@ -29,9 +29,9 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.archive import decode
 from mika.faculties.memory.faculty import MEMORY, PENDING_CAP, MemoryParams, MemoryState, occurrence, params
 from mika.faculties.memory.hearing import names_of
+from mika.faculties.memory.life_archive import decode
 from mika.faculties.memory.salience import Item, dormant, salience
 from mika.faculties.memory.tables import ITEM_COLUMNS
 from mika.kernel.clock import MINUTE

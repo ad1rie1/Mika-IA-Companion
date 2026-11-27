@@ -23,10 +23,10 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as mc
 from mika.contracts import social as sc
 from mika.faculties.memory import kept
-from mika.faculties.memory.archive import LifeArchive
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XCroyance, XEvenement
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
+from mika.faculties.memory.life_archive import LifeArchive
 from mika.faculties.memory.projections import Chunks, Items
 from mika.faculties.memory.recall import _recall, named_people
 from mika.faculties.memory.recall_sections import _body

@@ -23,7 +23,7 @@ from sqlalchemy import Float, Integer, inspect, select
 from mika.contracts import memory as mc
 from mika.contracts import runtime as rt
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.archive import LifeArchive
+from mika.faculties.memory.life_archive import LifeArchive
 from mika.faculties.memory.night import joinable_pairs
 from mika.faculties.memory.projections import (
     RETIRED_VIEWS,

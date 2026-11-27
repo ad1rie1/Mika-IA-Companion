@@ -21,9 +21,9 @@ from sqlalchemy import select
 
 from mika.contracts import memory as c
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.archive import decode
 from mika.faculties.memory.faculty import MEMORY, MemoryState
 from mika.faculties.memory.inspect import OUTCOME_FR
+from mika.faculties.memory.life_archive import decode
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard

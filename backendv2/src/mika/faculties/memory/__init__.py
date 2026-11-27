@@ -8,7 +8,7 @@ Ses modules à contributions, importés ici pour qu'elles s'inscrivent :
 - le rappel filtré par la divulgation (``recall``), ses sections (``recall_sections``) et le récit sans nom
   (``veiled``, ADR 0091) ;
 - la vie des autres (``life``), ses promesses (``promises``), et l'archive des situations et des dates durables
-  (``archive``) ;
+  (``life_archive``) ;
 - la nuit : réfléchir, trier, joindre (``night``), et relire ce qu'elle a lu (``reread``, ADR 0085) ;
 - ses mensonges (``lies``, ADR 0076) et les sujets délicats (``delicate``, ADR 0099) ;
 - ses projections (``projections``), ses outils (``tools``), ses vues de la console (``inspect``) et ce que
@@ -19,13 +19,13 @@ Voir ``contracts/memory.py`` pour ce que les autres peuvent lire.
 
 from mika.faculties.memory import (  # noqa: F401 — contributions
     actions,
-    archive,
     consolidation,
     delicate,
     index,
     inspect,
     lies,
     life,
+    life_archive,
     night,
     projections,
     promises,

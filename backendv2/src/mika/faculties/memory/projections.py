@@ -23,7 +23,7 @@
   relecture de la nuit (ADR 0085).
 
 La sixième, ``memory_life`` (les situations et les dates durables), est dans
-``archive.py``.
+``life_archive.py``.
 
 Ce module écrit. Lire une ligne — les colonnes d'un élément, un témoignage, l'empreinte d'un texte — se fait par
 ``tables.py``, où la projection les prend aussi : qui lit n'importe pas l'écrivain.
