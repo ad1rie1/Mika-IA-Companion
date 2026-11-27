@@ -26,8 +26,9 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.conversation import Conversation, render
-from mika.faculties.memory.faculty import MemoryParams, MemoryState, over
+from mika.faculties.memory.faculty import MemoryState, over
 from mika.faculties.memory.life_archive import for_people
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.speakers import People, scope_of
 from mika.faculties.memory.tables import batches, handle_key, keys_of
 from mika.kernel.clock import DAY

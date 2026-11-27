@@ -31,10 +31,11 @@ from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.conversation import Conversation, Line, pieces_of
-from mika.faculties.memory.faculty import MemoryParams, MemoryState, day_of, occurrence
+from mika.faculties.memory.faculty import MemoryState, day_of, occurrence
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
 from mika.faculties.memory.life import resolution, same_day, same_task
 from mika.faculties.memory.life_archive import for_people
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.promises import kept_too_early, reminders_of
 from mika.faculties.memory.retelling import veiled_refusal
 from mika.faculties.memory.shown import Forecast, Shown

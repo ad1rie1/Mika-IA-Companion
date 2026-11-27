@@ -21,8 +21,9 @@ from mika.contracts.social import relations_table
 from mika.contracts.transcript import thread_table
 from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
 from mika.faculties.memory.extraction import Extraction, XCroyance
-from mika.faculties.memory.faculty import MemoryParams, MemoryState
+from mika.faculties.memory.faculty import MemoryState
 from mika.faculties.memory.kept import _veiled as veiled_version
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.projections import Items, Told
 from mika.faculties.memory.recall import _recall
 from mika.faculties.memory.retelling import retellable, veiled_refusal

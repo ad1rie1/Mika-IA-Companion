@@ -39,16 +39,9 @@ from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.faculty import (
-    MEMORY,
-    PROMISE_SUBJECT,
-    Keeping,
-    MemoryParams,
-    MemoryState,
-    day_of,
-    params,
-)
+from mika.faculties.memory.faculty import MEMORY, PROMISE_SUBJECT, Keeping, MemoryState, day_of
 from mika.faculties.memory.life import same_day, same_task
+from mika.faculties.memory.params import MemoryParams, params
 from mika.faculties.memory.tables import batches
 from mika.kernel.arbitration import Candidate
 from mika.kernel.clock import DAY, instant

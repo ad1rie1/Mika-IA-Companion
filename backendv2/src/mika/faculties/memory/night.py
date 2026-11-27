@@ -34,8 +34,9 @@ from mika.contracts import memory as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.memory import cues
-from mika.faculties.memory.faculty import MEMORY, REFLECTION_MARK, MemoryState, Reflection, params
+from mika.faculties.memory.faculty import MEMORY, REFLECTION_MARK, MemoryState, Reflection
 from mika.faculties.memory.kept import kept_secrets
+from mika.faculties.memory.params import params
 from mika.faculties.memory.salience import Item
 from mika.faculties.memory.tables import ITEM_COLUMNS, items, keys_of
 from mika.kernel.clock import instant, local_date_of_night

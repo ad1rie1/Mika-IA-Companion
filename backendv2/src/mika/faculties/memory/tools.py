@@ -20,9 +20,10 @@ from sqlalchemy import func, select
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.faculty import MEMORY, params
+from mika.faculties.memory.faculty import MEMORY
 from mika.faculties.memory.hearing import felt_here, items_by_id, names_of, verdict_of
 from mika.faculties.memory.lines import concerned_name, doubted, feelings, knowledge_label, when_words
+from mika.faculties.memory.params import params
 from mika.faculties.memory.promises import kept_too_early
 from mika.faculties.memory.recall import about_us, between_us, relevance, topic
 from mika.faculties.memory.salience import age_words, tag

@@ -26,8 +26,9 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, _moment_resolved_felt
+from mika.faculties.memory.faculty import MEMORY, _moment_resolved_felt
 from mika.faculties.memory.inspect import BELIEFS, EPISODE_MEMORIES, STATUS_FR, STATUS_TONE
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.projections import Items
 from mika.faculties.self.faculty import SELF, SelfState
 from mika.faculties.self.model import FORESIGHT, KEPT, PROMISES, SLIPPED

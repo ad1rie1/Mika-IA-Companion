@@ -395,7 +395,7 @@ def test_a_strong_cue_wakes_a_sleeping_memory(tmp_path):
 
 
 def test_a_landmark_never_falls_asleep():
-    from mika.faculties.memory.faculty import MemoryParams
+    from mika.faculties.memory.params import MemoryParams
     from mika.faculties.memory.salience import Item, dormant
 
     p = MemoryParams()

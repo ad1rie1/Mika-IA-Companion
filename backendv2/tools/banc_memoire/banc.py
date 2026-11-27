@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from mika.adapters.vectors import SqliteVectorIndex  # noqa: E402
 from mika.adapters.vectors.embedders import SentenceEmbedder  # noqa: E402
 from mika.contracts import memory as c  # noqa: E402
-from mika.faculties.memory.faculty import MemoryParams  # noqa: E402
+from mika.faculties.memory.params import MemoryParams  # noqa: E402
 from mika.faculties.memory.recall import above_floor, best_of_searches, scored, search  # noqa: E402
 from mika.faculties.memory.salience import Item, dormant, rank  # noqa: E402
 from mika.ports.vectors import VectorItem  # noqa: E402

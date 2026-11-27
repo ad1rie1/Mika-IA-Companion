@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from mika.contracts.memory import FIRST_HAND, OFFICIAL, OUTCOME_VALUE, PREDICTION, REPORTED
-from mika.faculties.memory.faculty import MemoryParams
+from mika.faculties.memory.params import MemoryParams
 from mika.vocab.affect import tag_intensity
 from mika.vocab.phrasebook import phrase
 from mika.vocab.words import fold

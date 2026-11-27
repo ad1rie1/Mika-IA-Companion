@@ -33,7 +33,7 @@ from mika.contracts import phone as c
 from mika.contracts import runtime as rt
 from mika.faculties.identity import audience_for
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.faculty import MemoryParams, params
+from mika.faculties.memory.params import MemoryParams, params
 from mika.kernel.clock import HOUR, MINUTE
 from mika.plugins.phone import app_name
 from mika.plugins.phone import inspect as phone_inspect

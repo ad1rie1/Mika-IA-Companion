@@ -19,7 +19,7 @@ import pytest
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
-from mika.faculties.memory.faculty import MemoryParams
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.salience import Item, dormant
 from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.events import Content, Origin

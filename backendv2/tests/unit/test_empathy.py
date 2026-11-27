@@ -18,7 +18,8 @@ from mika.contracts import runtime as rt
 from mika.faculties.memory import consolidation as cons
 from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
 from mika.faculties.memory.extraction import Extraction, XCroyance, XEvenement, XSouvenir
-from mika.faculties.memory.faculty import MemoryParams, MemoryState, _retained
+from mika.faculties.memory.faculty import MemoryState, _retained
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.recall import _recall
 from mika.faculties.memory.recall_sections import _body
 from mika.faculties.memory.tools import SearchArgs, memory_search

@@ -38,8 +38,9 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.conversation import Conversation, Line, Piece, Speaker
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
+from mika.faculties.memory.faculty import MEMORY, MemoryState
 from mika.faculties.memory.kept import kept_from
+from mika.faculties.memory.params import MemoryParams, params
 from mika.faculties.memory.shown import extract_request, shown_of
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import batches

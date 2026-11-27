@@ -27,8 +27,8 @@ from mika.faculties.memory.extraction import (
     XSouvenir,
     kind_of_genre,
 )
-from mika.faculties.memory.faculty import MemoryParams
 from mika.faculties.memory.inspect import KeptLine, _detail
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.salience import Item, salience
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import ITEM_COLUMNS

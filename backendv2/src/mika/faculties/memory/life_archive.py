@@ -22,7 +22,8 @@ from sqlalchemy import delete, or_, select
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import runtime as rt
-from mika.faculties.memory.faculty import MEMORY, cached, params
+from mika.faculties.memory.faculty import MEMORY, cached
+from mika.faculties.memory.params import params
 from mika.faculties.memory.tables import about, handle_key, life
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import CatchUp, Tier

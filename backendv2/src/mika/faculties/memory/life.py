@@ -52,15 +52,9 @@ from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import timespan
-from mika.faculties.memory.faculty import (
-    MEMORY,
-    MemoryParams,
-    MemoryState,
-    day_of,
-    events_at,
-    params,
-)
+from mika.faculties.memory.faculty import MEMORY, MemoryState, day_of, events_at
 from mika.faculties.memory.lines import when_words
+from mika.faculties.memory.params import MemoryParams, params
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Draft
 from mika.kernel.faculty import CatchUp

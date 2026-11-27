@@ -46,8 +46,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from mika.contracts import memory as c
-from mika.faculties.memory.faculty import MemoryParams
 from mika.faculties.memory.knowledge import Testimony
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.tables import keys_of
 from mika.kernel.clock import DAY
 from mika.vocab.affect import emotion_of, facets, facets_valence, valence

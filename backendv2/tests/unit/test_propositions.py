@@ -17,10 +17,11 @@ from mika.faculties.memory import kept
 from mika.faculties.memory import knowledge as kn
 from mika.faculties.memory.conversation import Conversation
 from mika.faculties.memory.extraction import Extraction, XCroyance
-from mika.faculties.memory.faculty import MemoryParams, MemoryState
+from mika.faculties.memory.faculty import MemoryState
 from mika.faculties.memory.hearing import heard_confidence, items_by_id, verdict_of
 from mika.faculties.memory.knowledge import pooled
 from mika.faculties.memory.night import joinable_pairs
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.projections import Items
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import TESTIMONIES_TABLE

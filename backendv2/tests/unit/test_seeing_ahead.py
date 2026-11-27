@@ -30,7 +30,6 @@ from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XConstat, XEvenement
 from mika.faculties.memory.faculty import (
     MEMORY,
-    MemoryParams,
     MemoryState,
     _ahead,
     _moment_resolved,
@@ -38,6 +37,7 @@ from mika.faculties.memory.faculty import (
     _to_check,
 )
 from mika.faculties.memory.kept import _drafts, _moved
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.recall import Moment, Recall, _ahead_moments, _moments
 from mika.faculties.memory.recall_sections import _ahead as ahead_section
 from mika.faculties.memory.recall_sections import _moment_line
@@ -411,8 +411,9 @@ def test_the_console_shows_what_she_expected_and_who_keeps_their_word():
     apprend de qui annonce (lot I du chantier « émotions, conscience, mémoire »)."""
     from types import SimpleNamespace as NS
 
-    from mika.faculties.memory.faculty import MemoryParams, MemoryState
+    from mika.faculties.memory.faculty import MemoryState
     from mika.faculties.memory.inspect import _seeing_ahead
+    from mika.faculties.memory.params import MemoryParams
     from mika.kernel.inspect import Badge, Meter, Table
     from mika.kernel.state import FrozenDict
 

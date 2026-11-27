@@ -21,7 +21,8 @@ from mika.faculties.memory import kept
 from mika.faculties.memory.conversation import Conversation, Line, Speaker, render
 from mika.faculties.memory.cues import voice_of
 from mika.faculties.memory.extraction import Extraction, XEvenement, XSouvenir
-from mika.faculties.memory.faculty import MemoryParams, MemoryState
+from mika.faculties.memory.faculty import MemoryState
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.shown import _moments
 from mika.faculties.memory.speakers import People
 from mika.kernel.clock import DAY

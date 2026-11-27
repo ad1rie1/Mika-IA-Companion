@@ -15,8 +15,9 @@ from zoneinfo import ZoneInfo
 from mika.contracts import memory as mc
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
-from mika.faculties.memory.faculty import MemoryParams, MemoryState, _reread
+from mika.faculties.memory.faculty import MemoryState, _reread
 from mika.faculties.memory.hearing import items_by_id, verdict_of
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.projections import Readings, Told
 from mika.faculties.memory.reread import Reread, _learned, _learned_section
 from mika.faculties.memory.tables import READINGS_TABLE, TESTIMONIES_TABLE

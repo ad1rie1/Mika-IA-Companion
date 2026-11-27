@@ -19,10 +19,11 @@ from mika.faculties.memory import kept
 from mika.faculties.memory import knowledge as kn
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XCroyance
-from mika.faculties.memory.faculty import MemoryParams, MemoryState
+from mika.faculties.memory.faculty import MemoryState
 from mika.faculties.memory.hearing import items_by_id
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, judge
 from mika.faculties.memory.lines import contested_line
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.speakers import People
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience

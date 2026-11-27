@@ -20,8 +20,9 @@ from mika.faculties.memory import tables as tb
 from mika.faculties.memory.consolidation import Consolidate
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XCroyance, XPromesse, XSouvenir
-from mika.faculties.memory.faculty import MemoryParams, MemoryState
+from mika.faculties.memory.faculty import MemoryState
 from mika.faculties.memory.index import Index, _item_vector
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.projections import Chunks, Items
 from mika.faculties.memory.salience import Item, admissible
 from mika.faculties.memory.speakers import People

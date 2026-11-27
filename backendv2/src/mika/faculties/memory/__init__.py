@@ -36,6 +36,7 @@ from mika.faculties.memory import (  # noqa: F401 — contributions
     tools,
     veiled,
 )
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
+from mika.faculties.memory.faculty import MEMORY, MemoryState
+from mika.faculties.memory.params import MemoryParams
 
 __all__ = ["MEMORY", "MemoryParams", "MemoryState"]

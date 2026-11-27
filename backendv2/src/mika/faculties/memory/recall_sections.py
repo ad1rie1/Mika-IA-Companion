@@ -18,11 +18,12 @@ from typing import Any
 
 from mika.contracts import memory as c
 from mika.contracts import social as social_c
-from mika.faculties.memory.faculty import MEMORY, MemoryState, params
+from mika.faculties.memory.faculty import MEMORY, MemoryState
 from mika.faculties.memory.hearing import names_of
 from mika.faculties.memory.life import followed_lately, happens_today, moment_when
 from mika.faculties.memory.likelihood import cautious, likely_words, nature_of
 from mika.faculties.memory.lines import knowledge_label, when_words
+from mika.faculties.memory.params import params
 from mika.faculties.memory.recall import OWNER, Moment, Recall, Recalled
 from mika.faculties.memory.salience import Item, age_words
 from mika.kernel.clock import DAY

@@ -80,7 +80,7 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.cues import same_moment
 from mika.faculties.memory.delicate import sensitivity_of
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
+from mika.faculties.memory.faculty import MEMORY, MemoryState, over
 from mika.faculties.memory.hearing import (
     canon,
     felt_here,
@@ -101,6 +101,7 @@ from mika.faculties.memory.lines import (
     mood_of,
     sensed,
 )
+from mika.faculties.memory.params import MemoryParams, params
 from mika.faculties.memory.promises import due_now, due_today
 from mika.faculties.memory.salience import (
     Item,

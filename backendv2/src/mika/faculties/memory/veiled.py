@@ -26,7 +26,8 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
+from mika.faculties.memory.faculty import MEMORY, MemoryState
+from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.retelling import FRAMING, retellable
 from mika.faculties.memory.salience import Item
 from mika.faculties.memory.tables import about, batches, handle_key, items, told_lines
