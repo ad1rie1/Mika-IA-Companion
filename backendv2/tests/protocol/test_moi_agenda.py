@@ -19,9 +19,9 @@ import pytest
 from mika.adapters.agenda import (
     CalDavProvider,
     GoogleProvider,
-    GoogleSignIn,
     MicrosoftProvider,
     Web,
+    google_signin,
     microsoft_signin,
 )
 from mika.app.domains.agenda.live import signed
@@ -343,7 +343,7 @@ def _google(client, live) -> tuple[FakeGoogle, str]:
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
     client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret))
-    signin = GoogleSignIn(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
     provider = GoogleProvider(signin, transport=google.transport())
     providers.add(provider)
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
@@ -559,7 +559,7 @@ def test_google_is_connected_by_pasting_the_return_address(world):  # noqa: F811
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
     client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret))
-    signin = GoogleSignIn(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
     providers.add(GoogleProvider(signin, transport=google.transport()))
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
     started = post(client, "/agenda/account/google/start", {"account": account}).json()
@@ -721,7 +721,7 @@ def test_google_returning_without_a_session_asks_to_paste_its_address_in_the_app
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
     client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret, web=True))
-    signin = GoogleSignIn(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
     providers.add(GoogleProvider(signin, transport=google.transport()))
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
     started = client.post(API + "/agenda/account/google/start", json={"account": account},

@@ -4,8 +4,8 @@
 Les fournisseurs du dehors s'y ajoutent (``Providers.add``, par le serveur) : l'abonnement iCal (``ical``) et CalDAV
 (``caldav``), sur un même format iCalendar (``ics``) et une même façon de joindre un serveur (``http``) ; Google
 Agenda (``google``) et Microsoft Graph (``graph``), sur une même API JSON (``cloud``) et leurs connexions (``oauth`` :
-Google par PKCE, Microsoft par le code d'appareil du courrier). Un compte d'une sorte sans fournisseur ne se
-synchronise pas.
+la portée et les mots de l'agenda, sur les moteurs du cadre, ``adapters/signin/`` — Google par PKCE, Microsoft par
+le code d'appareil, ADR 0318). Un compte d'une sorte sans fournisseur ne se synchronise pas.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from mika.adapters.agenda.google import GoogleProvider
 from mika.adapters.agenda.graph import MicrosoftProvider
 from mika.adapters.agenda.http import Web, server_host, server_url
 from mika.adapters.agenda.ical import IcalProvider
-from mika.adapters.agenda.oauth import AgendaGrants, GoogleApplication, GoogleSignIn, microsoft_signin
+from mika.adapters.agenda.oauth import AgendaGrants, google_signin, microsoft_signin
 from mika.adapters.agenda.store import AgendaStore
 from mika.adapters.agenda.system import SystemProvider
 from mika.ports.agenda import SYSTEM, CalendarProvider, Connection, system_person
@@ -55,6 +55,5 @@ class Providers:
 
 
 __all__ = ["SERVICES", "AgendaAccount", "AgendaConfig", "AgendaGrants", "AgendaStore", "CalDavProvider",
-           "CalDavService", "CalendarSetting", "GoogleApplication", "GoogleProvider", "GoogleSignIn", "IcalProvider",
-           "MicrosoftProvider", "Providers", "SignInNeeded", "SystemProvider", "Web", "microsoft_signin",
-           "server_host", "server_url"]
+           "CalDavService", "CalendarSetting", "GoogleProvider", "IcalProvider", "MicrosoftProvider", "Providers",
+           "SignInNeeded", "SystemProvider", "Web", "google_signin", "microsoft_signin", "server_host", "server_url"]

@@ -1,4 +1,4 @@
-"""Google Agenda (ADR 0309, lot 2), ``adapters/agenda/google.py`` et ``oauth.py::GoogleSignIn`` : contre un faux Google
+"""Google Agenda (ADR 0309, lot 2), ``adapters/agenda/google.py`` et ``oauth.py::google_signin`` : contre un faux Google
 (``tests/fixtures/google_calendar.py``, un transport ``httpx`` factice qui suit les formes de l'API Calendar v3 et de
 son point OAuth), sur le vrai magasin et ``agenda.sync``. Rien ne parle au vrai Google.
 
@@ -24,9 +24,10 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from mika.adapters.agenda import AgendaStore, GoogleApplication, GoogleProvider, GoogleSignIn, SignInNeeded
+from mika.adapters.agenda import AgendaStore, GoogleProvider, SignInNeeded, google_signin
 from mika.adapters.agenda.cloud import Api
-from mika.adapters.agenda.oauth import GOOGLE_REVOKED, RETURN_PATH
+from mika.adapters.agenda.oauth import RETURN_PATH
+from mika.adapters.signin.google import GOOGLE_REVOKED, GoogleApplication
 from mika.plugins.agenda import AgendaParams
 from mika.plugins.agenda.sync import reread, sync_account
 from mika.ports.agenda import (
@@ -126,8 +127,8 @@ class World:
         self.vault = Vault()
         self.app: list[GoogleApplication | None] = [GoogleApplication.of(CLIENT_ID, SECRET, web=web)]
         self.clock = [NOW]
-        self.signin = GoogleSignIn(self.vault, lambda: self.app[0], transport=self.google.transport(),
-                                   now=lambda: self.clock[0], port=lambda: 53682)
+        self.signin = google_signin(self.vault, lambda: self.app[0], transport=self.google.transport(),
+                                    now=lambda: self.clock[0], port=lambda: 53682)
         self.provider = GoogleProvider(self.signin, transport=self.google.transport(), now=lambda: self.clock[0])
         self.store = AgendaStore(backend.target(tmp, "agenda"), now=lambda: NOW)
         self.account = Connection("google", "google", owner=ME, label="Google")

@@ -1,5 +1,6 @@
-"""Google Agenda (ADR 0309, lot 2) : l'API Calendar v3 de Google, par la connexion du compte
-(``adapters/agenda/oauth.py::GoogleSignIn``), vers ``www.googleapis.com`` seulement.
+"""Google Agenda (ADR 0309, lot 2) : l'API Calendar v3 de Google, par la connexion du compte (le parcours du
+cadre, ``adapters/signin/google.py::GoogleSignIn``, à la portée de l'agenda :
+``adapters/agenda/oauth.py::google_signin``), vers ``www.googleapis.com`` seulement.
 
 - **Ses agendas** (``calendarList``) : nom (celui que la personne a donné, sinon le sien), couleur, ce qu'on peut y
   faire (``accessRole`` : ``owner`` et ``writer`` écrivent), fuseau, le principal (son identifiant est l'adresse du
@@ -48,7 +49,7 @@ import httpx
 
 from mika.adapters.agenda import ics
 from mika.adapters.agenda.cloud import Answer, Api, Session, SignInNeeded, refused_words
-from mika.adapters.agenda.oauth import GoogleSignIn
+from mika.adapters.signin.google import GoogleSignIn
 from mika.ports.agenda import (
     ALL,
     CANCELLED,

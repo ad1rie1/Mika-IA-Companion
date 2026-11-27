@@ -19,7 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from mika.adapters.agenda import AgendaAccount, AgendaConfig
-from mika.adapters.agenda.oauth import pasted
+from mika.adapters.signin.google import pasted
 from mika.adapters.signin.grants import Grant
 from mika.adapters.store_sql import SqlStore
 from mika.app.domains.agenda.cli import agenda_command

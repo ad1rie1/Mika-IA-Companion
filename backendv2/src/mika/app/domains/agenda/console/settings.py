@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from mika.adapters.agenda.oauth import google_client_id
+from mika.adapters.signin.google import google_client_id
 from mika.adapters.signin.microsoft import application_id
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.domains.mail.settings import MailSettings

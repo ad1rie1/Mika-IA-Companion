@@ -16,11 +16,11 @@ from mika.adapters.agenda import (
     AgendaStore,
     CalDavProvider,
     GoogleProvider,
-    GoogleSignIn,
     IcalProvider,
     MicrosoftProvider,
     Providers,
     Web,
+    google_signin,
     microsoft_signin,
 )
 from mika.app.domains.agenda.live import signed
@@ -49,7 +49,7 @@ def wire(w: Wiring) -> None:
     # Google Agenda et Outlook.com / Microsoft 365 (ADR 0309, lot 2) : leurs connexions scellées à part des comptes ;
     # Google par l'application Google du serveur (réglée par un opérateur), Microsoft par celle du courrier (ADR 0238),
     # chacun joignant ses hôtes seulement. Leurs parcours de connexion : ``.signin`` de chacun (lot 4 : l'API)
-    outside["agenda_providers"].add(GoogleProvider(GoogleSignIn(own, own.google_application, now=clock.now),
+    outside["agenda_providers"].add(GoogleProvider(google_signin(own, own.google_application, now=clock.now),
                                                    now=clock.now))
     outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(own, settings.of(MailSettings).mail_application),
                                                       now=clock.now))

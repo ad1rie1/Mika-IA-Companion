@@ -16,7 +16,7 @@ import asyncio
 import logging
 
 from mika.adapters.agenda.config import AgendaConfig
-from mika.adapters.agenda.oauth import GoogleApplication
+from mika.adapters.signin.google import GoogleApplication
 from mika.adapters.signin.grants import Grant
 from mika.app.settings import Settings, SettingsPart
 from mika.contracts.agenda import RIGHTS_SORT, AgendaRule

@@ -4,7 +4,7 @@ jeton porteur, ses pannes dites en mots (``AgendaError``).
 - **Leurs hôtes seulement** (``Api.hosts`` : ``www.googleapis.com``, ``graph.microsoft.com``), en https : une adresse
   qu'une réponse donnerait ailleurs (le ``@odata.nextLink`` de Graph, une redirection) est refusée en mots, jamais
   suivie. Les points OAuth (``oauth2.googleapis.com``, ``login.microsoftonline.com``) sont ceux de leur connexion
-  (``adapters/agenda/oauth.py``, ``adapters/signin/microsoft.py``), à des adresses fixes.
+  (``adapters/signin/google.py``, ``adapters/signin/microsoft.py``), à des adresses fixes.
 - **Le jeton** vient de la connexion du compte, à chaque requête (``Session``) ; refusé (401), il est renouvelé une
   fois ; refusé encore, le compte est à reconnecter (``SignInNeeded``, en mots).
 - **Des bornes** : une réponse lue au plus jusqu'à ``BODY_MAX`` octets, un délai par requête.
