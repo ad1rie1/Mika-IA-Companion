@@ -593,9 +593,9 @@ renvois : chaque « Révise » a son « Révisée par » (ou « Remplacée par �
 
 - **La mémoire a son modèle, qui n'est pas celui des projets** (ADR 0313). Ses événements sont tous publics : ils sont au contrat (`contracts/memory.py`), avec leurs charges utiles, même ceux qu'aucune autre faculté ne lit encore.
 - **Leur réduction est dans `faculty.py`, seul** : chaque réducteur (`@MEMORY.reducer`), chaque fait (`@MEMORY.fact`) et son appréciation (`@MEMORY.appraisal`). Ils sont courts et partagent une tranche plate, que l'oubli traverse d'un coup.
-- **Ses projections sont dans `projections.py`**, et dans `archive.py` pour l'archive de sa vie ; ses tables restent derrière sa porte (ADR 0078).
-- **Ce qu'un sous-sujet a de propre vit dans son module** : ses règles pures, son processus, son interprète, sa section (`consolidation.py`, `night.py`, `reread.py`, `life.py`, `veiled.py`…). Ses outils sont dans `tools.py`, ses vues dans `inspect.py`, ses actions dans `actions.py`. Un sous-sujet neuf suit ce modèle.
-- **La garde** (`tests/architecture/test_memory_reduces_in_one_place.py`) le lit par l'AST : aucun réducteur, aucun fait, aucune appréciation hors de `faculty.py` ; aucune projection hors de `projections.py` et d'`archive.py`.
+- **Ses projections sont dans `projections.py`**, et dans `life_archive.py` pour l'archive de sa vie ; ses tables restent derrière sa porte (ADR 0078).
+- **Ce qu'un sous-sujet a de propre vit dans son module** : ses règles pures, son processus, son interprète, sa section (`consolidation.py`, `night.py`, `reread.py`, `life.py`, `promises.py`, `veiled.py`…). Ses outils sont dans `tools.py`, ses vues dans `inspect.py`, ses actions dans `actions.py`. Un sous-sujet neuf suit ce modèle.
+- **La garde** (`tests/architecture/test_memory_reduces_in_one_place.py`) le lit par l'AST : aucun réducteur, aucun fait, aucune appréciation hors de `faculty.py` ; aucune projection hors de `projections.py` et de `life_archive.py`.
 
 *Pourquoi :* l'audit d'organisation du 26 novembre a trouvé la mémoire bien rangée, sur un modèle que rien n'écrivait : le prochain sous-sujet n'aurait pas su s'il devait suivre l'ADR 0313, ses réducteurs à côté de ses règles, ou celui-ci. L'ADR 0313 soigne un `faculty.py` de 3 600 lignes dont quarante modules importaient les formes ; ici les réducteurs font dix lignes, et les couper par sous-sujet couperait aussi l'oubli.
 

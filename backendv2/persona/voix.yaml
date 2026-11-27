@@ -2645,7 +2645,7 @@ memory:
     # Ce qu'elle a dit. {age} : memory.age.
     line: "- {text} (tu l'as dit {age})"
 
-  # Tenir parole au moment dit (memory/life.py, ``_keep``) : le brief qu'elle lit quand elle prend la parole
+  # Tenir parole au moment dit (memory/promises.py, ``_keep``) : le brief qu'elle lit quand elle prend la parole
   # d'elle-même pour tenir une promesse datée (« brief:memory »). Un fait : l'heure promise est là ; comment elle
   # s'y prend est à elle (ADR 0154).
   keep:
