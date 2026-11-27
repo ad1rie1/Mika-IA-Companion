@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from mika.app.domains.imaging.settings import ImagingSettings
 from tests.protocol.test_console_settings import BASE, html_of, post
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -33,7 +34,7 @@ def test_images_are_off_until_a_provider_is_declared_then_live_without_restartin
 
     refused = post(client, url, image_backend("oa", kind="openai", model="gpt-image-1"))
     assert refused.status_code == 400 and "pas de clé" in html_of(refused)
-    assert client.portal.call(live.settings.imaging).backends == {} and not live.imaging.configured
+    assert client.portal.call(live.settings.of(ImagingSettings).imaging).backends == {} and not live.imaging.configured
 
     saved = post(client, url, image_backend("oa", kind="openai", model="gpt-image-1", api_key=CANARY))
     assert saved.status_code == 200 and "« oa » enregistré" in html_of(saved) and CANARY not in saved.text
@@ -47,7 +48,7 @@ def test_images_are_off_until_a_provider_is_declared_then_live_without_restartin
     kept = post(client, url, {**image_backend("oa", kind="openai", model="gpt-image-1", fallback="maison"),
                               "_ancienne": "oa"})
     assert kept.status_code == 200
-    cfg = client.portal.call(live.settings.imaging)
+    cfg = client.portal.call(live.settings.of(ImagingSettings).imaging)
     assert cfg.backends["oa"].api_key == CANARY and cfg.backends["oa"].fallback == "maison"  # clé gardée
     assert cfg.backends["maison"].adult and live.imaging.can("draw", adult=True)
 
@@ -60,7 +61,7 @@ def test_images_are_off_until_a_provider_is_declared_then_live_without_restartin
 
     gone = post(client, url, {"_section": "images", "_supprimer": "backends", "_cle": "maison"})
     assert "« maison » retiré" in html_of(gone)
-    cfg = client.portal.call(live.settings.imaging)
+    cfg = client.portal.call(live.settings.of(ImagingSettings).imaging)
     assert cfg.routes == {"draw": "oa"} and cfg.backends["oa"].fallback == ""
     assert live.imaging.serving("own") == "oa"
 

@@ -32,6 +32,7 @@ from mika.app.domains.domain import (
     part,
 )
 from mika.app.domains.forge import FORGE
+from mika.app.domains.imaging import IMAGING
 from mika.app.domains.mail import MAIL
 from mika.app.domains.maps import MAPS
 from mika.app.domains.phone import PHONE
@@ -44,6 +45,7 @@ from mika.app.domains.wakeup import WAKEUP
 __all__ = ["DOMAINS", "AccountsPart", "Base", "ConsolePart", "Domain", "LivePart", "OutsidePart", "PersonPart",
            "Place", "PortPart", "QueuePart", "RightsSort", "ShareWrite", "SharingPart", "gathered", "part"]
 
-#: les domaines, dans l'ordre où le cadre les parcourt
-DOMAINS: tuple[Domain, ...] = (MAPS, TOOLS, MAIL, SENSES, TEAMS, PHONE, WAKEUP, CONTACTS, AGENDA, FORGE,
+#: les domaines, dans l'ordre où le cadre les parcourt ; les dessins en tête : leur port, leur démarrage et leurs
+#: libellés gardent ainsi leur place d'avant, quand le cadre les câblait lui-même (ADR 0317)
+DOMAINS: tuple[Domain, ...] = (IMAGING, MAPS, TOOLS, MAIL, SENSES, TEAMS, PHONE, WAKEUP, CONTACTS, AGENDA, FORGE,
                                PROJECTS)

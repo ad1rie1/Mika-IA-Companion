@@ -66,6 +66,7 @@ def _cost(usd: float) -> str:
 
 def sections(live: Live) -> tuple[SettingsSection, ...]:
     settings = live.settings
+    images = settings.named("imaging")
 
     # ── modèles ──
     async def save_llm(cfg: LLMConfig) -> list[str]:
@@ -144,11 +145,11 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             "routes": {r: b for r, b in cfg.routes.items() if b in cfg.backends},
             "backends": {n: s if not s.fallback or s.fallback in cfg.backends else s.model_copy(update={"fallback": ""})
                          for n, s in cfg.backends.items()}})
-        previous = settings.imaging()
-        await settings.save_imaging(cfg)  # une configuration qui a un problème est refusée (ValueError), en le disant
+        previous = images.imaging()
+        await images.save_imaging(cfg)  # une configuration qui a un problème est refusée (ValueError), en le disant
         problems = await live.reload_imaging()
         if problems:
-            await settings.save_imaging(previous)
+            await images.save_imaging(previous)
             await live.reload_imaging()
         return problems
 
@@ -165,7 +166,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         """La ligne d'un rôle d'images dans Qui dessine quoi (en table) : ce qui le sert, son type et son modèle, où
         il tourne, ce qu'il sait aussi faire, et comment il y est arrivé. Sans fournisseur déclaré, elle ne génère pas
         d'images ; le premier déclaré sert « dessiner », les autres rôles y retombent."""
-        cfg = settings.imaging()
+        cfg = images.imaging()
         name = live.imaging.resolution().get(role, "")
         spec = cfg.backends.get(name)
         caps = next((row for row in live.imaging.status() if row["name"] == name), {}) if name else {}
@@ -182,7 +183,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                            "tag": how == "déclaré" or not name, "tone": "ok" if name and how == "déclaré" else "muted"}]}
 
     def image_facts() -> list[tuple[str, str]]:
-        cfg = settings.imaging()
+        cfg = images.imaging()
         serving = live.imaging.serving(DRAW)
         return [("Dessiner", f"servi par « {serving} »" if serving else "désactivé : aucun fournisseur"),
                 ("Fournisseurs", str(len(cfg.backends)))]
@@ -310,7 +311,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                              "« Répondre » est toujours servi : sans choix, par le premier "
                                              "fournisseur déclaré.")),
                         )),
-        SettingsSection("images", "Images", "intelligence", ImagingConfig, settings.imaging, save_images, order=120,
+        SettingsSection("images", "Images", "intelligence", ImagingConfig, images.imaging, save_images, order=120,
                         description="Les fournisseurs qui génèrent ses images, et lequel sert chaque rôle. Aucun "
                                     "fournisseur : elle n'en génère pas. Les clés sont chiffrées, jamais "
                                     "réaffichées.", loaders={"image_models": image_models}, facts=image_facts,

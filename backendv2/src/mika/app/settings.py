@@ -27,13 +27,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Mapped, mapped_column
 
-from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.web.gate import new_key, token_digest
 from mika.app import authors as authors_m
 from mika.app.domains import DOMAINS, gathered, part
 from mika.inspector import mcp as console_mcp
-from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.sql import Key, LongText, MindBase, upsert
 from mika.runtime.boundary import call
 from mika.runtime.tool_offer import RULES as TOOL_RULES
@@ -46,8 +44,6 @@ log = logging.getLogger("mika.settings")
 _IGNORED_ROLES: set[str] = set()
 
 LLM_KEY = "llm"
-#: les fournisseurs d'images et leurs rôles (clés scellées)
-IMAGING_KEY = "imaging"
 STT_KEY = "stt"
 #: les notifications du téléphone (ADR 0077) : la clé du compte de service Firebase, scellée
 PUSH_KEY = "push"
@@ -312,34 +308,6 @@ class Settings:
             data["api_key_sealed"] = self.box.seal(data.pop("api_key"))
             backends[name] = data
         await self._put(LLM_KEY, {"backends": backends, "routes": dict(cfg.routes), "efforts": dict(cfg.efforts)})
-        return cfg
-
-    # ── Images ──
-    def imaging(self) -> ImagingConfig:
-        """Les fournisseurs d'images (clés déchiffrées) ; aucun : la génération d'images est désactivée. Un
-        rôle qui n'existe plus est ignoré, jamais bloquant."""
-        data = self._get(IMAGING_KEY) or {}
-        backends = {}
-        for name, spec in (data.get("backends") or {}).items():
-            spec = dict(spec)
-            spec["api_key"] = self.box.open(spec.pop("api_key_sealed", ""))
-            backends[name] = ImageBackendSpec.model_validate(spec)
-        routes = {r: b for r, b in dict(data.get("routes") or {}).items() if r in IMAGE_ROLES}
-        return ImagingConfig(backends=backends, routes=routes)
-
-    async def save_imaging(self, cfg: ImagingConfig) -> ImagingConfig:
-        """Enregistre les fournisseurs d'images et rend la configuration qui vaut désormais (revalidée : le
-        premier fournisseur déclaré sert « dessiner » d'office) ; refusée, en le disant, si elle a un problème."""
-        cfg = ImagingConfig.model_validate({"backends": dict(cfg.backends), "routes": dict(cfg.routes)})
-        problems = cfg.problems()
-        if problems:
-            raise ValueError("; ".join(problems))
-        backends = {}
-        for name, spec in cfg.backends.items():
-            data = spec.model_dump()
-            data["api_key_sealed"] = self.box.seal(data.pop("api_key"))
-            backends[name] = data
-        await self._put(IMAGING_KEY, {"backends": backends, "routes": dict(cfg.routes)})
         return cfg
 
     # ── Transcription ──

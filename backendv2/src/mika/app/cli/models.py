@@ -109,7 +109,8 @@ async def images_command(data: Path, args: argparse.Namespace) -> dict[str, obje
     """Les fournisseurs d'images : montrer, déclarer, router, retirer — ou faire un essai avec la
     configuration enregistrée (``essai`` n'écrit rien d'autre que l'image demandée)."""
     async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
-        cfg = settings.imaging()
+        images = settings.named("imaging")
+        cfg = images.imaging()
         if args.images_cmd == "essai":
             return await _image_trial(cfg, args)
         backends = dict(cfg.backends)
@@ -133,7 +134,7 @@ async def images_command(data: Path, args: argparse.Namespace) -> dict[str, obje
             routes = {r: b for r, b in routes.items() if b != args.name}
         if args.images_cmd != "show":
             try:
-                cfg = await settings.save_imaging(ImagingConfig(backends=backends, routes=routes))
+                cfg = await images.save_imaging(ImagingConfig(backends=backends, routes=routes))
             except ValueError as exc:
                 return {"ok": False, "problems": [p.strip() for p in str(exc).split(";") if p.strip()]}
         return {"ok": True, "activée": cfg.enabled, "backends": {n: b.redacted() for n, b in cfg.backends.items()},

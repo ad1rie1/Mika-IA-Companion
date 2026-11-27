@@ -99,6 +99,8 @@ PACKAGES: dict[str, tuple[str, ...]] = {
     "agenda": ("adapters.agenda", "plugins.agenda", "contracts.agenda", "ports.agenda"),
     "mail": ("adapters.mail", "plugins.email", "contracts.email", "ports.mail"),
     "projects": ("faculties.projects", "contracts.projects", "adapters.workshop", "ports.workshop"),
+    # les dessins (ADR 0317) : leurs quatre paquets restent au cadre (``FRAME_OWNED``) tant que le cadre les câble
+    "imaging": (),
 }
 
 #: ce qui loge dans le paquet d'un domaine sans être à lui : le nommer, ce n'est pas nommer le domaine

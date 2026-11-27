@@ -27,7 +27,8 @@ from mika.adapters.imaging.pricing import price_usd
 from mika.adapters.imaging.sizes import dimensions, pixels, sniff
 from mika.adapters.store_sql import SqlStore
 from mika.app import cli
-from mika.app.settings import IMAGING_KEY, SecretBox, Settings
+from mika.app.domains.imaging.settings import IMAGING_KEY, ImagingSettings
+from mika.app.settings import SecretBox, Settings
 from mika.kernel.clock import ManualClock
 from mika.ports.imaging import ASPECTS, OK, UNCONFIGURED, ImageRequest, ImageResult, ImageUsage, Picture
 from tests.fixtures.fake_images import FakeImageBackend, solid_png
@@ -103,18 +104,19 @@ async def test_settings_seal_the_key_and_refuse_a_broken_configuration(tmp_path)
     try:
         settings = Settings(store, SecretBox.for_data(tmp_path))
         await settings.open()
-        assert not settings.imaging().enabled
-        saved = await settings.save_imaging(ImagingConfig(backends={"oa": openai()}))
+        images = settings.of(ImagingSettings)
+        assert not images.imaging().enabled
+        saved = await images.save_imaging(ImagingConfig(backends={"oa": openai()}))
         assert saved.routes == {"draw": "oa"}
         raw = json.dumps(settings._get(IMAGING_KEY))
         assert KEY not in raw and "api_key_sealed" in raw
-        assert settings.imaging().backends["oa"].api_key == KEY
+        assert images.imaging().backends["oa"].api_key == KEY
         with pytest.raises(ValueError, match="pas de clé"):
-            await settings.save_imaging(ImagingConfig(backends={"oa": openai(api_key="")}))
-        assert settings.imaging().backends["oa"].api_key == KEY  # rien n'a changé
+            await images.save_imaging(ImagingConfig(backends={"oa": openai(api_key="")}))
+        assert images.imaging().backends["oa"].api_key == KEY  # rien n'a changé
         # un rôle qui n'existe plus est ignoré à la lecture, jamais bloquant
         await settings._put(IMAGING_KEY, {**settings._get(IMAGING_KEY), "routes": {"draw": "oa", "vieux": "oa"}})
-        assert settings.imaging().routes == {"draw": "oa"}
+        assert images.imaging().routes == {"draw": "oa"}
     finally:
         await store.close()
 

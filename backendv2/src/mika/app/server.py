@@ -223,7 +223,7 @@ class Live:
         """Rebranche la génération d'images sur ses réglages ; sans fournisseur, elle n'existe pas."""
         if self.imaging_fixed:
             return []
-        cfg = self.settings.imaging()
+        cfg = self.settings.named("imaging").imaging()
         problems = cfg.problems()
         if cfg.backends and not problems:
             self.imaging.set(build_image_gateway(cfg, self.kernel.deps.clock, on_trace=self.trace_image))
