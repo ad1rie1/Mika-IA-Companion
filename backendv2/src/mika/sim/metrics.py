@@ -59,9 +59,9 @@ def log_metrics(events: Sequence[Any], driver: Driver) -> dict[str, Any]:
         "heard": len(transport.heard),
         "undelivered_online": sum(1 for u in utterances if u.id not in heard_keys and u.data.visible
                                   and u.data.target in driver.online),
-        "consolidations": sum(1 for e in events if e.type.name == "memory.consolidated"),
-        "retained": sum(1 for e in events if e.type.name in ("memory.remembered", "memory.believed")),
-        "reinforced": sum(1 for e in events if e.type.name == "memory.reinforced"),
+        "consolidations": sum(1 for e in events if e.type.name == memory_c.CONSOLIDATED.name),
+        "retained": sum(1 for e in events if e.type.name in (memory_c.REMEMBERED.name, memory_c.BELIEVED.name)),
+        "reinforced": sum(1 for e in events if e.type.name == memory_c.REINFORCED.name),
         "repeats": transport.repeats,
         "transport_failures": transport.failures,
         "crashes": driver.crashes,

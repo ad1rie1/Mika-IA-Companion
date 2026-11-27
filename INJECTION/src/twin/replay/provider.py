@@ -30,6 +30,7 @@ from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from mika.faculties.memory.extraction import TOOL_NAME
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.vocab.phrasebook import family, phrase
 
@@ -44,7 +45,9 @@ CREATE TABLE IF NOT EXISTS replay_seq (seq INTEGER PRIMARY KEY, archive TEXT NOT
 CREATE TABLE IF NOT EXISTS replay_archive (archive INTEGER PRIMARY KEY, seq INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS replay_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
-EXTRACT_TOOL, PROFILE_TOOL = "record_memories", "record_profile"
+#: l'outil de la consolidation : son nom vient du moteur (``extraction.TOOL_NAME``)
+EXTRACT_TOOL = TOOL_NAME
+PROFILE_TOOL = "record_profile"
 #: les tons de rêve du moteur (leurs mots sont dans sa voix, ``self.night.dream.tone.<code>``) → ceux des rêves
 #: synthétisés. Le rejoueur reconnaît le ton à ses mots dans la consigne : changer une tournure dans ``voix.yaml``
 #: ne le perd pas.
