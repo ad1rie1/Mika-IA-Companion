@@ -12,10 +12,11 @@ agenda sa couleur, s'il est masqué, le rappel de Mika et ses partages.
   (``vocab.access.SHARES``). Les partages et les propriétaires sont journalisés avec les paramètres du plugin
   (``params``), comme ceux des boîtes : ce que Mika en fait se relit tel qu'il était.
 - **Google et Microsoft** (lot 2) n'ont ni mot de passe ni adresse de serveur : leur connexion (le jeton de
-  renouvellement) est gardée à part, scellée (``app/settings.py`` : ``agenda_oauth``), que ce formulaire ne touche
-  jamais. Un compte Microsoft entre par l'application de l'instance, celle du courrier (ADR 0238), ou par la sienne
-  (``oauth_client_id``), dans son annuaire (``oauth_tenant``) ; un compte Google, par l'application Google du
-  serveur, réglée par un opérateur.
+  renouvellement) est gardée à part, scellée (``app/domains/agenda/settings.py`` : ``agenda_oauth``), que ce
+  formulaire ne touche jamais. Un compte Microsoft entre par l'application de l'instance, que le courrier partage
+  (ADR 0238), ou par la sienne (``oauth_client_id``), dans son annuaire (``oauth_tenant``) ; un compte Google, par
+  l'application Google du serveur, réglée par un opérateur — toutes deux des réglages du cadre (``app/connections.py``,
+  ADR 0318).
 """
 
 from __future__ import annotations

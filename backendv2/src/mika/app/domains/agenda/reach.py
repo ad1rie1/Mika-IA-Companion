@@ -93,8 +93,8 @@ def can_use(level: str) -> bool:
 
 
 def agenda_settings(call: Call) -> AgendaSettings:
-    """Ses réglages (ses comptes, leurs connexions, l'application Google du serveur) ; 503 s'ils ne sont pas
-    branchés."""
+    """Ses réglages (ses comptes, leurs connexions ; l'application Google du serveur est au cadre,
+    ``app/connections.py``) ; 503 s'ils ne sont pas branchés."""
     found: AgendaSettings = settings_of(call).of(AgendaSettings)
     return found
 
