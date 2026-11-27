@@ -25,6 +25,19 @@ coupe, plancher, étiquettes) ; le composeur, générique :
 5. rend un ``ChatPrompt`` : préfixe stable, historique en vrais tours (avec
    leurs repères de temps et, dans un salon, qui parle), bloc volatile en tête
    du dernier tour utilisateur.
+
+Cinq textes que le modèle lit sont écrits ici, hors de sa voix
+(``persona/voix.yaml``), et y restent exprès : la marque d'une coupe
+(``TRIM_MARK``), les bornes de l'état interne (``CONTEXT_HEADER``,
+``CONTEXT_FOOTER``), le tour qui ouvre une reprise de la conversation
+(``RESUME_MARKER``) et la note qui précède une citation (``UNTRUSTED_NOTE``).
+Le noyau ne lit pas la voix (``vocab.phrasebook`` est au-dessus de lui) ; le
+composeur compte leur longueur dans son budget, la neutralisation désamorce
+les bornes de l'état interne là où il ne les a pas posées, et d'autres les
+lisent ici (l'adaptateur compatible OpenAI encadre le bloc volatile des mêmes
+bornes, la consigne de style les nomme) : les en sortir changerait le prompt
+au caractère près. Le gabarit d'un titre de section, lui, se reçoit
+(``Composer.header_fmt``).
 """
 
 from __future__ import annotations
