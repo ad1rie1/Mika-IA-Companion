@@ -67,7 +67,6 @@ from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY
-from mika.faculties.memory.knowledge import pooled
 from mika.faculties.memory.tables import (
     DEFERRED_TABLE,
     EMOTION,
@@ -96,6 +95,7 @@ from mika.faculties.memory.tables import (
     told,
     told_lines,
 )
+from mika.faculties.memory.testimonies import pooled
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.faculty import Tier
 from mika.ports.paging import fold_text

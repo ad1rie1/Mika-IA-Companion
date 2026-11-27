@@ -18,12 +18,12 @@ from mika.faculties.memory.conversation import Conversation
 from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryState
 from mika.faculties.memory.hearing import heard_confidence, items_by_id, verdict_of
-from mika.faculties.memory.knowledge import pooled
 from mika.faculties.memory.night import joinable_pairs
 from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.projections import Items
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import TESTIMONIES_TABLE, Testimony
+from mika.faculties.memory.testimonies import pooled
 from mika.faculties.social.faculty import SocialState, _knit
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.events import Content

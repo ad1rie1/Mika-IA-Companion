@@ -20,11 +20,11 @@ from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryState
 from mika.faculties.memory.hearing import items_by_id
-from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, judge
 from mika.faculties.memory.lines import contested_line
 from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.speakers import People
 from mika.faculties.memory.tables import Testimony
+from mika.faculties.memory.testimonies import CONTEST, SUPERSEDE, judge
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
 from mika.vocab.privacy import Sensitivity
