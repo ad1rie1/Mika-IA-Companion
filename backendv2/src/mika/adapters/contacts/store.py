@@ -22,7 +22,7 @@
   organisation qui n'avait que ce nom ; sans organisation de domaine, la personne va à l'organisation de ce nom, née
   au besoin. Deux organisations à domaine ne se réunissent jamais par leur nom. L'organisation Teams (``TENANT``) se
   range à l'organisation de sa personne, à elle seule. Son poste et son service sont ceux de sa vue.
-- **Le téléphone et ce qu'on lui raconte** (lot 5) : un expéditeur du téléphone (``PHONE_APP``) et un nom raconté
+- **Le téléphone et ce qu'on lui raconte** : un expéditeur du téléphone (``PHONE_APP``) et un nom raconté
   (``TOLD_NAME``) sont des identifiants comme les autres, sans valeur à montrer ni à chercher (``OPAQUE_KINDS``) ; une
   vue du téléphone garde ses conversations (``threads`` : les plus récentes). Une fiche que le téléphone ne connaît
   que par un numéro (un expéditeur hors du carnet, sans nom) *est* ce numéro : le profil qui le dit la réunit à sa
@@ -30,7 +30,7 @@
 - **L'oubli** efface le contact entier (ou la seule adresse générique d'une organisation) et garde, de chaque
   identifiant, l'empreinte et l'instant : une observation datée d'avant ne le ramène pas. Une organisation qui
   n'existait que par une personne oubliée part avec elle.
-- **Ce qu'elle en sait** (lot 6) : les faits d'un portrait (``notes``) remplacent ceux de la même vue ; un fait oublié
+- **Ce qu'elle en sait** : les faits d'un portrait (``notes``) remplacent ceux de la même vue ; un fait oublié
   laisse l'empreinte de ses mots (``notes_forgotten``), et le même fait reformulé n'est plus gardé ; chaque passage
   est noté (``portraits``). Ils suivent le contact quand il est réuni à un autre, et partent avec lui, ou avec le
   compte d'où ils viennent.
@@ -1238,7 +1238,7 @@ class ContactsStore:
             n += int(s.execute(delete(row).where(row.contact.in_(ids))).rowcount or 0)
         return n + int(s.execute(delete(C).where(C.id.in_(ids))).rowcount or 0)
 
-    # ── ce qu'elle en sait (lot 6) ──
+    # ── ce qu'elle en sait : ses faits, ses portraits ──
     def notes(self, contact_id: int, *, visible: Collection[tuple[str, str]] | None = None) -> list[Note]:
         if visible is not None and not visible:
             return []

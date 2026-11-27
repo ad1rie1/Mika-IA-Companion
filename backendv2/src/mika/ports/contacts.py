@@ -14,7 +14,7 @@ monde de Teams et du courrier. La faculté ``identity`` reste celle de qui lui p
   fiches (``bases``, ``pair_basis``). Sûr de la même personne, il les réunit (``unite``, gardé : ``Joined``) ; sûr de
   deux, elles ne se proposent plus ; sinon elles se proposent avec son avis. Ses appels (``JudgeCall``) bornent son
   coût.
-- **Un profil Teams** (lot 2) dit d'une personne son e-mail, ses numéros, son poste, son service et son entreprise :
+- **Un profil Teams** dit d'une personne son e-mail, ses numéros, son poste, son service et son entreprise :
   une observation peut ainsi aller au contact d'un autre identifiant (``joins``) — l'e-mail le prouve (``proof`` : deux
   contacts qui le portent se réunissent, sauf reliés à deux personnes différentes de l'identité), un numéro non (un
   standard se partage : déjà à quelqu'un d'autre, il reste où il est). L'entreprise (``COMPANY``) nomme
@@ -26,12 +26,12 @@ monde de Teams et du courrier. La faculté ``identity`` reste celle de qui lui p
   première et la dernière fois, le nom qu'il y porte, et pour le téléphone ses conversations (``Thread``). À qui est
   un contact se lit à la lecture, sur le propriétaire du compte de ses vues (``visible_sources`` ; ``person_accounts``
   pour les comptes qui sont des personnes) : jamais rangé avec lui.
-- **Le téléphone** (lot 5) : un expéditeur WhatsApp ou SMS est un identifiant ``PHONE_APP`` (``<appli>:<empreinte>``,
+- **Le téléphone** : un expéditeur WhatsApp ou SMS est un identifiant ``PHONE_APP`` (``<appli>:<empreinte>``,
   l'empreinte de sa clé ``phone:<empreinte>:<nom>`` : un contact renommé reste le même) ; un expéditeur que le
   téléphone ne nomme que par son numéro (``number_in_name``) est aussi ce numéro (``PHONE``), une preuve. Un numéro
   se range en E.164 quand c'est un numéro français sans ambiguïté (``06…`` → ``+336…``) : celui d'un profil Teams et
   celui du téléphone se retrouvent.
-- **Ce qu'on lui raconte** (lot 5) : une personne dont on lui parle (une clé ``name:<portée>:<nom>`` de sa mémoire)
+- **Ce qu'on lui raconte** : une personne dont on lui parle (une clé ``name:<portée>:<nom>`` de sa mémoire)
   est un identifiant ``TOLD_NAME`` ; un même prénom, d'un côté sans nom de famille, se propose aussi (plus faible).
 - **Les organisations** : un domaine de courrier (hors des webmails publics, ``PUBLIC_DOMAINS``) fait une
   organisation (``ORG``), nommée d'après lui tant qu'on ne lui en sait pas mieux ; une personne de ce domaine y est
@@ -41,7 +41,7 @@ monde de Teams et du courrier. La faculté ``identity`` reste celle de qui lui p
   ``phone:<empreinte>:<nom>`` (un expéditeur du téléphone), ``name:…`` (une personne dont on lui a parlé), ou la clé
   d'une personne de l'identité (ses contacts reliés, et ce que son téléphone et ses récits avaient apporté) ; chaque
   identifiant oublié laisse une empreinte et l'instant de l'oubli : ce qui le revoit, daté d'avant, ne le ramène pas.
-- **Ce qu'elle en sait** (lot 6) : des faits courts (``Note``) qu'un portrait (le rôle ``portrait``) tire de ses
+- **Ce qu'elle en sait** : des faits courts (``Note``) qu'un portrait (le rôle ``portrait``) tire de ses
   derniers messages, rangés sous la vue (source, compte) d'où ils viennent : visibles de qui voit cette vue, repris
   au portrait suivant de la même vue, qui reçoit ses faits d'avant et rend la fiche entière (ADR 0303) ; oubliables
   un à un — un fait oublié laisse son empreinte (``note_print`` : ses mots, réduits à des empreintes), et le même fait
@@ -543,7 +543,7 @@ def pair_basis(a: str, b: str) -> str:
     return hashlib.sha256(f"pair\n{first}\n{second}".encode()).hexdigest()[:32]
 
 
-# ── ce qu'elle en sait, à partir de ce qu'elle lit (lot 6) ──
+# ── ce qu'elle en sait, à partir de ce qu'elle lit : ses faits, ses portraits ──
 #: la sorte d'un fait tiré de ses messages : son rôle, un de ses sujets, avec quelle équipe elle travaille (sans nommer
 #: personne), ce qu'elle attend ; sa façon d'être et d'écrire (``manner``), ce qu'il y a entre elle et la personne du
 #: compte (``bond``, ADR 0303)
@@ -767,7 +767,7 @@ class ContactsPort(Protocol):
         combien de lignes."""
         ...
 
-    # ── ce qu'elle en sait (lot 6) ──
+    # ── ce qu'elle en sait : ses faits, ses portraits ──
     def notes(self, contact_id: int, *, visible: Collection[tuple[str, str]] | None = None) -> list[Note]:
         """Les faits qu'elle a tirés de ce qu'il écrit, ceux des vues ``visible`` (``None`` : tous, pour une
         opératrice), les plus sûrs d'abord."""
