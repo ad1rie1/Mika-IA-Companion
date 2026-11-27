@@ -2546,7 +2546,7 @@ memory:
     # Qui parlait, quand on ne connaît pas son nom.
     someone: la personne
 
-  # Un jour dit comme on le dit (memory/recall.py, ``when_words``) : aujourd'hui, demain, jeudi, hier, le 12
+  # Un jour dit comme on le dit (memory/lines.py, ``when_words``) : aujourd'hui, demain, jeudi, hier, le 12
   # octobre. Sert aux promesses et aux moments de la vie des autres. {hour} : rien, ou memory.when.at /
   # memory.when.at_hour.
   when:
