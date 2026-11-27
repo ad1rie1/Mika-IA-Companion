@@ -28,6 +28,12 @@ confié (``told_by``) et qui l'a entendu (``heard_by``). Pour l'interlocuteur :
 
 Ce qui ne peut pas se dire ici n'est pas pour autant inconnu : elle peut
 savoir qu'elle sait (``unsaid_line``), sans un mot du contenu.
+
+**Une ligne lue.** Ce module porte aussi ``Item``, la forme lue d'une ligne
+de ``memory_items`` (``Item.of``, sur les colonnes de ``tables.ITEM_COLUMNS``) :
+le rappel et ses sections, le verdict (``hearing.py``), les mots d'une ligne
+(``lines.py``), le délicat, la nuit, la relecture de ce qu'elle a lu, le récit
+sans nom et la console la lisent d'ici.
 """
 
 from __future__ import annotations
