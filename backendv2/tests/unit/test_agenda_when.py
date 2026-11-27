@@ -76,6 +76,37 @@ def test_an_end_before_its_start_and_a_span_too_long_are_refused():
     assert isinstance(span_of("2026-06-10T14:00", "", LONGEST_DAYS * 24 * 60, False, PARIS), Span)
 
 
+@pytest.mark.parametrize(("start", "end", "minutes", "kept"), [
+    # quatorze jours au calendrier par-dessus le passage à l'heure d'hiver : 337 h réelles, acceptées
+    ("2026-10-20T10:00", "2026-11-03T10:00", None, True),
+    ("2026-10-20T10:00", "2026-11-03T10:01", None, False),
+    # quatorze jours au calendrier par-dessus le passage à l'heure d'été : 335 h réelles
+    ("2026-03-20T10:00", "2026-04-03T10:00", None, True),
+    ("2026-03-20T10:00", "2026-04-03T11:00", None, True),  # quatorze jours réels, tout juste
+    ("2026-03-20T10:00", "2026-04-03T11:01", None, False),
+    # quatorze jours réels dits en minutes, par-dessus l'un et l'autre
+    ("2026-03-20T10:00", "", 14 * 24 * 60, True),
+    ("2026-10-20T10:00", "", 14 * 24 * 60, True),
+    ("2026-10-20T10:00", "", 14 * 24 * 60 + 60, True),  # la fin tombe à 10 h murales, quatorze jours plus tard
+    ("2026-10-20T10:00", "", 14 * 24 * 60 + 61, False),
+])
+def test_fourteen_days_count_by_the_calendar_or_by_real_time(start, end, minutes, kept):
+    """La borne se lit au plus court des deux mesures : le changement d'heure ne fait refuser ni quatorze jours du
+    calendrier ni quatorze jours réels."""
+    assert LONGEST_DAYS == 14
+    assert isinstance(span_of(start, end, minutes, False, PARIS), Span) is kept
+
+
+def test_a_moved_start_keeps_fourteen_days_that_span_the_change_of_hour():
+    """Déplacer le seul début d'un rendez-vous de quatorze jours qui enjambait le 25 octobre reprend sa durée réelle
+    (337 h) : elle passe encore."""
+    current = Span(instant(datetime(2026, 10, 20, 10, 0, tzinfo=PARIS)),
+                   instant(datetime(2026, 11, 3, 10, 0, tzinfo=PARIS)), "Europe/Paris", False)
+    assert current.end - current.start == 337 * HOUR
+    moved = span_of("2026-10-19T10:00", "", None, False, PARIS, current=current)
+    assert isinstance(moved, Span) and moved.end - moved.start == 337 * HOUR
+
+
 def test_the_bound_of_a_day_is_local_midnight_whatever_the_day():
     """La borne d'un jour : minuit local — un jour de changement d'heure fait 23 ou 25 heures."""
     def day(iso: str) -> int:

@@ -150,7 +150,11 @@ def span_of(start: str, end: str, minutes: int | None, all_day: bool, tz: ZoneIn
         closes = opens + (current.end - current.start)
     else:
         closes = opens + DEFAULT_MINUTES * MINUTE
-    if closes <= opens or closes - opens > LONGEST_DAYS * DAY:
+    # la borne, elle, se lit au plus court du calendrier et du temps réel : quatorze jours à l'heure murale par-dessus
+    # le passage à l'heure d'hiver durent une heure réelle de plus, quatorze jours réels par-dessus celui de l'heure
+    # d'été finissent une heure murale plus tard — ni l'un ni l'autre ne se refuse
+    wall = (local(closes, tz).replace(tzinfo=None) - local(opens, tz).replace(tzinfo=None)) // timedelta(microseconds=1)
+    if closes <= opens or min(closes - opens, wall) > LONGEST_DAYS * DAY:
         return phrase("agenda.tools.bad_time")
     return Span(opens, closes, getattr(tz, "key", ""), False)
 
