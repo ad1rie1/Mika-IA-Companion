@@ -2,8 +2,9 @@
 
 Chaque domaine a son dossier ici et sa fiche (``Domain``, ``domain.py``). ``DOMAINS`` les liste, à la main et dans un
 ordre voulu : c'est l'ordre où le cadre les parcourt — celui où ses routes sont essayées, où ``mika --help`` montre
-ses commandes. Rien n'est découvert : ni dossier balayé, ni point d'entrée ; ajouter un domaine, c'est écrire son
-dossier et l'inscrire ici.
+ses commandes (sauf celles que le cadre range à côté de celle des modèles : ``app/cli/models.py::BESIDE_MODELS``).
+Rien n'est découvert : ni dossier balayé, ni point d'entrée ; ajouter un domaine, c'est écrire son dossier et
+l'inscrire ici.
 
 Une fiche n'importe rien : elle nomme les modules de ses parts, que le cadre importe au moment d'assembler
 (``domain.part``). Ce module est donc une feuille : tout module d'``app`` peut le lire sans que l'import tourne en

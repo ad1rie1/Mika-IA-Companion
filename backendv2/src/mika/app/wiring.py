@@ -10,7 +10,8 @@ pour de bon) et y pose ce qu'il apporte :
   vivants, par le nom du domaine : ``Live.parts``) et ``w.watched`` (ses bases tenues à côté du journal, que le
   direct écoute) ;
 - ``bind(w)``, facultatif, une fois le noyau construit : ce qui a besoin de son port d'entrée (``w.port`` ; le
-  noyau : ``w.port.kernel``), du serveur vivant (``w.live`` : ses comptes, de quoi se reconfigurer) ou des
+  noyau : ``w.port.kernel``), du serveur vivant (``w.live`` : ses comptes, son registre des appels, de quoi se
+  reconfigurer) ou des
   notifications des téléphones (``w.push``). Ce qu'il signale de lui-même au direct passe par
   ``w.live.changes.add(touches)``, lu à l'appel (le direct naît après lui). Il peut encore poser des routes (``w.routes`` : des montages de
   l'application web, à côté de ceux du serveur) et ce que la console reçoit par nom (``w.inspector`` :

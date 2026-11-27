@@ -30,8 +30,6 @@ log = logging.getLogger("mika.reglages")
 #: « destination/onglet »). Une ligne n'est montrée que si son plugin est composé ; ses paramètres avancés, que si sa
 #: faculté en a.
 _FRAME: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
-    "imaging": ("Ses fournisseurs d'images et qui dessine quoi ; sa qualité par défaut, ses quotas",
-                ("images-fournisseurs", "images-roles"), ("Ses sens › Dessins", "sens/dessins")),
     "contacts": ("Ce qu'elle se forme de ses contacts à partir de ce qu'elle lit : la période relue, ses bornes, les "
                  "plafonds par jour", (), ("Personnes › Annuaire", "personnes/personnes")),
 }

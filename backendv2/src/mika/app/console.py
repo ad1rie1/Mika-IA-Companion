@@ -143,7 +143,7 @@ PARAM_FAMILY: dict[str, str] = _named("parameters", {
     "affect": "Émotions", "needs": "Émotions", "body": "Émotions", "self": "Émotions", "attention": "Esprit",
     "memory": "Esprit", "attachments": "Esprit", "transcript": "Esprit", "social": "Relations",
     "others": "Relations", "identity": "Relations", "agency": "Action", "runtime": "Action",
-    "goals": "Action", "shares": "Action", "imaging": "Action", "world": "Action", "kernel": "Noyau",
+    "goals": "Action", "shares": "Action", "world": "Action", "kernel": "Noyau",
 })
 #: … et leur ordre dans leur famille, par leur nom technique : qui n'y est pas vient après, dans l'ordre des fiches
 PARAM_ORDER: tuple[str, ...] = (
@@ -160,7 +160,6 @@ FACULTY_LABELS: dict[str, str] = _named("faculties", {
     "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
-    "imaging": "Dessins",
 })
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -191,7 +190,7 @@ SECTION_LABELS: dict[str, str] = _named("sections", {
     # ADR 0140
     "form": "Comment elle écrit ici (les codes de son autrice)",
     # ADR 0062
-    "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
+    "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)",
     # ADR 0271
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
@@ -207,7 +206,6 @@ REASON_LABELS: dict[str, str] = _named("reasons", {
     "greeting": "Saluer", "present": "Quelqu'un de présent", "chat": "Envie de bavarder",
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
-    "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
     "second_thoughts": "Elle s'est ravisée",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
@@ -253,7 +251,7 @@ PROCESS_LABELS: dict[str, str] = _named("processes", {
     "social.bonds": "Remarquer qu'un lien a changé",
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
     "world.settle": "Conclure ses gestes dans le monde", "world.notice": "Remarquer ce qu'on a changé chez elle",
-    "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
+    "shares.retention": "Retirer les fichiers envoyés trop anciens",
     "attachments.study": "Lire de près les pièces reçues", "attachments.index": "Indexer les pièces reçues",
     "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
     "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
@@ -327,8 +325,6 @@ EVENT_LABELS: dict[str, str] = _named("events", {
     "attachments.kept": "Une pièce reçue, lue de près",
     "attachments.linked": "Une pièce reçue reliée (ou déliée) à ce qu'elle sait",
     "attachments.expired": "Des pièces reçues retirées",
-    "imaging.requested": "Un dessin demandé", "imaging.drawn": "Un dessin prêt",
-    "imaging.failed": "Un dessin qui n'a pas pu se faire",
     "memory.relayed_read": "Des messages du téléphone relus, ou remis à la file des reprises",
 })
 
@@ -376,7 +372,6 @@ FAMILY_ABOUT: dict[str, str] = _named("about", {
     "attention": "ce qui lui trotte dans la tête en ce moment",
     "goals": "ses rappels et ses explorations ; noter une séance et en rendre compte",
     "identity": "douter d'une identité, défaire un lien",
-    "imaging": "dessiner pour la personne (quelques minutes par image), montrer un dessin prêt",
     "memory": "fouiller ses souvenirs et ce qu'elle sait ; dire qu'une promesse est tenue",
     "self": "relire ce qu'elle a écrit dans son journal un jour passé",
     "shares": "envoyer à la personne un texte qu'elle écrit ou un fichier d'un projet ; relire un envoi",
@@ -414,15 +409,12 @@ ENRICHER_LABELS: dict[str, str] = _named("enrichers", {
     "learned": "Ce qu'elle a appris en lisant", "goals": "Ses buts en cours",
     "goals_context": "D'où vient le but, et la vie de la personne",
     "sent_files": "Les fichiers qu'elle a envoyés",
-    "dessins": "Ses dessins",
 })
 
 #: Les ports que des outils attendent (``needs=``) : pourquoi la porte ne les offre pas tant que le port n'est pas prêt
 #: (``runtime.tool_offer.ready``), et la page de réglages où il se règle — la fiche d'un outil dit l'un et mène à
-#: l'autre.
-NEED_LABELS: dict[str, tuple[str, str]] = _named("needs", {
-    "imaging": ("aucun fournisseur d'images n'est configuré", "images-fournisseurs"),
-})
+#: l'autre. Celui d'un domaine est dans sa fiche (``labels["needs"]`` : les dessins).
+NEED_LABELS: dict[str, tuple[str, str]] = _named("needs", {})
 
 #: Tout ce que la console nomme en français, d'un bloc.
 LABELS = Labels(faculties=FACULTY_LABELS, sections=SECTION_LABELS, reasons=REASON_LABELS, vetoes=VETO_LABELS,
