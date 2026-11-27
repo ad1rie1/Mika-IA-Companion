@@ -14,8 +14,8 @@ from collections.abc import Callable
 from typing import Any
 
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
-from mika.adapters.mail.config import DEFAULT_APPLICATION, application_id
-from mika.adapters.mail.oauth import Grant
+from mika.adapters.signin.grants import Grant
+from mika.adapters.signin.microsoft import DEFAULT_APPLICATION, application_id
 from mika.app.settings import Settings, SettingsPart
 
 EMAIL_KEY = "email"

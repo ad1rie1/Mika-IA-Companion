@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mika.adapters.mail.config import DEFAULT_APPLICATION
+from mika.adapters.signin.microsoft import DEFAULT_APPLICATION
 from mika.app.domains.mail.settings import MailSettings
 from mika.inspector.catalog import Builtin, Destination, NavGroup, check
 from mika.kernel.registry import CompositionError

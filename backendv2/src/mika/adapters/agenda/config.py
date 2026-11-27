@@ -25,7 +25,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mika.adapters.mail.config import CONSUMERS, application_id, tenant_id
+from mika.adapters.signin.microsoft import CONSUMERS, application_id, tenant_id
 from mika.kernel.forms import Knob
 from mika.ports.agenda import (
     KIND_WORDS,

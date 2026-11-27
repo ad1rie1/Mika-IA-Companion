@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 
-from mika.adapters.mail.oauth import Grant
+from mika.adapters.signin.grants import Grant
 from mika.app.domains.mail.settings import MailSettings
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content

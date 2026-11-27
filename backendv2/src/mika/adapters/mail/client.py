@@ -60,8 +60,9 @@ from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mail.imap import ImapError, Session, role_of, since
 from mika.adapters.mail.models import sent_name
-from mika.adapters.mail.oauth import MicrosoftSignIn, OAuthError, answer
+from mika.adapters.mail.oauth import answer, mail_signin
 from mika.adapters.mail.parse import Part, attachment_files, parse, parse_parts
+from mika.adapters.signin.microsoft import MicrosoftSignIn, OAuthError
 from mika.contracts.email import HANDLE_PREFIX
 from mika.ports.mail import (
     ASIDE,
@@ -150,7 +151,7 @@ class ImapSmtpMail:
         self._cache = MailCache(cache)
         self._locks: dict[str, asyncio.Lock] = {}
         #: les connexions Microsoft (sans endroit où garder leur jeton, aucune boîte Microsoft n'entre)
-        self._microsoft = microsoft or MicrosoftSignIn()
+        self._microsoft = microsoft or mail_signin()
         #: par compte, le jeton d'accès de la session qui va s'ouvrir (posé sous le verrou du compte)
         self._bearers: dict[str, str] = {}
         #: les boîtes que le courrier en direct observe (ADR 0308 ; ``MailWatch``) : leur panne est la sienne — une

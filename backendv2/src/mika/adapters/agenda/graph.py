@@ -1,5 +1,6 @@
 """Outlook.com / Microsoft 365 (ADR 0309, lot 2) : Microsoft Graph, par la connexion du compte (le code d'appareil du
-courrier, ``adapters/agenda/oauth.py::microsoft_signin``), vers ``graph.microsoft.com`` seulement.
+cadre, ``adapters/signin/microsoft.py``, à la portée de l'agenda : ``adapters/agenda/oauth.py::microsoft_signin``), vers
+``graph.microsoft.com`` seulement.
 
 - **Ses agendas** (``/me/calendars``) : nom, couleur (``hexColor``, sinon sa couleur nommée), si on peut y écrire
   (``canEdit``), le principal (``isDefaultCalendar``), son propriétaire (l'adresse du compte : ``whoami``, et qui il
@@ -51,7 +52,7 @@ from icalendar.timezone.windows_to_olson import WINDOWS_TO_OLSON
 
 from mika.adapters.agenda import ics
 from mika.adapters.agenda.cloud import Answer, Api, Session, SignInNeeded, refused_words
-from mika.adapters.mail.oauth import MicrosoftSignIn, OAuthError, Unreachable
+from mika.adapters.signin.microsoft import MicrosoftSignIn, OAuthError, Unreachable
 from mika.ports.agenda import (
     ALL,
     CANCELLED,

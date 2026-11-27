@@ -17,7 +17,7 @@ import logging
 
 from mika.adapters.agenda.config import AgendaConfig
 from mika.adapters.agenda.oauth import GoogleApplication
-from mika.adapters.mail.oauth import Grant
+from mika.adapters.signin.grants import Grant
 from mika.app.settings import Settings, SettingsPart
 from mika.contracts.agenda import RIGHTS_SORT, AgendaRule
 from mika.plugins.agenda.rights import shared_table

@@ -12,17 +12,19 @@ Une boîte entre par mot de passe, ou par un compte Microsoft (Hotmail,
 Outlook.com, Live ; Microsoft 365 si son administrateur le permet), où le mot
 de passe est refusé : OAuth2 (``oauth``, ADR 0166). Le jeton de cette connexion
 n'est pas ici : il est gardé à part, scellé, et ce formulaire ne le touche
-jamais.
+jamais. Ce qui vaut pour une application Microsoft et un annuaire (leur forme,
+l'annuaire des comptes personnels) est au cadre, avec la connexion
+(``adapters/signin/microsoft.py``, ADR 0318).
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mika.adapters.signin.microsoft import CONSUMERS, application_id, tenant_id
 from mika.kernel.forms import Knob
 from mika.ports.mail import ACCOUNT_KEY, VOICES, AccountInfo
 from mika.vocab.access import PERSON, SELF, Share
@@ -35,39 +37,8 @@ ACCOUNT_KEY_RULE = "des minuscules, chiffres, - ou _ (40 au plus), en commençan
 PASSWORD, MICROSOFT = "password", "microsoft"
 AUTHS: tuple[tuple[str, str], ...] = ((PASSWORD, "par mot de passe"),
                                       (MICROSOFT, "par un compte Microsoft (Hotmail, Outlook.com, Live)"))
-#: l'annuaire Microsoft des comptes personnels (Hotmail, Outlook.com, Live)
-CONSUMERS = "consumers"
-#: l'identifiant d'une application Microsoft (un GUID) ; un annuaire (``consumers``, ``organizations``, un domaine ou
-#: un GUID) : il entre dans l'adresse de Microsoft, rien d'autre n'y passe
-_CLIENT_ID = re.compile(r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
-_TENANT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$")
 #: sans serveur d'envoi, une boîte ne fait que lire : ses réglages d'envoi et sa voix attendent qu'on le donne
 _NO_SMTP = (("smtp_host", ("",)),)
-
-
-#: l'application Microsoft que Mika livre (ADR 0238) : un client public inscrit dans Microsoft Entra (comptes
-#: personnels, flux de clients publics), dont l'identifiant n'est pas un secret. Une instance peut donner la sienne.
-DEFAULT_APPLICATION = "ed7003c6-4cc5-4af8-91a9-724a66281d58"
-
-
-def application_id(client_id: str) -> str:
-    """L'identifiant d'une application Microsoft (client ID), mis en forme ; vide : aucune. ``ValueError`` s'il n'en
-    a pas la forme."""
-    client_id = client_id.strip()
-    if client_id and not _CLIENT_ID.match(client_id):
-        raise ValueError("l'application Microsoft se donne par son identifiant (client ID), de la forme "
-                         "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
-    return client_id.lower()
-
-
-def tenant_id(tenant: str) -> str:
-    """Un annuaire Microsoft (``consumers``, ``organizations``, un domaine ou un GUID), vide : ``consumers`` ;
-    ``ValueError`` s'il n'en a pas la forme (il entre dans l'adresse de Microsoft). Une boîte et un compte d'agenda
-    (ADR 0309) le vérifient de même."""
-    tenant = tenant.strip() or CONSUMERS
-    if not _TENANT.match(tenant):
-        raise ValueError("l'annuaire Microsoft est « consumers », « organizations », un domaine ou un identifiant")
-    return tenant
 
 
 class MailAccount(BaseModel):

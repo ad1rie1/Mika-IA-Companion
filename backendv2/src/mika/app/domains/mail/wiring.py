@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from mika.adapters.mail import ImapSmtpMail, MailWatch
-from mika.adapters.mail.oauth import MicrosoftSignIn
+from mika.adapters.mail.oauth import mail_signin
+from mika.adapters.signin.microsoft import MicrosoftSignIn
 from mika.app.domains.mail.live import signed
 from mika.app.domains.mail.settings import MailSettings
 from mika.app.wiring import Wiring
@@ -35,7 +36,7 @@ def wire(w: Wiring) -> None:
     own = w.settings.of(MailSettings)
     # une boîte Microsoft garde sa connexion (son jeton de renouvellement) scellée dans les réglages
     # (ADR 0166), et entre par l'application de l'instance quand elle n'en déclare pas (ADR 0238)
-    microsoft = MicrosoftSignIn(own, application=own.mail_application)
+    microsoft = mail_signin(own, application=own.mail_application)
     mail = w.ports[NAME] = ImapSmtpMail(own.email, w.bases["mail"], her=w.her, microsoft=microsoft, images=own)
     parts = w.parts[NAME] = MailParts(microsoft)
     # le direct (ADR 0308) : sa base prévient de ses écritures validées

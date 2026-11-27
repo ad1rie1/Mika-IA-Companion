@@ -2,9 +2,10 @@
 d'agenda, scellé dans les réglages à part des comptes (``AgendaGrants`` : ``app/settings.py``, la clé
 ``agenda_oauth``), et le jeton d'accès, en mémoire, renouvelé avant sa fin.
 
-- **Microsoft** (``microsoft_signin``) : le code d'appareil du courrier (``adapters/mail/oauth.py``,
-  ``MicrosoftSignIn``, ADR 0166), une instance à part : la portée de Graph (``Calendars.ReadWrite`` et
-  ``offline_access`` : un jeton à part de celui d'une boîte IMAP), les connexions des comptes d'agenda, ses mots.
+- **Microsoft** (``microsoft_signin``) : le code d'appareil du cadre (``adapters/signin/microsoft.py``,
+  ``MicrosoftSignIn``, ADR 0166, 0318), que le courrier prend aussi, une instance à part : la portée de Graph
+  (``Calendars.ReadWrite`` et ``offline_access`` : un jeton à part de celui d'une boîte IMAP), les connexions des
+  comptes d'agenda, ses mots.
   L'application est celle de l'instance, celle du courrier (ADR 0238), ou celle que le compte déclare
   (``oauth_client_id``), dans son annuaire (``oauth_tenant``).
 - **Google** (``GoogleSignIn``) : OAuth 2 avec PKCE (RFC 7636) — Google refuse le code d'appareil pour l'agenda. Le
@@ -41,7 +42,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 import httpx
 
 from mika.adapters.agenda.cloud import TIMEOUT, USER_AGENT, SignInNeeded
-from mika.adapters.mail.oauth import Grant, MicrosoftSignIn
+from mika.adapters.signin.grants import Grant
+from mika.adapters.signin.microsoft import MicrosoftSignIn
 from mika.ports.agenda import GOOGLE, MICROSOFT, AgendaError
 from mika.ports.signin import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
 
@@ -66,8 +68,8 @@ class AgendaGrants(Protocol):
 
 
 class _KindGrants:
-    """Les connexions d'une sorte de compte d'agenda, sous la forme que lit le code d'appareil du courrier
-    (``adapters/mail/oauth.py::GrantStore``)."""
+    """Les connexions d'une sorte de compte d'agenda, sous la forme que lisent les connexions du cadre
+    (``adapters/signin/grants.py::GrantStore``)."""
 
     def __init__(self, grants: AgendaGrants, kind: str) -> None:
         self._grants = grants
@@ -82,7 +84,7 @@ class _KindGrants:
 
 def microsoft_signin(grants: AgendaGrants | None, application: Callable[[], str] = lambda: "", *,
                      transport: httpx.AsyncBaseTransport | None = None, **more: Any) -> MicrosoftSignIn:
-    """Les connexions Microsoft des comptes d'agenda : le code d'appareil du courrier, à la portée de Graph
+    """Les connexions Microsoft des comptes d'agenda : le code d'appareil du cadre, à la portée de Graph
     (``start(compte, connexion)``, ``state``, ``token``, ``drop``) ; ``application`` : celle de l'instance."""
     return MicrosoftSignIn(_KindGrants(grants, MICROSOFT) if grants is not None else None, transport=transport,
                            application=application, scopes=MICROSOFT_SCOPES, not_signed_in=MICROSOFT_NOT_SIGNED_IN,

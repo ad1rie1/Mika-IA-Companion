@@ -28,8 +28,7 @@ import pytest
 
 from mika.adapters.agenda import AgendaStore, MicrosoftProvider, SignInNeeded, microsoft_signin
 from mika.adapters.agenda.oauth import MICROSOFT_SCOPES
-from mika.adapters.mail.config import DEFAULT_APPLICATION
-from mika.adapters.mail.oauth import REVOKED
+from mika.adapters.signin.microsoft import DEFAULT_APPLICATION, REVOKED
 from mika.plugins.agenda import AgendaParams
 from mika.plugins.agenda.sync import reread, sync_account
 from mika.ports.agenda import (

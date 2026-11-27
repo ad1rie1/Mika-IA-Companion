@@ -46,7 +46,7 @@ from typing import Any, TypeVar
 from mika.adapters.mail.client import ImapSmtpMail
 from mika.adapters.mail.config import MailAccount
 from mika.adapters.mail.imap import ImapError, Session
-from mika.adapters.mail.oauth import OAuthError
+from mika.adapters.signin.microsoft import OAuthError
 
 log = logging.getLogger("mika.mail")
 

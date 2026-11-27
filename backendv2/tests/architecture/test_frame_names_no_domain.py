@@ -137,6 +137,8 @@ FRAME_OWNED: dict[str, str] = {
     "adapters.preprocess": "le prétraitement de ce qu'on lui envoie, au bord du cœur",
     "adapters.push": "les notifications du téléphone (ADR 0077), que le transport web envoie",
     "adapters.shares": OFF_JOURNAL,
+    "adapters.signin": "les connexions aux comptes Microsoft et Google (le code d'appareil, PKCE, leur renouvellement, "
+                       "l'application qu'on présente), que plusieurs domaines partagent (ADR 0318)",
     "adapters.store_sql": STORAGE,
     "adapters.system": "les sources réelles du temps et des identifiants",
     "adapters.vectors": "les plongements et leur index, que lit la mémoire",
@@ -171,7 +173,7 @@ FRAME_OWNED: dict[str, str] = {
 #: ce que le cadre porte pour que plusieurs domaines s'en servent sans s'emprunter l'un l'autre — se connecter à un
 #: compte Microsoft ou Google (ADR 0318) : un de ces paquets qui nommerait un domaine ferait de nouveau dépendre les
 #: autres de lui (``test_what_the_domains_share_names_none_of_them``)
-SHARED_BY_DOMAINS = ("ports.signin",)
+SHARED_BY_DOMAINS = ("adapters.signin", "ports.signin")
 
 #: ce que le cadre nomme exprès, pour toujours, et pourquoi
 FOREVER: dict[str, str] = {

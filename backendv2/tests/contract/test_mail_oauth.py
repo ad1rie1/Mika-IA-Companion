@@ -21,8 +21,16 @@ import httpx
 import pytest
 
 from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig
-from mika.adapters.mail.config import DEFAULT_APPLICATION
-from mika.adapters.mail.oauth import DEVICE_GRANT, EXPIRED, REVOKED, Grant, MicrosoftSignIn, OAuthError
+from mika.adapters.mail.oauth import mail_signin
+from mika.adapters.signin.grants import Grant
+from mika.adapters.signin.microsoft import (
+    DEFAULT_APPLICATION,
+    DEVICE_GRANT,
+    EXPIRED,
+    REVOKED,
+    MicrosoftSignIn,
+    OAuthError,
+)
 from mika.adapters.store_sql import SqlStore
 from mika.app.domains.mail.settings import MAIL_GRANTS_KEY, MailSettings
 from mika.app.settings import SecretBox, Settings
@@ -89,7 +97,7 @@ async def _no_wait(_seconds: float) -> None:
 
 def signin(vault: Vault, microsoft: Microsoft, clock: list[datetime] | None = None) -> MicrosoftSignIn:
     clock = clock if clock is not None else [NOW]
-    return MicrosoftSignIn(vault, now=lambda: clock[0], transport=httpx.MockTransport(microsoft), sleep=_no_wait)
+    return mail_signin(vault, now=lambda: clock[0], transport=httpx.MockTransport(microsoft), sleep=_no_wait)
 
 
 @pytest.fixture
@@ -298,7 +306,7 @@ INSTANCE = "11111111-2222-4333-8444-555555555555"
 def test_a_box_without_an_application_enters_by_the_one_of_the_instance():
     """ADR 0238 : l'application est celle de l'instance ; celle qu'une boîte déclare passe devant."""
     vault, microsoft, application = Vault(), Microsoft(pending=0), [INSTANCE]
-    oauth = MicrosoftSignIn(vault, now=lambda: NOW, transport=httpx.MockTransport(microsoft), sleep=_no_wait,
+    oauth = mail_signin(vault, now=lambda: NOW, transport=httpx.MockTransport(microsoft), sleep=_no_wait,
                             application=lambda: application[0])
     bare = hotmail(oauth_client_id="")
     assert oauth.state("hotmail", bare) == oauth.state("hotmail", hotmail())  # à connecter, sans reproche

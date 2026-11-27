@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from mika.adapters.agenda import AgendaAccount, AgendaConfig
 from mika.adapters.agenda.oauth import pasted
-from mika.adapters.mail.oauth import Grant
+from mika.adapters.signin.grants import Grant
 from mika.adapters.store_sql import SqlStore
 from mika.app.domains.agenda.cli import agenda_command
 from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AGENDA_GRANTS_KEY, AgendaSettings
