@@ -1,5 +1,6 @@
 """La part de la Forge dans la console (ADR 0104, 0310) : l'onglet dessiné des apps forgées (``tabs.py``), son gabarit
-(``templates/``) et sa feuille (``static/``) — sous les noms et aux adresses qu'ils avaient dans l'inspecteur.
+(``templates/``) et sa feuille (``static/``) — sous les noms et aux adresses qu'ils avaient dans l'inspecteur. Les vues
+de la Forge, elles, gardent le rendu de la console (``plain``) : l'interface de ses apps est un contrat.
 """
 
 from __future__ import annotations
@@ -13,4 +14,4 @@ from mika.inspector.ui import console_folder
 
 console_folder(Path(__file__).parent)
 
-CONSOLE = ConsolePart(drawn=TABS, queue=QUEUE)
+CONSOLE = ConsolePart(drawn=TABS, queue=QUEUE, plain=("forge",))

@@ -562,6 +562,9 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             console = part(d.console, "CONSOLE")
             assert all(f is None or callable(f) for f in (console.shared, console.unshared)), d.name
             assert console.shared is None or d.sharing is not None, f"{d.name} : un partage dans la console sans sorte"
+            # ses propriétaires dont les vues gardent le rendu de la console : les siens (son plugin, sa faculté)
+            assert all(any(f"{layer}.{owner}" in PACKAGES[d.name] for layer in ("plugins", "faculties"))
+                       for owner in console.plain), f"{d.name} : {console.plain}"
             # la sorte de ressource qu'il apporte à Réglages › Droits : son sous-onglet (un nom de SUBTABS, ses mots),
             # le début de ses clés, sa sorte de droits ; et le tableau qu'il y fait régler — ce qu'il appelle et le lien
             # vers la fiche de sa ressource, en mots : les quatre, ou aucun

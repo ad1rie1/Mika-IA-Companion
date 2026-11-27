@@ -413,6 +413,10 @@ class ConsolePart:
     #: d'écriture, ``SharingPart.write`` : un service se règle sur ses lignes d'accès) : ``unshared(s)`` rend son
     #: adresse
     unshared: Callable[..., str] | None = None
+    #: ses propriétaires (ses plugins, ses facultés) dont les vues gardent le rendu de la console, bloc par bloc,
+    #: plutôt que le vocabulaire des pages dessinées : leur interface est un contrat (la Forge) — le cadre les réunit
+    #: (``app/handmade/pages.py::PLAIN_OWNERS``) et les donne à l'inspecteur (``InspectorDeps.plain_owners``)
+    plain: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

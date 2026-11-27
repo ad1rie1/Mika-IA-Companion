@@ -2,7 +2,8 @@
 les reçoit (``InspectorDeps.drawn``) et retombe sur leurs blocs si un dessin échoue. Chacun a sa forme (ADR 0177),
 déclarée par le module de sa destination dans ``tabs/`` ; ``DRAWN`` en est la réunion. Les fiches dessinées des
 objets (``subjects/``) se réunissent ici aussi (``OVERVIEWS``) : celles du cadre, puis celles que chaque domaine
-inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310)."""
+inscrit dans sa part de la console (``ConsolePart.overviews``, ADR 0310) ; et les propriétaires dont les vues gardent
+le rendu de la console (``PLAIN_OWNERS`` : ``ConsolePart.plain``)."""
 
 from __future__ import annotations
 
@@ -64,3 +65,8 @@ DRAWN: dict[str, Drawn] = gathered("un onglet de ConsolePart.drawn", [
     *((who, console.drawn) for who, console in BROUGHT),
     # l'accueil est une page à lui (home.py) ; la Forge garde ses contrats d'interface
 ])
+
+#: les propriétaires dont les vues gardent le rendu de la console, bloc par bloc (``InspectorDeps.plain_owners``) :
+#: ceux que chaque domaine dit dans sa part (``ConsolePart.plain``) — le cadre n'en dit aucun
+PLAIN_OWNERS: frozenset[str] = frozenset(gathered("un propriétaire de ConsolePart.plain", [
+    (who, dict.fromkeys(console.plain)) for who, console in BROUGHT]))
