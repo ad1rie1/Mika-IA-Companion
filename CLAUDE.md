@@ -167,8 +167,9 @@ Ce qui fait échouer un changement :
   - dans les projets, un sous-sujet garde ses événements, leurs réducteurs et sa projection dans son module,
     pas dans `faculty.py` (ADR 0313) ; la mémoire réduit les siens dans `faculty.py` seul (ADR 0315) ;
   - les droits d'une ressource sont à son propriétaire : son type de ligne au contrat, son calcul dans son plugin
-    ou sa faculté, ses tableaux réglés dans les réglages de son domaine — rien de cela dans `vocab` ni dans
-    `app/settings.py` (ADR 0316).
+    ou sa faculté, ses tableaux réglés dans les réglages de son domaine (ADR 0316). La garde en tient deux points :
+    `Rights` n'a aucun champ au nom d'un domaine, `vocab/access.py` ne déclare aucune ligne d'un seul domaine ; un
+    calcul ajouté à `vocab/rights.py` ou un tableau rangé par `app/settings.py` ne tiennent qu'à la règle.
 
 La composition (facultés, plugins, politiques d'épisode, arbitrage, modes) est dans `app/composition.py`. Pour écrire
 ou ajouter une faculté : ARCHITECTURE.md, « Écrire une faculté » ; pour ajouter un domaine (son dossier, sa fiche, ses

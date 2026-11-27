@@ -8,8 +8,8 @@ cause, le jour où cet import s'en va (``veiled.py`` de la mémoire ne tenait ai
 Lu par l'AST, sans importer aucun module de faculté ni de plugin (un import inscrirait justement ce qu'on vérifie) :
 
 - une **contribution** est un appel ``X.<méthode>(…)`` ou un décorateur ``@X.<méthode>`` où ``X`` est un nom lié à un
-  ``Faculty(…)`` — défini dans le module, ou importé d'un module qui le définit — et ``<méthode>`` une de celles qui
-  inscrivent (``REGISTERING``) ;
+  ``Faculty(…)`` — défini dans le module, ou importé d'un module qui le définit ou qui le réexporte (un paquet qui
+  l'importe dans son ``__init__.py``) — et ``<méthode>`` une de celles qui inscrivent (``REGISTERING``) ;
 - un module est **importé par son paquet** quand le ``__init__.py`` de son dossier l'importe lui-même (``from paquet
   import module``, ``import paquet.module``, ``from paquet.module import …``, ou leur forme relative) ; un sous-paquet
   qui porte des contributions (``plugins/email/inspect/``) l'est par le ``__init__.py`` du dossier du dessus.
@@ -86,12 +86,17 @@ def unimported(sources: Mapping[str, str]) -> list[str]:
     def plain(name: str) -> str:
         return name.removesuffix(".__init__")
 
+    imports = {name: list(_imports(tree, plain(name), name.endswith(".__init__"))) for name, tree in trees.items()}
     known = {(plain(name), x) for name, found in faculties.items() for x in found}
+    while True:  # une faculté qu'un module réexporte (un paquet, par son ``__init__``) reste la faculté
+        more = {(plain(name), local) for name, found in imports.items() for source, what, local in found
+                if (source, what) in known} - known
+        if not more:
+            break
+        known |= more
     registering: dict[str, tuple[int, str]] = {}
     for name, tree in trees.items():
-        package = name.endswith(".__init__")
-        mine = set(faculties[name]) | {local for source, what, local in _imports(tree, plain(name), package)
-                                       if (source, what) in known}
+        mine = set(faculties[name]) | {local for source, what, local in imports[name] if (source, what) in known}
         for node in ast.walk(tree):
             if (isinstance(node, ast.Attribute) and node.attr in REGISTERING and isinstance(node.value, ast.Name)
                     and node.value.id in mine):
@@ -174,3 +179,17 @@ def test_the_check_sees_a_module_kept_only_by_a_neighbour():
     toy["mika.faculties.toy.inspect.__init__"] = ""  # ni son module dans le sous-paquet
     assert [fault.split(" inscrit ")[0] for fault in unimported(toy)] == [
         "mika.faculties.toy.inspect", "mika.faculties.toy.inspect.views"]
+
+
+def test_the_check_follows_a_faculty_reexported_by_its_package():
+    """Un module qui prend sa faculté par le paquet qui la réexporte inscrit comme les autres."""
+    toy = {
+        "mika.faculties.toy.__init__": ("from mika.faculties.toy import faculty\nfrom mika.faculties.toy.faculty "
+                                        "import TOY\n"),
+        "mika.faculties.toy.faculty": "TOY = Faculty('toy')\n",
+        "mika.faculties.toy.veiled": ("from mika.faculties.toy import TOY as T\n\n\n@T.section('veiled')\n"
+                                      "def _veiled(s, f): ...\n"),
+    }
+    assert [fault.split(" inscrit ")[0] for fault in unimported(toy)] == ["mika.faculties.toy.veiled"]
+    toy["mika.faculties.toy.__init__"] += "from mika.faculties.toy import veiled\n"
+    assert unimported(toy) == []

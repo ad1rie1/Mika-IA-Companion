@@ -3,9 +3,9 @@
 Une passerelle qu'un seul plugin sert est un domaine (ADR 0317). Ce dossier porte leurs réglages (``settings.py`` :
 leurs fournisseurs d'images, la clé de chacun, scellée, et qui dessine quoi), leur câblage (``wiring.py`` : la
 passerelle d'images vivante, qui est le port ``imaging`` du noyau, rebranchée sur leurs réglages au démarrage et à
-chaque enregistrement, fermée en dernier ; la trace de chaque appel au registre des appels, commun avec celui des
-modèles, sous ``image.<rôle>``), leur rubrique de réglages (``console/`` : Réglages › Intelligence › Images) et leur
-commande (``cli.py`` : ``mika images``).
+chaque enregistrement, fermée la dernière des domaines, avant la passerelle des modèles ; la trace de chaque appel
+au registre des appels, commun avec celui des modèles, sous ``image.<rôle>``), leur rubrique de réglages
+(``console/`` : Réglages › Intelligence › Images) et leur commande (``cli.py`` : ``mika images``).
 
 Restent au cadre : la passerelle des modèles, qui sert tout le moteur, et le registre des appels ; la place de leur
 commande dans ``mika --help`` (``app/cli/models.py::BESIDE_MODELS``) et celle de leur ligne dans la page des plugins

@@ -6,7 +6,8 @@ projections dans ``projections.py`` (``life_archive.py`` pour l'archive de sa vi
 règles, son processus, son interprète, sa section — vit dans son module.
 
 Lu par l'AST : un décorateur ``@MEMORY.<sorte>`` ou un appel ``MEMORY.<sorte>(…)`` ; un commentaire ou une docstring
-qui en parle ne compte pas.
+qui en parle ne compte pas. La mémoire se lit aussi sous un autre nom (``M = MEMORY``, ``import … MEMORY as M``,
+``faculty.MEMORY``) ; ce qui échappe encore est dit dans ``tests/fixtures/source.py``.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import mika
+from tests.fixtures.source import aliases, held
 
 FOLDER = Path(mika.__file__).parent / "faculties" / "memory"
 
@@ -30,9 +32,11 @@ HOMES: dict[str, frozenset[str]] = {
 
 def contributions(source: str, owner: str = "MEMORY") -> list[tuple[int, str]]:
     """Chaque contribution qu'un source inscrit auprès de ``owner`` : sa ligne et sa sorte (``reducer``, ``fact``…) —
-    le décorateur ``@MEMORY.reducer(…)`` comme l'appel ``MEMORY.projector(…)(…)``."""
-    return sorted({(node.lineno, node.attr) for node in ast.walk(ast.parse(source))
-                   if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == owner})
+    le décorateur ``@MEMORY.reducer(…)`` comme l'appel ``MEMORY.projector(…)(…)``, sous chacun de ses noms."""
+    tree = ast.parse(source)
+    names = aliases(tree, owner)
+    return sorted({(node.lineno, node.attr) for node in ast.walk(tree)
+                   if isinstance(node, ast.Attribute) and held(node.value, names, owner)})
 
 
 def misplaced(sources: Mapping[str, str], homes: Mapping[str, frozenset[str]] = HOMES) -> list[str]:
@@ -71,3 +75,19 @@ def test_the_check_sees_a_reducer_and_a_projector_out_of_their_home():
     assert all(fault.startswith("photos.py:") and "ADR 0315" in fault for fault in faults)
     assert [fault.split(" inscrit un ")[1].split(" hors de ")[0] for fault in faults] == [
         "« reducer »", "« fact »", "« projector »"]
+
+
+def test_the_check_follows_memory_under_another_name():
+    """La mémoire rebaptisée — par une affectation, à l'import, ou lue par son module — reste la mémoire."""
+    toy = {
+        "faculty.py": "@MEMORY.reducer(c.KEPT)\ndef _kept(s, e, cx): ...\n",
+        "renamed.py": "M = MEMORY\nN = M\n\n\n@N.reducer(c.SEEN)\ndef _seen(s, e, cx): ...\n",
+        "imported.py": ("from mika.faculties.memory.faculty import MEMORY as M\n\n\n@M.fact(c.SHOWN)\n"
+                        "def _shown(s): ...\n"),
+        "by_module.py": ("from mika.faculties.memory import faculty\n\nfaculty.MEMORY.projector(c.PHOTOS, version=1)"
+                         "(Photos)\n"),
+        "other.py": "M = OTHERS\n\n\n@M.reducer(c.SEEN)\ndef _seen(s, e, cx): ...\n",
+    }
+    assert [fault.split(" hors de ")[0] for fault in misplaced(toy)] == [
+        "by_module.py:3 inscrit un « projector »", "imported.py:4 inscrit un « fact »",
+        "renamed.py:5 inscrit un « reducer »"]

@@ -1,7 +1,7 @@
 """Le câblage des dessins (ADR 0061, 0063, 0317) : la passerelle d'images vivante, qui est le port ``imaging`` du
 noyau — vide tant qu'aucun fournisseur n'est branché ; une fois le serveur là, la trace de chaque appel va au
 registre des appels, commun avec celui des modèles ; dans le cycle de vie, elle se branche sur ses réglages
-(``start``) et se ferme en dernier (``release``)."""
+(``start``) et se ferme la dernière des domaines, avant la passerelle des modèles (``release``)."""
 
 from __future__ import annotations
 

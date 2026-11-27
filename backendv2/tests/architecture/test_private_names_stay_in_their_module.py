@@ -6,6 +6,10 @@ où il est défini ; une aide que plusieurs modules partagent a un module à ell
 
 Lu par l'AST : un commentaire ou une docstring qui cite un nom privé ne compte pas. Les noms à double soulignement
 (``__all__``, ``__name__``) et les sous-modules ne sont pas des noms privés. Les tests, eux, lisent ce qu'ils veulent.
+
+Ce qu'elle ne voit pas : un nom privé lu par son nom en chaîne (``getattr(module, "_nom")``, ``vars(module)["_nom"]``)
+ou sur un module chargé à l'exécution (``importlib.import_module("mika.x")._nom``). Aucun module de ``src`` ne le
+fait ; la règle l'interdit comme le reste.
 """
 
 from __future__ import annotations
