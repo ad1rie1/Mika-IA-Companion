@@ -33,7 +33,7 @@ from mika.adapters.vectors import SqliteVectorIndex  # noqa: E402
 from mika.adapters.vectors.embedders import SentenceEmbedder  # noqa: E402
 from mika.contracts import memory as c  # noqa: E402
 from mika.faculties.memory.faculty import MemoryParams  # noqa: E402
-from mika.faculties.memory.recall import _merged, above_floor, scored, search  # noqa: E402
+from mika.faculties.memory.recall import above_floor, best_of_searches, scored, search  # noqa: E402
 from mika.faculties.memory.salience import Item, dormant, rank  # noqa: E402
 from mika.ports.vectors import VectorItem  # noqa: E402
 from tests.fixtures.sqldb import SqlDB  # noqa: E402
@@ -167,7 +167,7 @@ async def recall(idx: SqliteVectorIndex, items: dict[int, Item], msg: Message, p
     near, wider = await search(idx, msg.text, "", p.recall_k, kinds={c.EPISODE_MEMORY, c.BELIEF})
     own_near, own_wider = await search(idx, msg.text, "", p.recall_k, kinds={c.EPISODE_MEMORY, c.BELIEF},
                                        persons=(msg.speaker,))
-    near, wider = _merged(near, own_near), _merged(wider, own_wider)
+    near, wider = best_of_searches(near, own_near), best_of_searches(wider, own_wider)
     took = time.perf_counter() - t0
     sims = scored(near, wider, {i: items[i].text for i in {*near, *wider}}, msg.text, "")
     candidates = above_floor(sims, p)

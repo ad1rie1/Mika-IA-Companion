@@ -493,7 +493,7 @@ async def search(vectors: Any, query: str, context: str, k: int, **kw: Any) -> t
     return near, wider
 
 
-def _merged(a: dict[int, float], b: dict[int, float]) -> dict[int, float]:
+def best_of_searches(a: dict[int, float], b: dict[int, float]) -> dict[int, float]:
     """Deux recherches réunies : pour chaque candidat, sa meilleure similarité."""
     out = dict(a)
     for key, sim in b.items():
@@ -621,12 +621,12 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
             own = tuple(sorted({person, ep.target, *frame.get(identity_c.HANDLES(person))}))
             own_near, own_wider = await search(vectors, query, context, p.recall_k, kinds={c.EPISODE_MEMORY, c.BELIEF},
                                                persons=own)
-            near, wider = _merged(near, own_near), _merged(wider, own_wider)
+            near, wider = best_of_searches(near, own_near), best_of_searches(wider, own_wider)
         if ep.kind == Kind.REPLY and aud.veiled_level > Sensitivity.ANODYNE and (pool := veiled_pool(store)):
             # ce qu'elle pourrait raconter sans nommer personne, cherché à part : ce qui peut se dire ici, plus proche
             # de la question, ne le chasse pas des candidats (ADR 0099)
             v_near, v_wider = await search(vectors, query, context, p.recall_k, keys=pool)
-            near, wider = _merged(near, v_near), _merged(wider, v_wider)
+            near, wider = best_of_searches(near, v_near), best_of_searches(wider, v_wider)
     found = items_by_id(store, sorted({*near, *wider}))
     sims = scored(near, wider, {i: it.text for i, it in found.items()}, query, context)
     verdicts = {i: verdict_of(frame, found[i], person, aud, memo, store) for i in sims if i in found}
