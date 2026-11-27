@@ -100,7 +100,6 @@ from mika.faculties.projects.faculty import (
     AMENDED,
     ISSUE_CAPABILITIES,
     NETWORKED_CAPABILITY,
-    PULL_OPEN,
     PULL_REQUEST_CAPABILITY,
     STEER_CAPABILITY,
     Item,
@@ -137,6 +136,7 @@ from mika.faculties.projects.inspect_tracker import (
 from mika.faculties.projects.inspect_words import CHECKS_FR, OBJ_FR, PULL_FR, STATUS_FR
 from mika.faculties.projects.triggers import trigger_words
 from mika.kernel.clock import HOUR
+from mika.ports.workshop import PULL_OPEN
 from mika.runtime import decisions
 from mika.runtime.operations import audit
 from mika.vocab.access import CHANGES, STEER_ASK, STEER_EDIT, STEER_NO, STEER_WORDS

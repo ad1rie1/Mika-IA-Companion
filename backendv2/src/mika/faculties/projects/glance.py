@@ -22,7 +22,6 @@ from mika.contracts import projects as c
 from mika.faculties.projects import milestones, pulls, tickets, tracker, work
 from mika.faculties.projects.faculty import (
     ON_DEMAND,
-    PULL_OPEN,
     Milestone,
     Objective,
     Project,
@@ -37,6 +36,7 @@ from mika.faculties.projects.rhythm import schedule_words
 from mika.faculties.projects.triggers import trigger_words
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
+from mika.ports.workshop import PULL_OPEN
 
 #: où en est un objectif ponctuel sur la carte de son projet
 DONE, DOING, TODO, BLOCKED = "done", "doing", "todo", "blocked"

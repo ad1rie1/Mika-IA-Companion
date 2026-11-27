@@ -15,8 +15,9 @@ from mika.app.domains.domain import ConsolePart, RightsSort
 from mika.app.domains.projects.console.person import PERSON_PART
 from mika.app.domains.projects.console.queue import QUEUE
 from mika.app.domains.projects.console.settings import sections
-from mika.app.domains.projects.console.subject import KIND, ProjectFiche
+from mika.app.domains.projects.console.subject import ProjectFiche
 from mika.app.domains.projects.console.tabs import TABS
+from mika.app.domains.projects.console.zones import KIND
 from mika.inspector.ui import console_folder
 
 console_folder(Path(__file__).parent)

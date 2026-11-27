@@ -18,7 +18,6 @@ from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
     NOTED,
-    PULL_OPEN,
     REFRAMED,
     detail_level,
     frame_subject,
@@ -28,6 +27,7 @@ from mika.faculties.projects.faculty import (
 from mika.faculties.projects.milestones import MILESTONE_CHANGED
 from mika.faculties.projects.pulls import PULL_SEEN
 from mika.kernel.events import Content, Origin
+from mika.ports.workshop import PULL_OPEN
 from mika.vocab.access import PERSON
 from mika.vocab.episodes import Kind, Outcome, project_target
 from tests.protocol.test_moi_mail import login, post

@@ -22,7 +22,6 @@ from mika.contracts import projects as c
 from mika.faculties.projects import inspect_merge, merge, tracker
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
-    PULL_OPEN,
     REFRAMED,
 )
 from mika.faculties.projects.merge import MERGE_ANSWERED, MERGE_ASKED
@@ -32,6 +31,7 @@ from mika.ports.workshop import (
     CHECKS_FAILED,
     CHECKS_PASSED,
     PULL_MERGED,
+    PULL_OPEN,
     CheckLog,
     CheckRun,
     Checks,

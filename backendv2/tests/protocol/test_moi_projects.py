@@ -34,7 +34,6 @@ from mika.faculties.projects.actions import NOT_KEEPER
 from mika.faculties.projects.faculty import (
     ACCESS_SET,
     OBJECTIVE_CHANGED,
-    PULL_OPEN,
     REFRAMED,
     STEER_ASKED,
     STEER_CAPABILITY,
@@ -42,6 +41,7 @@ from mika.faculties.projects.faculty import (
 from mika.faculties.projects.inspect_merge import BLOCK_WORDS
 from mika.faculties.projects.pulls import PULL_SEEN
 from mika.kernel.events import Content
+from mika.ports.workshop import PULL_OPEN
 from mika.vocab.access import PERSON
 from mika.vocab.episodes import project_target
 from mika.vocab.privacy import Sensitivity
