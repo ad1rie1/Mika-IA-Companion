@@ -203,13 +203,20 @@ def test_the_settings_say_each_write_at_their_only_door():
     assert {"set_push", "clear_push", "create", "update"} <= writers  # la garde lit bien de vraies écritures
 
 
+#: les parts de réglages du cadre, que plusieurs domaines prennent (``Settings.of``) : les applications par lesquelles
+#: on se connecte à Microsoft et à Google (ADR 0318)
+FRAME_PARTS = ("app/connections.py",)
+
+
 def test_the_settings_of_a_domain_write_only_through_the_door():
     """Les réglages d'un domaine sont une classe de son dossier (``app/domains/<nom>/settings.py``, une
-    ``SettingsPart`` : ADR 0310). Elle lit et écrit par la porte des réglages (``_get``, ``_put`` qui dit chaque
-    écriture) : jamais par le magasin, où une écriture ne se dirait pas."""
+    ``SettingsPart`` : ADR 0310), ceux que le cadre porte pour plusieurs domaines une classe de ``FRAME_PARTS``. Elle
+    lit et écrit par la porte des réglages (``_get``, ``_put`` qui dit chaque écriture) : jamais par le magasin, où une
+    écriture ne se dirait pas."""
     parts = sorted((SRC / "app" / "domains").glob("*/settings.py"))
     assert parts, "aucun réglage de domaine : le chemin a changé"
-    for path in parts:
+    assert all((SRC / p).is_file() for p in FRAME_PARTS), FRAME_PARTS
+    for path in [*parts, *(SRC / p for p in FRAME_PARTS)]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
         assert classes and all(any(isinstance(b, ast.Name) and b.id == "SettingsPart" for b in c.bases) for c in classes), \

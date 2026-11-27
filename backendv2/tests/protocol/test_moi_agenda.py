@@ -24,9 +24,9 @@ from mika.adapters.agenda import (
     google_signin,
     microsoft_signin,
 )
+from mika.app.connections import ConnectionSettings
 from mika.app.domains.agenda.live import signed
 from mika.app.domains.agenda.settings import AgendaSettings
-from mika.app.domains.mail.settings import MailSettings
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.plugins.agenda import CAPABILITY, DONE, OWNER, SYNC_ASKED, AgendaParams
@@ -342,8 +342,8 @@ def _google(client, live) -> tuple[FakeGoogle, str]:
     """Un compte Google connecté par l'adresse collée, puis synchronisé."""
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
-    client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret))
-    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    client.portal.call(lambda: live.settings.of(ConnectionSettings).save_google_application(google.client_id, google.secret))
+    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(ConnectionSettings).google_application, transport=google.transport())
     provider = GoogleProvider(signin, transport=google.transport())
     providers.add(provider)
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
@@ -558,8 +558,8 @@ def test_google_is_connected_by_pasting_the_return_address(world):  # noqa: F811
     bootstrap(client)
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
-    client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret))
-    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    client.portal.call(lambda: live.settings.of(ConnectionSettings).save_google_application(google.client_id, google.secret))
+    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(ConnectionSettings).google_application, transport=google.transport())
     providers.add(GoogleProvider(signin, transport=google.transport()))
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
     started = post(client, "/agenda/account/google/start", {"account": account}).json()
@@ -586,7 +586,7 @@ def test_microsoft_gives_a_code_and_its_wait_is_pushed(world):  # noqa: F811
     async def no_wait(_seconds: float) -> None:
         await asyncio.sleep(0)
 
-    signin = microsoft_signin(live.settings.of(AgendaSettings), live.settings.of(MailSettings).mail_application, transport=graph.transport(),
+    signin = microsoft_signin(live.settings.of(AgendaSettings), live.settings.of(ConnectionSettings).microsoft_application, transport=graph.transport(),
                               sleep=no_wait)
     signin.on_state = lambda account: signed(live.changes, account)
     live.kernel.ports["agenda_providers"].add(MicrosoftProvider(signin, transport=graph.transport()))
@@ -720,8 +720,8 @@ def test_google_returning_without_a_session_asks_to_paste_its_address_in_the_app
     second_person(client, live)
     google = FakeGoogle()
     providers = live.kernel.ports["agenda_providers"]
-    client.portal.call(lambda: live.settings.of(AgendaSettings).save_google_application(google.client_id, google.secret, web=True))
-    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(AgendaSettings).google_application, transport=google.transport())
+    client.portal.call(lambda: live.settings.of(ConnectionSettings).save_google_application(google.client_id, google.secret, web=True))
+    signin = google_signin(live.settings.of(AgendaSettings), live.settings.of(ConnectionSettings).google_application, transport=google.transport())
     providers.add(GoogleProvider(signin, transport=google.transport()))
     account = post(client, "/agenda/account/save", {"kind": "google", "values": {"label": "Perso"}}).json()["account"]
     started = client.post(API + "/agenda/account/google/start", json={"account": account},

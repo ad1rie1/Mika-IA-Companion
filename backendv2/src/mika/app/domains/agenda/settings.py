@@ -1,6 +1,8 @@
 """Les réglages de l'agenda (ADR 0309, 0310) : ses comptes (chacun à quelqu'un, leurs secrets scellés) et le
-réglage de chacun de leurs agendas ; les connexions Google et Microsoft de ses comptes ; l'application Google du
-serveur ; le partage d'un agenda ; le tableau de droits réglé de chaque agenda.
+réglage de chacun de leurs agendas ; les connexions Google et Microsoft de ses comptes ; le partage d'un agenda ; le
+tableau de droits réglé de chaque agenda. Les applications par lesquelles ses comptes entrent chez Google et chez
+Microsoft ne sont pas ici : ce sont des réglages du cadre (``app/connections.py::ConnectionSettings``, ADR 0318),
+toujours sous leurs clés (``agenda_google``, ``mail_application``).
 
 Rangés dans les réglages du serveur (``mind.db``), par leur porte (``app/settings.py::SettingsPart``) ; le domaine
 les prend par leur classe (``settings.of(AgendaSettings)``), une page du cadre par le nom du domaine
@@ -16,7 +18,6 @@ import asyncio
 import logging
 
 from mika.adapters.agenda.config import AgendaConfig
-from mika.adapters.signin.google import GoogleApplication
 from mika.adapters.signin.grants import Grant
 from mika.app.settings import Settings, SettingsPart
 from mika.contracts.agenda import RIGHTS_SORT, AgendaRule
@@ -32,14 +33,11 @@ AGENDA_KEY = "agenda"
 #: les connexions des comptes d'agenda Google et Microsoft (ADR 0309, lot 2) : par compte, sa sorte, le jeton de
 #: renouvellement scellé, l'application et l'annuaire qui l'ont délivré — à part des comptes, comme ``mail_oauth``
 AGENDA_GRANTS_KEY = "agenda_oauth"
-#: l'application Google du serveur (ADR 0309, lot 2) : le client OAuth d'un projet Google Cloud, son secret scellé
-AGENDA_GOOGLE_KEY = "agenda_google"
 #: le tableau de droits de chaque agenda qu'on a réglé (ADR 0309), par sa clé ; les autres ont celui que leur
 #: propriétaire et leurs partages donnent (``plugins/agenda/rights.py``)
 AGENDA_RIGHTS_KEY = "agenda_droits"
-#: ce qu'une connexion garde scellé : son jeton de renouvellement ; l'application Google : son secret
+#: ce qu'une connexion garde scellé : son jeton de renouvellement
 GRANT_SECRETS = ("refresh",)
-GOOGLE_SECRETS = ("secret",)
 
 
 class AgendaSettings(SettingsPart):
@@ -108,35 +106,6 @@ class AgendaSettings(SettingsPart):
     def agenda_connections(self) -> list[Connection]:
         """Les comptes d'agenda réglés, pour qui les joint (le port ``agenda_providers``, relu à chaque usage)."""
         return self.agenda().connections()
-
-    def google_application(self) -> GoogleApplication | None:
-        """L'application Google du serveur (son secret ouvert) ; aucune, ou illisible : ``None`` (brancher Google est
-        alors refusé en mots)."""
-        got = self._get(AGENDA_GOOGLE_KEY)
-        if not isinstance(got, dict) or not got.get("client_id"):
-            return None
-        try:
-            return GoogleApplication.of(str(got["client_id"]), self._opened(got, GOOGLE_SECRETS)["secret"],
-                                        web=bool(got.get("web")))
-        except ValueError:
-            log.warning("agenda : l'application Google gardée est illisible (le secret ne s'ouvre plus ?)")
-            return None
-
-    async def save_google_application(self, client_id: str, secret: str = "", *,
-                                      web: bool = False) -> GoogleApplication | None:
-        """Garde l'application Google du serveur (``client_id`` vide : l'efface) ; un secret vide garde celui de la
-        même application. ``ValueError`` si l'identifiant ou le secret n'en ont pas la forme. En changer demande de
-        reconnecter les comptes Google."""
-        if not client_id.strip():
-            await self._put(AGENDA_GOOGLE_KEY, {})
-            return None
-        known = self.google_application()
-        if not secret.strip() and known is not None and known.client_id == client_id.strip().lower():
-            secret = known.secret
-        app = GoogleApplication.of(client_id, secret, web=web)
-        await self._put(AGENDA_GOOGLE_KEY, self._sealed({"client_id": app.client_id, "secret": app.secret,
-                                                         "web": app.web}, GOOGLE_SECRETS))
-        return app
 
     async def share_calendar(self, calendar: str, person: str, level: str | None) -> AgendaConfig:
         """Partager un agenda (ADR 0309, 0188) avec une personne (« personne:<clé> »), à un niveau — lire, lire et

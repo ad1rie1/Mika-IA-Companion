@@ -27,6 +27,7 @@ from starlette.routing import Route
 from mika.adapters.agenda import SERVICES, AgendaAccount, AgendaConfig, server_host
 from mika.adapters.agenda.config import ACCOUNT_KEY, COLORS
 from mika.adapters.web.session import account_of
+from mika.app.connections import ConnectionSettings
 from mika.app.domains.agenda.reach import (
     account_kind,
     agenda_ports,
@@ -38,7 +39,6 @@ from mika.app.domains.agenda.reach import (
     owned_calendar,
 )
 from mika.app.domains.agenda.settings import AgendaSettings
-from mika.app.domains.mail.settings import MailSettings
 from mika.app.me.api import NO_STORE, OWN_MAX, Call, Denied, MeApiBase, done, form, missing, refused
 from mika.app.me.common import millis, own_room, settings_of
 from mika.app.me.hosts import public_only
@@ -127,9 +127,9 @@ async def accounts(call: Call) -> dict[str, Any]:
     _store, providers = agenda_ports(call)
     google = getattr(providers.of(GOOGLE), "signin", None)
     return {"plugged": True, "accounts": found,
-            "google": {"app": settings.of(AgendaSettings).google_application() is not None,
+            "google": {"app": settings.of(ConnectionSettings).google_application() is not None,
                        "direct": bool(google is not None and google.direct())},
-            "microsoft_app": bool(settings.of(MailSettings).mail_application()),
+            "microsoft_app": bool(settings.of(ConnectionSettings).microsoft_application()),
             "kinds": [{"code": k, "label": KIND_WORDS[k]} for k in PLUGGABLE],
             "services": [{"key": x.key, "name": x.name, "url": x.url, "help": x.help} for x in SERVICES],
             "colors": [{"code": c, "label": w} for c, w in COLORS],
@@ -324,7 +324,7 @@ async def google_start(call: Call) -> dict[str, Any]:
     """Commencer la connexion Google d'un compte : l'adresse de consentement à ouvrir ; on finit en collant l'adresse
     de la page qui n'a pas pu s'ouvrir (ou son code), ou la redirection revient seule (``direct``)."""
     key, signin, conn = _connectable(call, GOOGLE)
-    if agenda_settings(call).google_application() is None:
+    if settings_of(call).of(ConnectionSettings).google_application() is None:
         raise Denied(409, NO_GOOGLE_APP)
     origin = call.request.headers.get("origin") or str(call.request.base_url).rstrip("/")
     try:

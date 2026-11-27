@@ -5,8 +5,9 @@ base. Une fois le noyau construit, ce guichet reçoit de quoi rejournaliser les 
 Microsoft d'un compte se dit au direct (``bind``). Ses réglages donnent aux paramètres du plugin ses comptes et leurs
 agendas (``inputs``).
 
-Ses comptes, leurs connexions et l'application Google du serveur sont ses réglages (``settings.py``) ; Microsoft
-entre par l'application du courrier (``MailSettings.mail_application``, ADR 0238)."""
+Ses comptes et leurs connexions sont ses réglages (``settings.py``) ; Google et Microsoft entrent par les
+applications de l'instance, un réglage du cadre que le courrier partage (``app/connections.py``, ADR 0238,
+0318)."""
 
 from __future__ import annotations
 
@@ -23,10 +24,10 @@ from mika.adapters.agenda import (
     google_signin,
     microsoft_signin,
 )
+from mika.app.connections import ConnectionSettings
 from mika.app.domains.agenda.live import signed
 from mika.app.domains.agenda.settings import AgendaSettings
 from mika.app.domains.agenda.store import AgendaSettingsDesk
-from mika.app.domains.mail.settings import MailSettings
 from mika.app.wiring import Wiring
 
 #: ses fournisseurs ; ce que la console change d'un compte (``ports/agenda.py::AgendaDesk``)
@@ -36,7 +37,7 @@ PROVIDERS, DESK = "agenda_providers", "agenda_desk"
 def wire(w: Wiring) -> None:
     """Avant le noyau : sa base, ses fournisseurs et le guichet de la console, dans les ports du noyau."""
     outside, settings, clock, bases = w.ports, w.settings, w.clock, w.bases
-    own = settings.of(AgendaSettings)
+    own, apps = settings.of(AgendaSettings), settings.of(ConnectionSettings)
     # l'agenda (ADR 0309) : ses événements hors du journal (ceux du système y font foi, ceux d'un fournisseur en sont
     # la copie), et ses fournisseurs avec les comptes des réglages, relus à chaque usage
     outside["agenda"] = AgendaStore(bases["agenda"], now=clock.now)
@@ -47,11 +48,12 @@ def wire(w: Wiring) -> None:
     outside["agenda_providers"].add(IcalProvider(agenda_web, now=clock.now))
     outside["agenda_providers"].add(CalDavProvider(agenda_web, now=clock.now))
     # Google Agenda et Outlook.com / Microsoft 365 (ADR 0309, lot 2) : leurs connexions scellées à part des comptes ;
-    # Google par l'application Google du serveur (réglée par un opérateur), Microsoft par celle du courrier (ADR 0238),
+    # Google par l'application Google du serveur (réglée par un opérateur), Microsoft par celle de l'instance, que le
+    # courrier partage (ADR 0238 ; toutes deux au cadre, ADR 0318),
     # chacun joignant ses hôtes seulement. Leurs parcours de connexion : ``.signin`` de chacun (lot 4 : l'API)
-    outside["agenda_providers"].add(GoogleProvider(google_signin(own, own.google_application, now=clock.now),
+    outside["agenda_providers"].add(GoogleProvider(google_signin(own, apps.google_application, now=clock.now),
                                                    now=clock.now))
-    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(own, settings.of(MailSettings).mail_application),
+    outside["agenda_providers"].add(MicrosoftProvider(microsoft_signin(own, apps.microsoft_application),
                                                       now=clock.now))
     # ce que la console change d'un compte d'agenda (ADR 0309, lot 5) : le décocher, ne plus suivre un de ses agendas,
     # oublier sa connexion — jamais une écriture dans un agenda

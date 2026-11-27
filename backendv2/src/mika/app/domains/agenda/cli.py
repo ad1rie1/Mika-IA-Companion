@@ -1,4 +1,5 @@
-"""Sa commande (ADR 0309, 0310) : ``mika agenda google``, l'application Google du serveur, hors ligne."""
+"""Sa commande (ADR 0309, 0310) : ``mika agenda google``, l'application Google du serveur, hors ligne — un
+réglage du cadre (``app/connections.py``, ADR 0318), que la commande de l'agenda règle toujours."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ import json
 
 from mika.adapters.agenda.oauth import RETURN_PATH
 from mika.app.cli.common import with_settings
-from mika.app.domains.agenda.settings import AgendaSettings
+from mika.app.connections import ConnectionSettings
 from mika.app.settings import Settings
 
 
@@ -17,13 +18,13 @@ async def agenda_command(settings: Settings, args: argparse.Namespace) -> dict[s
     Cloud, « Application de bureau » (ou « Application Web » avec ``--web``) —, la poser, l'effacer (``--defaut``) ou
     la montrer, jamais son secret. En changer demande de reconnecter les comptes Google."""
     if args.defaut:
-        await settings.of(AgendaSettings).save_google_application("")
+        await settings.of(ConnectionSettings).save_google_application("")
     elif args.client_id is not None:
         try:
-            await settings.of(AgendaSettings).save_google_application(args.client_id, args.secret or "", web=args.web)
+            await settings.of(ConnectionSettings).save_google_application(args.client_id, args.secret or "", web=args.web)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-    app = settings.of(AgendaSettings).google_application()
+    app = settings.of(ConnectionSettings).google_application()
     if app is None:
         return {"ok": True, "application": None,
                 "usage": "mika agenda google <identifiant>.apps.googleusercontent.com --secret GOCSPX-…"}

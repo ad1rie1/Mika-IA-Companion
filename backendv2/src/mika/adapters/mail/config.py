@@ -241,9 +241,9 @@ class MailConfig(BaseModel):
                               f"({ACCOUNT_KEY_RULE}).", advanced=False, order=10,
         key_pattern=ACCOUNT_KEY, key_rule=ACCOUNT_KEY_RULE)] = Field(default_factory=dict)
     #: l'application Microsoft propre à l'instance (ADR 0238 ; vide : celle que Mika livre), telle que la console la
-    #: règle à côté des boîtes. Elle se
-    #: garde à part des comptes (``MailSettings.mail_application``) : ``MailSettings.email`` ne la lit pas et
-    #: ``MailSettings.save_email`` ne l'écrit pas, pour qu'un ``MailConfig(accounts=…)`` rebâti ne l'efface jamais.
+    #: règle à côté des boîtes. Elle se garde à part des comptes, au cadre (``app/connections.py::ConnectionSettings``,
+    #: ADR 0318) : ``MailSettings.email`` ne la lit pas et ``MailSettings.save_email`` ne l'écrit pas, pour qu'un
+    #: ``MailConfig(accounts=…)`` rebâti ne l'efface jamais.
     microsoft_app: Annotated[str, Knob(
         label="Application Microsoft (client ID)", group="Compte Microsoft", advanced=False, order=20,
         help="Vide : l'application livrée d'origine, par laquelle entrent les boîtes Hotmail, Outlook.com et Live "

@@ -22,8 +22,9 @@ from mika.adapters.agenda import AgendaAccount, AgendaConfig
 from mika.adapters.signin.google import pasted
 from mika.adapters.signin.grants import Grant
 from mika.adapters.store_sql import SqlStore
+from mika.app.connections import GOOGLE_APPLICATION_KEY, ConnectionSettings
 from mika.app.domains.agenda.cli import agenda_command
-from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AGENDA_GRANTS_KEY, AgendaSettings
+from mika.app.domains.agenda.settings import AGENDA_GRANTS_KEY, AgendaSettings
 from mika.app.settings import SecretBox, Settings
 
 CLIENT = "123456789012-abcdefgh12345678.apps.googleusercontent.com"
@@ -76,19 +77,19 @@ def test_a_connection_is_sealed_apart_and_leaves_with_its_account(tmp_path):
 
 def test_the_google_application_is_checked_sealed_and_kept_without_its_secret(tmp_path):
     async def scenario(store, settings):
-        none = settings.of(AgendaSettings).google_application()
+        none = settings.of(ConnectionSettings).google_application()
         with pytest.raises(ValueError):
-            await settings.of(AgendaSettings).save_google_application("pas-un-client", SECRET)
+            await settings.of(ConnectionSettings).save_google_application("pas-un-client", SECRET)
         with pytest.raises(ValueError):
-            await settings.of(AgendaSettings).save_google_application(CLIENT, "")  # pas de secret à garder
-        await settings.of(AgendaSettings).save_google_application(CLIENT.upper(), SECRET)
-        first = settings.of(AgendaSettings).google_application()
-        await settings.of(AgendaSettings).save_google_application(CLIENT, web=True)  # l'identifiant seul : le secret reste
-        second = settings.of(AgendaSettings).google_application()
-        raw = settings._get(AGENDA_GOOGLE_KEY)
+            await settings.of(ConnectionSettings).save_google_application(CLIENT, "")  # pas de secret à garder
+        await settings.of(ConnectionSettings).save_google_application(CLIENT.upper(), SECRET)
+        first = settings.of(ConnectionSettings).google_application()
+        await settings.of(ConnectionSettings).save_google_application(CLIENT, web=True)  # l'identifiant seul : le secret reste
+        second = settings.of(ConnectionSettings).google_application()
+        raw = settings._get(GOOGLE_APPLICATION_KEY)
         sealed = _raw(store)
-        await settings.of(AgendaSettings).save_google_application("")
-        return none, first, second, raw, sealed, settings.of(AgendaSettings).google_application()
+        await settings.of(ConnectionSettings).save_google_application("")
+        return none, first, second, raw, sealed, settings.of(ConnectionSettings).google_application()
 
     none, first, second, raw, sealed, erased = _run(tmp_path, scenario)
     assert none is None and erased is None

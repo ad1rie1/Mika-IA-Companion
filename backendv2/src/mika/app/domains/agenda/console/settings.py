@@ -1,7 +1,7 @@
 """Sa rubrique de réglages (ADR 0206, 0309, 0310) : dans Agendas, derrière sa roue (Agendas › Paramètres) — les
 applications par lesquelles entrent les agendas Google et Microsoft de ce serveur, et les paramètres du plugin sur la
 même page (``templates/handmade/agendas/parametres.html``). L'application Microsoft est celle du courrier (ADR 0238) :
-elle se lit et s'enregistre dans les réglages du serveur."""
+toutes deux se lisent et s'enregistrent dans les réglages du cadre (``app/connections.py``, ADR 0318)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from mika.adapters.signin.google import google_client_id
 from mika.adapters.signin.microsoft import application_id
+from mika.app.connections import ConnectionSettings
 from mika.app.domains.agenda.settings import AgendaSettings
-from mika.app.domains.mail.settings import MailSettings
 from mika.inspector.catalog import SettingsPage, SettingsSection
 from mika.inspector.ui import PREFIX
 from mika.kernel.forms import Knob
@@ -57,35 +57,36 @@ class AgendaApps(BaseModel):
 def sections(live: Any) -> tuple[SettingsSection, ...]:
     """Sa rubrique de réglages, pour ce serveur (``live`` : ses réglages)."""
     settings = live.settings
+    apps = settings.of(ConnectionSettings)
 
     def agenda_apps() -> AgendaApps:
         """L'application Google du serveur (son secret ouvert) et celle de Microsoft, propre à l'instance (ADR 0238)."""
-        google = settings.of(AgendaSettings).google_application()
+        google = apps.google_application()
         return AgendaApps(google_client_id=google.client_id if google is not None else "",
                           google_secret=google.secret if google is not None else "",
                           google_web=bool(google.web) if google is not None else False,
-                          microsoft_app=settings.of(MailSettings).own_mail_application())
+                          microsoft_app=apps.own_microsoft_application())
 
     async def save_agenda_apps(cfg: AgendaApps) -> list[str]:
         """L'application Google (un secret vide garde celui de la même application) ; celle de Microsoft, partagée
         avec le courrier."""
         if cfg.google_client_id and not cfg.google_secret:
-            known = settings.of(AgendaSettings).google_application()
+            known = apps.google_application()
             if known is None or known.client_id != cfg.google_client_id:
                 return ["Le secret client de cette application Google, avec son identifiant."]
         try:
-            await settings.of(AgendaSettings).save_google_application(cfg.google_client_id, cfg.google_secret, web=cfg.google_web)
+            await apps.save_google_application(cfg.google_client_id, cfg.google_secret, web=cfg.google_web)
         except ValueError as exc:
             return [str(exc)]
-        if cfg.microsoft_app != settings.of(MailSettings).own_mail_application():
-            await settings.of(MailSettings).save_mail_application(cfg.microsoft_app)
+        if cfg.microsoft_app != apps.own_microsoft_application():
+            await apps.save_microsoft_application(cfg.microsoft_app)
         return []
 
     def agenda_facts() -> list[tuple[str, Any]]:
         accounts = settings.of(AgendaSettings).agenda().accounts
         google = sum(1 for a in accounts.values() if a.kind == "google")
         microsoft = sum(1 for a in accounts.values() if a.kind == "microsoft")
-        return [("Application Google", "réglée" if settings.of(AgendaSettings).google_application() is not None else "pas réglée"),
+        return [("Application Google", "réglée" if apps.google_application() is not None else "pas réglée"),
                 ("Comptes Google", str(google)), ("Comptes Microsoft", str(microsoft)),
                 ("Les comptes eux-mêmes", Ref("local", f"{PREFIX}/agendas/comptes", "Agendas › Comptes"))]
 

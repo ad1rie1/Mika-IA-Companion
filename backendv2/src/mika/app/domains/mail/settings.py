@@ -1,10 +1,10 @@
-"""Les réglages du courrier (ADR 0027, 0166, 0175, 0238, 0310) : ses boîtes (chacune à quelqu'un, leurs mots de passe
-scellés), la connexion Microsoft de chacune, l'application Microsoft de l'instance, les expéditeurs dont les images
-distantes s'affichent.
+"""Les réglages du courrier (ADR 0027, 0166, 0175, 0310) : ses boîtes (chacune à quelqu'un, leurs mots de passe
+scellés), la connexion Microsoft de chacune, les expéditeurs dont les images distantes s'affichent.
 
 Rangés dans les réglages du serveur (``mind.db``), par leur porte (``app/settings.py::SettingsPart``) ; le domaine
 les prend par leur classe (``settings.of(MailSettings)``), une page du cadre par le nom du domaine
-(``Settings.named("mail")``).
+(``Settings.named("mail")``). L'application Microsoft de l'instance, que l'agenda partage, n'est pas ici : c'est un
+réglage du cadre (``app/connections.py::ConnectionSettings``, ADR 0238, 0318), toujours sous ``mail_application``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from typing import Any
 
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.signin.grants import Grant
-from mika.adapters.signin.microsoft import DEFAULT_APPLICATION, application_id
 from mika.app.settings import Settings, SettingsPart
 
 EMAIL_KEY = "email"
@@ -24,8 +23,6 @@ EMAIL_KEY = "email"
 MAIL_GRANTS_KEY = "mail_oauth"
 #: les expéditeurs dont la console affiche les images distantes (ADR 0175) : des adresses, les plus récentes d'abord
 MAIL_IMAGES_KEY = "mail_images"
-#: l'application Microsoft propre à l'instance, à la place de celle que Mika livre (son client ID, ADR 0238)
-MAIL_APPLICATION_KEY = "mail_application"
 #: ce qu'une connexion Microsoft garde scellé : son jeton de renouvellement
 GRANT_SECRETS = ("refresh",)
 
@@ -90,27 +87,6 @@ class MailSettings(SettingsPart):
                                             "tenant": grant.tenant}, GRANT_SECRETS)
             await self._put(MAIL_GRANTS_KEY, grants)
         self.mail_saved()
-
-    def own_mail_application(self) -> str:
-        """L'application Microsoft que cette instance s'est donnée (son client ID, ADR 0238) ; vide : aucune, elle
-        se sert de celle que Mika livre."""
-        got = self._get(MAIL_APPLICATION_KEY)
-        try:
-            return application_id(got) if isinstance(got, str) else ""
-        except ValueError:
-            return ""
-
-    def mail_application(self) -> str:
-        """L'application par laquelle entre une boîte Microsoft qui n'en déclare pas (ADR 0238) : celle de
-        l'instance si elle s'en est donné une, sinon celle que Mika livre."""
-        return self.own_mail_application() or DEFAULT_APPLICATION
-
-    async def save_mail_application(self, client_id: str) -> str:
-        """Garde l'application propre à l'instance (vide : revient à celle que Mika livre) ; ``ValueError`` si ce
-        n'est pas un client ID."""
-        client_id = application_id(client_id)
-        await self._put(MAIL_APPLICATION_KEY, client_id)
-        return client_id
 
     def mail_images(self) -> tuple[str, ...]:
         """Les expéditeurs dont les images distantes s'affichent d'emblée (ADR 0175)."""

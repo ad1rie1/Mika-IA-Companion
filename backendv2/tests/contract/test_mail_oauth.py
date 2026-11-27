@@ -32,6 +32,7 @@ from mika.adapters.signin.microsoft import (
     OAuthError,
 )
 from mika.adapters.store_sql import SqlStore
+from mika.app.connections import ConnectionSettings
 from mika.app.domains.mail.settings import MAIL_GRANTS_KEY, MailSettings
 from mika.app.settings import SecretBox, Settings
 from mika.ports.signin import SIGNED_IN, SIGNIN_NEEDED, SIGNIN_PENDING, SignIn
@@ -340,13 +341,13 @@ def test_the_application_of_the_instance_is_kept_in_the_settings(tmp_path):
         try:
             settings = Settings(store, SecretBox.for_data(tmp_path))
             await settings.open()
-            none = settings.of(MailSettings).own_mail_application(), settings.of(MailSettings).mail_application()
+            none = settings.of(ConnectionSettings).own_microsoft_application(), settings.of(ConnectionSettings).microsoft_application()
             with pytest.raises(ValueError):
-                await settings.of(MailSettings).save_mail_application("pas-un-guid")
-            await settings.of(MailSettings).save_mail_application(f"  {INSTANCE.upper()} ")
-            kept = settings.of(MailSettings).own_mail_application(), settings.of(MailSettings).mail_application()
-            await settings.of(MailSettings).save_mail_application("")
-            return none, kept, settings.of(MailSettings).mail_application()
+                await settings.of(ConnectionSettings).save_microsoft_application("pas-un-guid")
+            await settings.of(ConnectionSettings).save_microsoft_application(f"  {INSTANCE.upper()} ")
+            kept = settings.of(ConnectionSettings).own_microsoft_application(), settings.of(ConnectionSettings).microsoft_application()
+            await settings.of(ConnectionSettings).save_microsoft_application("")
+            return none, kept, settings.of(ConnectionSettings).microsoft_application()
         finally:
             await store.close()
 

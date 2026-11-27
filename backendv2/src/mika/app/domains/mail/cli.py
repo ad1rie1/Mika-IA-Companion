@@ -10,13 +10,15 @@ import json
 
 from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.app.cli.common import with_settings
+from mika.app.connections import ConnectionSettings
 from mika.app.domains.mail.settings import MailSettings
 from mika.app.settings import Settings
 
 
 async def mail_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
-    """Ses boîtes (``set``, ``remove``, ``show``) et l'application Microsoft de l'instance (``application``)."""
-    own = settings.of(MailSettings)
+    """Ses boîtes (``set``, ``remove``, ``show``) et l'application Microsoft de l'instance (``application`` : un
+    réglage du cadre, ``app/connections.py``, ADR 0318)."""
+    own, apps = settings.of(MailSettings), settings.of(ConnectionSettings)
     if args.mail_cmd == "set":
         await own.save_mail_account(
             args.compte, address=args.address, imap_host=args.imap_host, imap_port=args.imap_port,
@@ -30,14 +32,14 @@ async def mail_command(settings: Settings, args: argparse.Namespace) -> dict[str
             display_name=args.nom, auth=args.auth, oauth_client_id=args.client_id, oauth_tenant=args.tenant)
     elif args.mail_cmd == "application":
         if args.defaut:
-            await own.save_mail_application("")
+            await apps.save_microsoft_application("")
         elif args.client_id is not None:
             try:
-                await own.save_mail_application(args.client_id)
+                await apps.save_microsoft_application(args.client_id)
             except ValueError as exc:
                 raise SystemExit(str(exc)) from None
-        return {"application": own.mail_application(),
-                "par_defaut": not own.own_mail_application()}
+        return {"application": apps.microsoft_application(),
+                "par_defaut": not apps.own_microsoft_application()}
     elif args.mail_cmd == "remove":
         cfg = own.email()
         if args.compte not in cfg.accounts:

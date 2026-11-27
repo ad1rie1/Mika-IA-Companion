@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from mika.app.connections import GOOGLE_APPLICATION_KEY
 from mika.app.domains.agenda.reach import seen_calendars
-from mika.app.domains.agenda.settings import AGENDA_GOOGLE_KEY, AGENDA_GRANTS_KEY, AGENDA_KEY
+from mika.app.domains.agenda.settings import AGENDA_GRANTS_KEY, AGENDA_KEY
 from mika.app.domains.domain import LivePart
 from mika.app.me.touches import Touch
 from mika.app.me.touches import both as _both
@@ -86,9 +87,10 @@ LIVE = LivePart(
     events={agenda_p.OWNER: _agenda},
     # ce que change le réglage de l'agenda (``kernel.params_changed``) : qui voit quoi, ce qui se règle — à toutes
     params={agenda_p.OWNER: (SETTINGS, AGENDA, ME)},
-    # ses comptes, leurs connexions, l'application Google du serveur (``Settings._put``, par leur clé)
+    # ses comptes, leurs connexions, et l'application Google du serveur, que ses écrans montrent — un réglage du
+    # cadre (``app/connections.py``), sous la clé qu'elle avait chez lui (``Settings._put``, par leur clé)
     saved={AGENDA_KEY: (SETTINGS, AGENDA, ME), AGENDA_GRANTS_KEY: (SETTINGS, AGENDA),
-           AGENDA_GOOGLE_KEY: (SETTINGS, AGENDA)},
+           GOOGLE_APPLICATION_KEY: (SETTINGS, AGENDA)},
     changes={AGENDA: from_change},
     judge={CALENDARS: judge},
     effects=effect,

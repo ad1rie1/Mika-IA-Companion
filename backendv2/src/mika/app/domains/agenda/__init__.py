@@ -1,18 +1,18 @@
 """L'agenda, tel que la couche ``app`` le relie (ADR 0309, 0310) : sa fiche.
 
 Ce dossier porte ce que la console change d'un compte (``store.py`` : le port ``agenda_desk``), « L'agenda de Mika »
-(``her.py`` : sa mémoire montrée comme un agenda), ses réglages (``settings.py`` : ses comptes, leurs connexions,
-l'application Google du serveur, le partage d'un agenda, le tableau de droits réglé de chaque agenda — que la porte
-des réglages tire de là, ADR 0316), son câblage (``wiring.py`` : sa base, le port ``agenda`` ;
+(``her.py`` : sa mémoire montrée comme un agenda), ses réglages (``settings.py`` : ses comptes, leurs connexions, le
+partage d'un agenda, le tableau de droits réglé de chaque agenda — que la porte des réglages tire de là, ADR 0316), son câblage (``wiring.py`` : sa base, le port ``agenda`` ;
 ses fournisseurs, le port ``agenda_providers`` ; le guichet de la console), son module de l'API par personne
 (``api.py`` : ses agendas et ceux qu'on lui partage, leur tableau de droits ; ce qui attend son geste, pour la barre
 du haut), ses comptes (``account_settings.py`` : leurs routes, leurs réglages, un agenda neuf ou réglé — Paramètres
 › Agendas) et ce qu'une personne a de ses agendas (``reach.py`` : lesquels elle voit, ce qu'elle peut y faire — ce
 que l'API, les partages et le direct lisent), ce qu'il partage (``sharing.py`` : ses agendas, avec qui), sa part du
 direct (``live.py`` : ce qui change un agenda, et à qui il est), sa part de la console (``console/`` : ses onglets, la
-fiche d'un agenda, l'onglet « Agendas » de la fiche d'une personne, ce qu'ils lisent, sa rubrique de réglages, leurs gabarits et leur script) et sa commande (``cli.py`` : ``mika agenda``). Son API dit où en est une connexion dans les mots du cadre
-(``ports.signin``, ADR 0318). Il lit le courrier : Microsoft entre par l'application du courrier (ADR 0238), que sa
-rubrique de réglages vérifie et enregistre.
+fiche d'un agenda, l'onglet « Agendas » de la fiche d'une personne, ce qu'ils lisent, sa rubrique de réglages, leurs gabarits et leur script) et sa commande (``cli.py`` : ``mika agenda``). Il ne lit aucun autre domaine : se connecter à Google ou à Microsoft
+est au cadre (ADR 0318) — les moteurs (``adapters/signin/``), où en est une connexion (``ports.signin``), et les
+applications de l'instance (``app/connections.py``), que sa rubrique de réglages et sa commande règlent toujours ;
+celle de Microsoft, le courrier la partage (ADR 0238).
 
 Reste au cadre « qui peut quoi » — une page qui croise les domaines, où sa console règle le tableau d'un agenda
 (``console/rights.py``).
@@ -25,7 +25,6 @@ from mika.inspector.catalog import Destination, MenuLink
 
 AGENDA = Domain(
     "agenda",
-    needs=("mail",),
     base=Base("agenda", models="mika.adapters.agenda.models",
               place="les agendas : ceux de ce serveur, et la copie de ceux qu'on a branchés"),
     settings="mika.app.domains.agenda.settings",

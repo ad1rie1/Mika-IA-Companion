@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 
 from mika.adapters.mail import MailConfig
 from mika.adapters.mail.config import MailAccount
+from mika.app.connections import ConnectionSettings
 from mika.app.domains.mail.settings import MailSettings
 from mika.app.handmade import ago
 from mika.app.settings_sections.common import owner_words, owners
@@ -27,7 +28,7 @@ log = logging.getLogger("mika.reglages")
 def sections(live: Any) -> tuple[SettingsSection, ...]:
     """Sa rubrique de réglages, pour ce serveur (``live`` : ses réglages, son noyau, ses comptes)."""
     settings = live.settings
-    own = settings.of(MailSettings)
+    own, apps = settings.of(MailSettings), settings.of(ConnectionSettings)
 
     def mail_owners() -> list[tuple[str, str]]:
         """À qui une boîte peut être (ADR 0185) : toi, elle, ou une personne qui a un compte."""
@@ -35,7 +36,7 @@ def sections(live: Any) -> tuple[SettingsSection, ...]:
 
     def mail() -> MailConfig:
         """Ses boîtes, et l'application Microsoft propre à l'instance, gardée à part d'elles (ADR 0238)."""
-        return own.email().model_copy(update={"microsoft_app": own.own_mail_application()})
+        return own.email().model_copy(update={"microsoft_app": apps.own_microsoft_application()})
 
     async def save_mail(cfg: MailConfig) -> list[str]:
         """Une boîte est à toi, à elle ou à une personne qui a un compte (ADR 0185) — sauf ce qui était déjà là (un
@@ -48,8 +49,8 @@ def sections(live: Any) -> tuple[SettingsSection, ...]:
             return problems
         await own.save_email(cfg)
         # l'application Microsoft de l'instance se garde à part des comptes (ADR 0238)
-        if cfg.microsoft_app != own.own_mail_application():
-            await own.save_mail_application(cfg.microsoft_app)
+        if cfg.microsoft_app != apps.own_microsoft_application():
+            await apps.save_microsoft_application(cfg.microsoft_app)
         # ce que ses proposeurs lisent (les comptes où elle prépare des réponses) est un réglage journalisé
         problems = await live.reconfigure()
         if problems:  # le courrier est enregistré ; seuls ses paramètres attendent la prochaine reconfiguration
@@ -108,7 +109,7 @@ def sections(live: Any) -> tuple[SettingsSection, ...]:
         return [("Comptes", f"{len(accounts)} ({plural(ready, 'prête à relever', 'prêtes à relever')})"
                  if accounts else "aucun"),
                 # ADR 0238 : une boîte Microsoft entre par elle, sans donner la sienne
-                ("Application Microsoft", own.own_mail_application() or "celle livrée d'origine"),
+                ("Application Microsoft", apps.own_microsoft_application() or "celle livrée d'origine"),
                 ("Lire et envoyer", Ref("local", f"{PREFIX}/courrier/reception", "Courrier › Réception"))]
 
     return (

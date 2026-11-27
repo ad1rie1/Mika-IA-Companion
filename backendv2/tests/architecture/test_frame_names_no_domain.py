@@ -615,9 +615,10 @@ def test_a_domain_seals_its_secrets_through_its_settings_part():
     (``app/settings.py::SettingsPart._sealed``, ``_opened``), qui seule écrit leur nom rangé (``<champ>_sealed``) :
     une copie à la main du motif est une copie qui peut dériver — un champ oublié resterait en clair dans
     ``mind.db``. Ce qui se scelle autrement (la Forge, sous le nom même du champ ; la clé d'un réveil signé) passe par
-    ``box``."""
-    found = [f"{path}:{line}" for path, text in _sources().items() if path.startswith(f"{HOME}/")
-             for line in sealed_by_hand(text)]
+    ``box``. Les applications de l'instance, une part du cadre que les domaines partagent (``connections.py``,
+    ADR 0318), scellent de même."""
+    found = [f"{path}:{line}" for path, text in _sources().items()
+             if path.startswith(f"{HOME}/") or path == "connections.py" for line in sealed_by_hand(text)]
     assert not found, found
     assert sealed_by_hand('A = "password_sealed"\nB = f"{k}_sealed"\n"""Le champ password_sealed."""\n') == [1, 2]
 
