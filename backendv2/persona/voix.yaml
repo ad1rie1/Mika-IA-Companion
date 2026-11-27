@@ -4962,7 +4962,7 @@ projects:
       not_yours: >-
         Le jalon n° {id} n'est pas à toi seule : {why} Si cela ne tient plus, dis-le à {who} dans « needs_you » :
         c'est à lui d'en décider.
-      # pourquoi (le nom de chaque clé est un code de faculty.py : NE PAS RENOMMER) ; des phrases sans trou
+      # pourquoi (le nom de chaque clé est un code de milestones.py : NE PAS RENOMMER) ; des phrases sans trou
       held:
         other: >-
           il n'est pas de toi — tu ne le retires pas, tu n'en changes ni le texte ni la vérification.

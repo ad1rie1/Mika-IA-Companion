@@ -1,9 +1,11 @@
 """Un sous-sujet des projets garde ses événements dans son module (ADR 0313).
 
-``faculties/projects/faculty.py`` déclare les événements du projet lui-même et de ses objectifs, et ceux des
-sous-sujets nés avant la règle (``BORN_BEFORE`` : tous en sont sortis). Un sous-sujet neuf déclare les siens dans son
-module, comme le registre (``tracker.py``) et la documentation (``docs.py``) : la liste d'ici ne s'allonge pas, et
-raccourcit quand un sous-sujet d'avant sort de ``faculty.py``.
+``faculties/projects/faculty.py`` ne déclare que les événements du projet lui-même et de ses objectifs
+(``ITSELF``). Un sous-sujet déclare les siens dans son module, comme le registre (``tracker.py``) et la documentation
+(``docs.py``) ; ceux qui étaient nés dans ``faculty.py`` avant la règle en sont tous sortis — les jalons, les
+décisions techniques, les pull requests et leur CI, la fusion, les issues, la relecture (``milestones.py``,
+``decisions.py``, ``pulls.py``, ``merge.py``, ``issues.py``, ``review.py``). La liste d'ici ne s'allonge donc que d'un
+événement du projet lui-même, et il n'y a plus de place où ranger un sous-sujet.
 
 Lu par l'AST : un commentaire ou une docstring qui nomme un événement ne compte pas.
 """
@@ -24,12 +26,6 @@ ITSELF = frozenset({
     "access_set", "links_set", "stirred", "steer_asked",
 })
 
-#: les sous-sujets nés avant la règle, encore dans ``faculty.py`` : chacun en sort quand on y touche, et sa ligne
-#: s'efface alors d'ici. Tous l'ont fait : les jalons, les décisions techniques, les pull requests et leur CI, la
-#: fusion, les issues et la relecture (``milestones.py``, ``decisions.py``, ``pulls.py``, ``merge.py``,
-#: ``issues.py``, ``review.py``)
-BORN_BEFORE: dict[str, frozenset[str]] = {}
-
 
 def declared(module: str) -> set[str]:
     """Les événements qu'un module des projets déclare : le premier argument de chaque ``PROJECTS.event(...)``."""
@@ -45,8 +41,7 @@ def declared(module: str) -> set[str]:
 
 
 def test_faculty_declares_no_event_of_a_new_subject():
-    known = ITSELF.union(*BORN_BEFORE.values())
-    new = sorted(declared("faculty.py") - known)
+    new = sorted(declared("faculty.py") - ITSELF)
     assert not new, (
         f"faculty.py déclare {new} : un sous-sujet des projets garde ses événements, leurs réducteurs et sa "
         "projection dans son module (ADR 0313), comme tracker.py et docs.py. Seul un événement du projet lui-même ou "
@@ -54,7 +49,7 @@ def test_faculty_declares_no_event_of_a_new_subject():
 
 
 def test_the_list_shrinks_when_a_subject_leaves_faculty():
-    gone = sorted(ITSELF.union(*BORN_BEFORE.values()) - declared("faculty.py"))
+    gone = sorted(ITSELF - declared("faculty.py"))
     assert not gone, f"{gone} n'est plus déclaré dans faculty.py : l'ôter de cette garde (ADR 0313)."
 
 
