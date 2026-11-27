@@ -21,6 +21,10 @@ CONTACTS = Domain(
     live="mika.app.domains.contacts.live",
     console="mika.app.domains.contacts.console",
     preview="mika.app.domains.contacts.preview",
+    plugins={
+        "contacts": ("Ce qu'elle se forme de ses contacts à partir de ce qu'elle lit : la période relue, ses bornes, "
+                     "les plafonds par jour", (), ("Personnes › Annuaire", "personnes/personnes")),
+    },
     labels={
         "faculties": {"contacts": "Annuaire"},
         "processes": {

@@ -25,21 +25,16 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("mika.reglages")
 
-#: Réglages › Configuration des plugins : une ligne par paquet de ``plugins/`` (``test_settings_pages`` les compare,
-#: pour qu'aucun ne manque), dans l'ordre de la page — ce qui s'y règle, ses pages de réglages, où s'en servir (nom,
-#: « destination/onglet »). Une ligne n'est montrée que si son plugin est composé ; ses paramètres avancés, que si sa
-#: faculté en a.
-_FRAME: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {
-    "contacts": ("Ce qu'elle se forme de ses contacts à partir de ce qu'elle lit : la période relue, ses bornes, les "
-                 "plafonds par jour", (), ("Personnes › Annuaire", "personnes/personnes")),
-}
-#: l'ordre de la page : une décision de la console, comme son menu — il se dit ici, pour tous les plugins
+#: l'ordre de Réglages › Configuration des plugins : une décision de la console, comme son menu — il se dit ici, pour
+#: tous les plugins
 ORDER = ("email", "teams", "phone", "rss", "web", "mcp", "camera", "imaging", "sensors", "location", "trips", "wakeup",
          "forge", "contacts", "agenda")
-#: la ligne de chaque plugin : celles du cadre, puis celles que chaque domaine dit dans sa fiche (``Domain.plugins``,
-#: ADR 0310)
-_CARDS = {**_FRAME, **{name: card for domain in DOMAINS for name, card in domain.plugins.items()}}
-if set(ORDER) != set(_CARDS) or len(_FRAME) + sum(len(d.plugins) for d in DOMAINS) != len(_CARDS):
+#: la ligne de chaque plugin, une par paquet de ``plugins/`` (``test_settings_pages`` les compare, pour qu'aucun ne
+#: manque) — ce qui s'y règle, ses pages de réglages, où s'en servir (nom, « destination/onglet ») : celle que son
+#: domaine dit dans sa fiche (``Domain.plugins``, ADR 0310) ; chaque plugin est à un domaine, le cadre n'en dit aucune.
+#: Une ligne n'est montrée que si son plugin est composé ; ses paramètres avancés, que si sa faculté en a.
+_CARDS = {name: card for domain in DOMAINS for name, card in domain.plugins.items()}
+if set(ORDER) != set(_CARDS) or sum(len(d.plugins) for d in DOMAINS) != len(_CARDS):
     raise ValueError("Configuration des plugins : chaque plugin a une ligne, dite une fois, et sa place dans ORDER — "
                      f"{sorted(set(ORDER) ^ set(_CARDS))}")
 PLUGINS: dict[str, tuple[str, tuple[str, ...], tuple[str, str] | None]] = {name: _CARDS[name] for name in ORDER}
