@@ -28,7 +28,8 @@ from mika.faculties.memory.faculty import (
     _noted,
 )
 from mika.faculties.memory.hearing import items_by_id
-from mika.faculties.memory.recall import Recall, _ahead_moments, expected_line
+from mika.faculties.memory.lines import expected_line
+from mika.faculties.memory.recall import Recall, _ahead_moments
 from mika.faculties.memory.recall_sections import _ahead as ahead_section
 from mika.faculties.others.faculty import OthersParams, _cheer_window
 from mika.kernel.events import Content

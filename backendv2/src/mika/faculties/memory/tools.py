@@ -6,8 +6,9 @@ lui as promis » — un outil qui relit ce qui est sous ses yeux l'invite à dir
 « attends, je vérifie » au lieu de parler.
 
 Ce que la recherche trouve passe le verdict de ``hearing.py`` devant qui
-demande, comme le rappel ; elle se classe comme lui et se dit avec les mots
-d'une ligne (``recall.py`` : ``relevance``, ``topic``, ``doubted``…)."""
+demande, comme le rappel ; elle se classe comme lui (``recall.py`` :
+``relevance``, ``topic``, ce qui n'appartient qu'à eux) et se dit avec les
+mots d'une ligne (``lines.py``)."""
 
 from __future__ import annotations
 
@@ -22,17 +23,8 @@ from mika.faculties.memory import tables as tb
 from mika.faculties.memory.faculty import MEMORY, params
 from mika.faculties.memory.hearing import felt_here, items_by_id, names_of, verdict_of
 from mika.faculties.memory.life import kept_too_early
-from mika.faculties.memory.recall import (
-    about_us,
-    between_us,
-    concerned_name,
-    doubted,
-    feelings,
-    knowledge_label,
-    relevance,
-    topic,
-    when_words,
-)
+from mika.faculties.memory.lines import concerned_name, doubted, feelings, knowledge_label, when_words
+from mika.faculties.memory.recall import about_us, between_us, relevance, topic
 from mika.faculties.memory.salience import age_words, tag
 from mika.ports.sql import alias_of
 from mika.vocab.affect import facets

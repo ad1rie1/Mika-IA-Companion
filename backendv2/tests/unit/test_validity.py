@@ -22,7 +22,7 @@ from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryParams, MemoryState
 from mika.faculties.memory.hearing import items_by_id
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, judge
-from mika.faculties.memory.recall import contested_line
+from mika.faculties.memory.lines import contested_line
 from mika.faculties.memory.speakers import People
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience

@@ -27,7 +27,8 @@ from mika.faculties.memory import extraction as x
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.faculty import MemoryState, _promised
 from mika.faculties.memory.kept import _closed_memories
-from mika.faculties.memory.recall import _recall, feelings
+from mika.faculties.memory.lines import feelings
+from mika.faculties.memory.recall import _recall
 from mika.faculties.memory.salience import admissible, unsaid
 from mika.faculties.memory.shown import _promises
 from mika.faculties.memory.tools import SearchArgs, memory_search

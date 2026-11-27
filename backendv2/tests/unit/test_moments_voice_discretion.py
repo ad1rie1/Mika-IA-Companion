@@ -218,7 +218,7 @@ def test_her_memory_says_a_date_as_the_rest_of_her_does():
     from zoneinfo import ZoneInfo
 
     from mika.faculties.memory import timespan
-    from mika.faculties.memory.recall import when_words
+    from mika.faculties.memory.lines import when_words
     from mika.vocab import circadian
     from mika.vocab.phrasebook import catalog
 
