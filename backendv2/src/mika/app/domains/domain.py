@@ -245,9 +245,10 @@ class AccountsPart:
 class OutsidePart:
     """Une sorte de ressource dont les outils viennent d'ailleurs (ADR 0192, 0219) : un service MCP, une app de la
     Forge. Ses outils sont rangés sous sa famille à elle (``mcp.<service>``, ``forge_apps.<app>``), et leur ligne est
-    celle de leur ressource, que sa faculté déclare (``RightsSpec.grants``). L'écran Outils (``app/me/rights.py``) et
-    Réglages › Droits (``app/handmade/rights.py``) réunissent les parts (``app/me/outside.py``), chacun dans l'ordre de
-    sa page ; ils n'en connaissent aucune."""
+    celle de leur ressource, que sa faculté déclare (``RightsSpec.grants``). L'écran Outils (``app/me/rights.py``),
+    Réglages › Droits (``app/handmade/rights.py``) et les tableaux de droits de l'inspecteur, qui mènent à la fiche
+    d'une famille (``app/handmade/access.py::family_href``), réunissent les parts (``app/me/outside.py``), chacun dans
+    l'ordre de sa page ; ils n'en connaissent aucune."""
 
     #: la sorte de ses droits, la fin de la clé de son ``RightsSpec`` (« services », « apps ») : son groupe dans l'écran
     #: Outils ; sa place : ``app/me/outside.py::OUTSIDE``
@@ -275,6 +276,10 @@ class OutsidePart:
     #: sa ligne dans Réglages › Droits, pour une de ses familles (``<bundle><nom>``) : ``row(frame, nom)`` rend son
     #: libellé et la clé du détail de ses accès
     row: Callable[..., tuple[str, str]]
+    #: la fiche où se règlent les droits d'une de ses familles (``<bundle><nom>``) : la sorte d'objet de sa fiche
+    #: (``Inspection.subject`` : « serveur », « app ») et l'onglet de ses droits (« fait », « acces ») —
+    #: ``app/handmade/access.py::family_href`` en fait l'adresse, pour les tableaux de droits de l'inspecteur
+    fiche: tuple[str, str]
     #: son sous-onglet dans Réglages › Droits, où ses familles ont chacune leur ligne : son nom (« forge ») — son ancre
     #: (``d-<nom>``) et sa place dans l'ordre de la page, ``app/handmade/rights.py::SUBTABS`` —, son titre et son aide
     #: (« Services MCP » ; « les outils venus d'ailleurs, service par service ») : ceux de cette page, pas ceux de

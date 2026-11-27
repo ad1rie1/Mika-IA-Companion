@@ -59,5 +59,6 @@ def row(frame: Any, name: str) -> tuple[str, str]:
 
 
 OUTSIDE = OutsidePart("apps", bundle="forge_apps.", title="Apps de la Forge", why="les accès de cette app", seen=seen,
-                      tool=tool, allowance=allowance, name=name, about=about, row=row, tab="forge",
-                      tab_title="Apps de la Forge", tab_hint="une app suit son projet ; sans projet, ses propres lignes")
+                      tool=tool, allowance=allowance, name=name, about=about, row=row, fiche=("app", "acces"),
+                      tab="forge", tab_title="Apps de la Forge",
+                      tab_hint="une app suit son projet ; sans projet, ses propres lignes")

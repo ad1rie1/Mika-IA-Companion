@@ -3,9 +3,10 @@ outils ne sont pas à une famille d'elle, et dont la ligne est celle que leur fa
 
 Chaque sorte est à un domaine, qui dit dans sa part (``OutsidePart`` : l'``outside.py`` de son dossier) la famille de
 ses outils, l'outil et la ressource d'une de ses lignes, la lecture même de sa ligne, le nom d'une de ses ressources et
-à quoi elle sert, sa ligne dans Réglages › Droits ; ce module garde l'ordre des sortes (``OUTSIDE``) et réunit les
-parts, sans en connaître aucune. Les lisent : la matrice de l'écran Outils (``app/me/rights.py``) et Réglages › Droits
-(``app/handmade/rights.py``).
+à quoi elle sert, sa ligne dans Réglages › Droits, la fiche qui règle une de ses familles ; ce module garde l'ordre des
+sortes (``OUTSIDE``) et réunit les parts, sans en connaître aucune. Les lisent : la matrice de l'écran Outils
+(``app/me/rights.py``), Réglages › Droits (``app/handmade/rights.py``) et l'adresse de la fiche d'une famille, que
+reçoivent les tableaux de droits de l'inspecteur (``app/handmade/access.py::family_href``).
 """
 
 from __future__ import annotations

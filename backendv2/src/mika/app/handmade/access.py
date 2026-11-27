@@ -8,6 +8,7 @@ sont ceux que sa part dit (``app/me/accounts.py``) : ce module n'en nomme aucun.
 from __future__ import annotations
 
 from mika.app.me import accounts as channels
+from mika.app.me import outside
 from mika.contracts import identity as identity_c
 from mika.faculties.identity.faculty import known_as
 from mika.faculties.identity.faculty import people as people_of
@@ -16,9 +17,6 @@ from mika.inspector.pages.subjects import subject_url
 from mika.inspector.ui import UI
 from mika.vocab.access import KEEPS, POLICIES, PRIVATE, TOGETHER, WEB, canal_key
 from mika.vocab.people import ACCOUNT_PREFIX
-
-#: la fiche qui règle une famille d'outils venue d'ailleurs, par le début de son lot : sa sorte, son onglet des droits
-FAMILY_FICHES = {"mcp": ("serveur", "fait"), "forge_apps": ("app", "acces")}
 
 
 def capitalized(options: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
@@ -67,10 +65,10 @@ def instances_from_settings(ui: UI) -> Instances:
 
 
 def family_href(bundle: str) -> str:
-    """L'adresse de la fiche où se règlent les droits d'une famille d'outils venue d'ailleurs (un service, une app) ;
-    vide pour toute autre."""
+    """L'adresse de la fiche où se règlent les droits d'une famille d'outils venue d'ailleurs (un service, une app) :
+    celle que dit la part de sa sorte (``OutsidePart.fiche``), par le début de son lot ; vide pour toute autre."""
     kind, _, name = bundle.partition(".")
-    fiche = FAMILY_FICHES.get(kind)
+    fiche = next((p.fiche for p in outside.parts().values() if p.bundle == f"{kind}."), None)
     return subject_url(fiche[0], name, fiche[1]) if fiche is not None else ""
 
 

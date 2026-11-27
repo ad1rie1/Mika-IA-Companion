@@ -553,6 +553,8 @@ def test_every_part_a_card_names_exists_and_carries_its_name():
             assert elsewhere.title and elsewhere.why, d.name
             assert all(callable(f) for f in (elsewhere.seen, elsewhere.tool, elsewhere.allowance, elsewhere.name,
                                              elsewhere.about, elsewhere.row)), d.name
+            # … la fiche qui règle une de ses familles : la sorte d'objet de sa fiche et l'onglet de ses droits
+            assert len(elsewhere.fiche) == 2 and all(isinstance(x, str) and x for x in elsewhere.fiche), d.name
             # … et son sous-onglet dans Réglages › Droits : un nom de SUBTABS, son titre et son aide
             assert elsewhere.tab in SUBTABS and elsewhere.tab_title.strip() and elsewhere.tab_hint.strip(), d.name
         assert d.console is None or isinstance(part(d.console, "CONSOLE"), ConsolePart), d.name

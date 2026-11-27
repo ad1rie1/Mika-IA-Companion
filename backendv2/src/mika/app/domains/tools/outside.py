@@ -92,5 +92,6 @@ def row(frame: Any, server: str) -> tuple[str, str]:
 
 
 OUTSIDE = OutsidePart("services", bundle="mcp.", title="Services", why="les accès de ce service", seen=seen, tool=tool,
-                      allowance=allowance, name=name, about=about, row=row, tab="services",
-                      tab_title="Services MCP", tab_hint="les outils venus d'ailleurs, service par service")
+                      allowance=allowance, name=name, about=about, row=row, fiche=("serveur", "fait"),
+                      tab="services", tab_title="Services MCP",
+                      tab_hint="les outils venus d'ailleurs, service par service")
