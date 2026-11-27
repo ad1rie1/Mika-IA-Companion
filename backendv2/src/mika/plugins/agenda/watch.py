@@ -27,13 +27,13 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Iterable
-from datetime import date, datetime, time, timedelta
+from datetime import date
 from typing import Any
 
 from mika.contracts import agenda as agenda_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
-from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -68,7 +68,7 @@ from mika.plugins.agenda import (
     reminder,
 )
 from mika.plugins.agenda.rights import at_work
-from mika.plugins.agenda.when import midnight
+from mika.plugins.agenda.when import eve_at, midnight
 from mika.ports.agenda import (
     CANCELLED,
     DAY_US,
@@ -120,8 +120,7 @@ def remind_at(start: int, all_day: bool, delay: str, tz: Any, eve_hour: int) -> 
     """Quand rappeler un rendez-vous à ce délai : tant de minutes avant ; la veille au soir, à ``eve_hour`` (une
     journée entière : la veille de son premier jour). Une journée entière ne se rappelle qu'ainsi : ``None``."""
     if delay == EVE:
-        first = date.fromisoformat(day_of(start)) if all_day else local(start, tz).date()
-        return instant(datetime.combine(first - timedelta(days=1), time(eve_hour), tzinfo=tz))
+        return eve_at(start, all_day, tz, eve_hour)
     if all_day or delay not in DELAYS or not delay.isdigit():
         return None
     return start - int(delay) * MINUTE

@@ -6,6 +6,9 @@ sa voix (``agenda.words.*``, ``agenda.tools.bad_time``).
   la console (``inspect/views.py::bounds``), l'API par personne (``app/domains/agenda/api.py``), « L'agenda de
   Mika » (``app/domains/agenda/her.py``) ; une journée entière commence à minuit (``watch.py::starts_at``).
 - **Quand il occupe** (``local_span``) : une journée entière, de minuit à minuit dans ce fuseau.
+- **La veille au soir** (``eve_at``) : la veille du jour local d'un rendez-vous (d'une journée entière : de son premier
+  jour), à l'heure dite — sa seule écriture : le rappel (``watch.py::remind_at``) et celui que la console annonce
+  (``inspect/views.py::planned_reminder``).
 - **En mots** : une heure (``hm`` : « 9 h », « 14 h 30 »), un moment (``when_words``), une période
   (``period_words``).
 - **Ce qu'un outil demande** : une période, en mots ou en dates (``period``, jamais plus de ``DAYS_MAX`` jours), ou
@@ -19,7 +22,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from mika.kernel.clock import DAY, MINUTE, instant, local
-from mika.ports.agenda import Span, local_days, whole_days
+from mika.ports.agenda import Span, day_of, local_days, whole_days
 from mika.vocab.circadian import day_fr
 from mika.vocab.phrasebook import phrase
 
@@ -38,6 +41,13 @@ def hm(dt: datetime) -> str:
 def midnight(d: date, tz: ZoneInfo) -> int:
     """La borne d'un jour : minuit de cette date dans ce fuseau, en microsecondes."""
     return instant(datetime.combine(d, time(), tzinfo=tz))
+
+
+def eve_at(start: int, all_day: bool, tz: ZoneInfo, eve_hour: int) -> int:
+    """La veille au soir d'un rendez-vous qui commence à ``start``, à ``eve_hour`` dans ce fuseau, en microsecondes :
+    la veille de son jour local (une journée entière : la veille de son premier jour)."""
+    first = date.fromisoformat(day_of(start)) if all_day else local(start, tz).date()
+    return instant(datetime.combine(first - timedelta(days=1), time(eve_hour), tzinfo=tz))
 
 
 def local_span(span: Span, tz: ZoneInfo) -> tuple[int, int]:

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
@@ -31,7 +31,7 @@ from mika.contracts import agenda as agenda_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.contracts.agenda import WRITE_WORDS
-from mika.kernel.clock import MINUTE, instant, local
+from mika.kernel.clock import MINUTE, local
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -76,7 +76,7 @@ from mika.plugins.agenda import (
 )
 from mika.plugins.agenda.actions import account_level, level_of, operator, person_of
 from mika.plugins.agenda.rights import table_of
-from mika.plugins.agenda.when import midnight
+from mika.plugins.agenda.when import eve_at, midnight
 from mika.ports.agenda import (
     BY_HER,
     CALDAV,
@@ -944,8 +944,7 @@ def planned_reminder(frame: Frame, delay: str, o: Occurrence) -> int | None:
     if delay in ("", "non"):
         return None
     if delay == "veille":
-        first = local(o.span.start, tz).date() if not o.span.all_day else date.fromisoformat(o.span.first_day)
-        return instant(datetime.combine(first - timedelta(days=1), time(p.eve_hour), tzinfo=tz))
+        return eve_at(o.span.start, o.span.all_day, tz, p.eve_hour)
     if o.span.all_day or not delay.isdigit():
         return None
     return o.span.start - int(delay) * MINUTE
