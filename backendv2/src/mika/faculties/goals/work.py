@@ -48,9 +48,9 @@ from mika.faculties.goals.faculty import (
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import HOUR
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, floor, workshop
+from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
-from mika.vocab.episodes import Kind, goal_of, goal_target
+from mika.vocab.episodes import Kind, goal_of, goal_target, workshop
 from mika.vocab.phrasebook import phrase
 
 #: au-dessus de la barre de réveil : un rappel urgent la réveille

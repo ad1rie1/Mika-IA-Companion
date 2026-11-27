@@ -29,7 +29,7 @@ from mika.kernel.arbitration import Candidate
 from mika.kernel.builtin import LEASE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, floor, workshop
+from mika.kernel.guards import Guard, floor
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.plugins.wakeup import (
@@ -47,7 +47,15 @@ from mika.plugins.wakeup import (
     untold,
 )
 from mika.ports.preprocess import inert
-from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WAKE_KINDS, Kind, project_target, task_target
+from mika.vocab.episodes import (
+    CONVERSATIONAL,
+    PROJECT_KINDS,
+    WAKE_KINDS,
+    Kind,
+    project_target,
+    task_target,
+    workshop,
+)
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 

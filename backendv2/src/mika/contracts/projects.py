@@ -29,7 +29,6 @@ from typing import Annotated
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.forms import Knob
-from mika.kernel.guards import workshop
 from mika.vocab import access
 from mika.vocab.access import (
     ALONE,
@@ -46,6 +45,7 @@ from mika.vocab.access import (
 )
 from mika.vocab.access import CHANGES as CHANGES
 from mika.vocab.access import STEER_ASK as STEER_ASK
+from mika.vocab.episodes import workshop
 from mika.vocab.privacy import Sensitivity
 
 OWNER = "projects"

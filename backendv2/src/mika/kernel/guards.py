@@ -23,11 +23,6 @@ def floor(person: str) -> str:
     return f"floor:{person}"
 
 
-def workshop(goal: str) -> str:
-    """La ressource « l'atelier de ce but »."""
-    return f"workshop:{goal}"
-
-
 @dataclass(frozen=True, slots=True)
 class Guard:
     name: str

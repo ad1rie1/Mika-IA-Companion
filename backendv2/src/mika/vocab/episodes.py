@@ -124,6 +124,13 @@ def goal_of(target: str | None) -> int | None:
         return None
 
 
+def workshop(key: str) -> str:
+    """La ressource « cet atelier », qu'un épisode tient par un bail pendant qu'il y travaille (``Proposal.resources``) :
+    celui d'un but (son numéro), d'un projet (``projet-<n>``), d'un réveil (``reveil-<nom>``) — trois propriétaires
+    la nomment, et deux épisodes ne travaillent pas dans le même atelier."""
+    return f"workshop:{key}"
+
+
 #: La cible d'une exécution sur un projet : ``project:7``. Personne ne l'écoute.
 PROJECT_PREFIX = "project:"
 
