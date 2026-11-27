@@ -22,10 +22,10 @@ from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XCroyance, XPromesse, XSouvenir
 from mika.faculties.memory.faculty import MemoryParams, MemoryState
 from mika.faculties.memory.index import Index, _item_vector
-from mika.faculties.memory.projections import ITEM_COLUMNS, Chunks, Items
+from mika.faculties.memory.projections import Chunks, Items
 from mika.faculties.memory.salience import Item, admissible
 from mika.faculties.memory.speakers import People
-from mika.faculties.memory.tables import DEFERRED_TABLE
+from mika.faculties.memory.tables import DEFERRED_TABLE, ITEM_COLUMNS
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience

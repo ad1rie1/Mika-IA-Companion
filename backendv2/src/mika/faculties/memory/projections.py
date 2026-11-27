@@ -25,6 +25,9 @@
 La sixième, ``memory_life`` (les situations et les dates durables), est dans
 ``archive.py``.
 
+Ce module écrit. Lire une ligne — les colonnes d'un élément, un témoignage, l'empreinte d'un texte — se fait par
+``tables.py``, où la projection les prend aussi : qui lit n'importe pas l'écrivain.
+
 **Montré, ou dit.** Un élément montré dans un prompt n'est pas un élément
 dont elle s'est servie : être montré date seulement l'anti-répétition
 (``shown_at``) ; seul ce qu'elle a vraiment repris dans ce qu'elle a dit
@@ -69,6 +72,7 @@ from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.tables import (
     DEFERRED_TABLE,
     EMOTION,
+    ITEM_COLUMNS,
     READING_COLUMNS,
     READINGS_TABLE,
     TESTIMONY_COLUMNS,
@@ -78,6 +82,7 @@ from mika.faculties.memory.tables import (
     contests,
     deferred,
     feelings,
+    fingerprint,
     forgets,
     handle_key,
     items,
@@ -86,24 +91,20 @@ from mika.faculties.memory.tables import (
     readings,
     refs,
     testimonies,
+    testimony_columns,
+    testimony_of,
     told,
     told_lines,
 )
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
-from mika.kernel.codec import digest
 from mika.kernel.faculty import Tier
 from mika.ports.paging import fold_text
 from mika.ports.sql import create_view, drop_view, fit, greatest, insert_ignore, json_has, least, upsert
 from mika.ports.store import Sql
 from mika.vocab.affect import FACET_DEFAULT, dominant
 from mika.vocab.tag import strip_prosody
-from mika.vocab.words import WORD, fold, same_words, stems
+from mika.vocab.words import same_words, stems
 
-ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
-                "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
-                "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us",
-                "knowledge_kind", "holder", "constraints", "internal_only", "superseded_by", "as_of", "valid_until",
-                "felt", "empathy", "until", "precision", "likelihood", "gist", "veiled", "felt_from")
 CHUNK_TEXT_MAX = 600
 #: les événements qui créent un élément (et portent son texte)
 _CREATES = frozenset({c.REMEMBERED.name, c.BELIEVED.name, c.PROMISE_NOTICED.name, c.EVENT_NOTED.name})
@@ -137,20 +138,6 @@ def _supersede(sql: Sql, sfx: str, old: int, new: int, at: int) -> None:
 def _contest(sql: Sql, sfx: str, item: int, other: int, at: int) -> None:
     upsert(sql, contests(sfx), [{"item": item, "other": other, "at": at}, {"item": other, "other": item, "at": at}],
            keys=["item", "other"])
-
-
-def testimony_of(row: Sequence[Any]) -> Testimony:
-    """Une ligne de ``memory_testimonies`` (``TESTIMONY_COLUMNS``)."""
-    r = dict(zip(TESTIMONY_COLUMNS, row, strict=True))
-    return Testimony(int(r["seq"]), keys_of(r["told_by"]), keys_of(r["heard_by"]), int(r["sensitivity"]),
-                     bool(r["secret"]), float(r["confidence"]), keys_of(r["informants"]), str(r["origin"]),
-                     int(r["at"]), bool(r["between_us"]), bool(r["speaks"]), bool(r["first_hand"]))
-
-
-def testimony_columns(sfx: str = "") -> list[Any]:
-    """Les colonnes de ``memory_testimonies`` dans l'ordre de ``TESTIMONY_COLUMNS`` (ce que lit ``testimony_of``)."""
-    tt = testimonies(sfx)
-    return [tt.c[n] for n in TESTIMONY_COLUMNS]
 
 
 def _testimonies(sql: Sql, sfx: str, item: int) -> list[Testimony]:
@@ -191,10 +178,6 @@ def _about_rows(sql: Sql, sfx: str, item: int, keys: Iterable[str]) -> None:
 def used(item_text: str, said: str) -> bool:
     """Elle s'en est servie : ce qu'elle a dit reprend l'élément (radicaux communs)."""
     return len(stems(item_text) & stems(said)) >= USED_STEMS
-
-
-def fingerprint(text: str) -> str:
-    return digest(WORD.findall(fold(text)))
 
 
 #: les vues de la porte (``contracts.memory``) que ``memory_items`` porte ; ``RETOLD_VIEW`` est à ``memory_told``
@@ -861,6 +844,5 @@ MEMORY.projector(READINGS_TABLE, version=3, tier=Tier.T0,
                  types=[rss_c.READ, mcp_c.CONSULTED, c.REREAD])(Readings)
 
 __all__ = [
-    "ITEM_COLUMNS", "Chunks", "ExtractionQueue", "Items", "Readings", "Told", "create_views", "fingerprint",
-    "forgotten", "informants_of", "testimony_columns", "testimony_of", "used",
+    "Chunks", "ExtractionQueue", "Items", "Readings", "Told", "create_views", "forgotten", "informants_of", "used",
 ]

@@ -29,9 +29,9 @@ from mika.faculties.memory.extraction import (
 )
 from mika.faculties.memory.faculty import MemoryParams
 from mika.faculties.memory.inspect import Kept, _detail
-from mika.faculties.memory.projections import ITEM_COLUMNS
 from mika.faculties.memory.salience import Item, salience
 from mika.faculties.memory.speakers import People
+from mika.faculties.memory.tables import ITEM_COLUMNS
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content
 from mika.vocab.lineage import Lineage, Requirement, Restriction, requirement, without_whom

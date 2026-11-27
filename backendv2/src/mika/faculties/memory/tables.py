@@ -15,12 +15,19 @@ son statut, suffit à ne relire que ses quasi-doublons.
 
 ``memory_chunks`` est déclarée au contrat (``contracts.memory.chunks_table`` : la console la relit) ; le fil
 (``transcript``) et le graphe des liens (``social``), que la mémoire relit, le sont aux leurs.
+
+**Lire une ligne.** Ce module dit aussi comment se lit une ligne, pour tous ceux qui la lisent — le rappel, les outils,
+la nuit, l'index, la console, ce que le code garde d'une relecture — comme pour la projection qui l'écrit
+(``projections.py``) : les colonnes d'un élément (``ITEM_COLUMNS``, ``item_columns`` ; la forme lue est
+``salience.Item``), celles d'un témoignage et sa forme lue (``TESTIMONY_COLUMNS``, ``testimony_columns``,
+``testimony_of`` : un ``knowledge.Testimony``), celles d'une lecture (``READING_COLUMNS``), une liste de clés
+(``keys_of``) et l'empreinte d'un texte (``fingerprint``). On les lit ici, jamais par l'écrivain.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from functools import cache
 from typing import Any
 
@@ -28,8 +35,11 @@ from sqlalchemy import BigInteger, Column, Double, Index, PrimaryKeyConstraint, 
 from sqlalchemy.exc import DBAPIError
 
 from mika.contracts import memory as c
+from mika.faculties.memory.knowledge import Testimony
+from mika.kernel.codec import digest
 from mika.ports.paging import fold_text
 from mika.ports.sql import HANDLE_MAX, Key, LongText, fit, projection_table
+from mika.vocab.words import WORD, fold
 
 #: élément → la référence de son texte (``Content.ref``)
 REFS_TABLE = "memory_refs"
@@ -117,6 +127,15 @@ def _text(name: str, *, nullable: bool = False, default: str | None = None) -> C
     return Column(name, LongText, nullable=nullable, server_default=default)
 
 
+#: les colonnes d'une ligne de ``memory_items`` telles qu'on la lit (``salience.Item.of``) et qu'on l'écrit
+#: (``projections.Items``) ; ``item_columns`` les donne dans cet ordre
+ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
+                "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
+                "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us",
+                "knowledge_kind", "holder", "constraints", "internal_only", "superseded_by", "as_of", "valid_until",
+                "felt", "empathy", "until", "precision", "likelihood", "gist", "veiled", "felt_from")
+
+
 @cache
 def items(sfx: str = "") -> Table:
     """``memory_items`` : souvenirs, croyances, promesses, moments — une ligne par élément (``c.LEDGER_COLUMNS``,
@@ -172,6 +191,18 @@ def items(sfx: str = "") -> Table:
         Index(f"{name}_kind", "kind", "status", "born_at"),
         Index(f"{name}_fingerprint", "fingerprint", "kind", "status"),
     )
+
+
+def item_columns() -> list[Any]:
+    """Les colonnes de ``memory_items`` dans l'ordre de ``ITEM_COLUMNS`` (ce que lit ``Item.of``)."""
+    t = items()
+    return [t.c[n] for n in ITEM_COLUMNS]
+
+
+def fingerprint(text: str) -> str:
+    """L'empreinte d'un texte (la colonne ``fingerprint``) : ses mots repliés. La projection l'écrit ; un quasi-doublon
+    se cherche par elle."""
+    return digest(WORD.findall(fold(text)))
 
 
 @cache
@@ -242,6 +273,20 @@ def testimonies(sfx: str = "") -> Table:
         _int("first_hand", default=0),
         PrimaryKeyConstraint("item", "seq", name=f"{name}_pk"),
     )
+
+
+def testimony_of(row: Sequence[Any]) -> Testimony:
+    """Une ligne de ``memory_testimonies`` (``TESTIMONY_COLUMNS``)."""
+    r = dict(zip(TESTIMONY_COLUMNS, row, strict=True))
+    return Testimony(int(r["seq"]), keys_of(r["told_by"]), keys_of(r["heard_by"]), int(r["sensitivity"]),
+                     bool(r["secret"]), float(r["confidence"]), keys_of(r["informants"]), str(r["origin"]),
+                     int(r["at"]), bool(r["between_us"]), bool(r["speaks"]), bool(r["first_hand"]))
+
+
+def testimony_columns(sfx: str = "") -> list[Any]:
+    """Les colonnes de ``memory_testimonies`` dans l'ordre de ``TESTIMONY_COLUMNS`` (ce que lit ``testimony_of``)."""
+    tt = testimonies(sfx)
+    return [tt.c[n] for n in TESTIMONY_COLUMNS]
 
 
 @cache
@@ -365,7 +410,7 @@ def life(sfx: str = "") -> Table:
 
 __all__ = [
     "CHANGES_TABLE", "CONTESTS_TABLE", "DEFERRED_TABLE", "READINGS_TABLE", "READING_COLUMNS", "REFS_TABLE",
-    "TESTIMONIES_TABLE", "TESTIMONY_COLUMNS",
-    "IN_MAX", "about", "batches", "changes", "contests", "deferred", "feelings", "forgets", "handle_key", "has_table", "items", "life", "prefixed", "readings",
-    "refs", "searched", "testimonies", "told", "told_lines",
+    "TESTIMONIES_TABLE", "TESTIMONY_COLUMNS", "ITEM_COLUMNS",
+    "IN_MAX", "about", "batches", "changes", "contests", "deferred", "feelings", "fingerprint", "forgets", "handle_key", "has_table", "item_columns", "items", "life", "prefixed", "readings",
+    "refs", "searched", "testimonies", "testimony_columns", "testimony_of", "told", "told_lines",
 ]

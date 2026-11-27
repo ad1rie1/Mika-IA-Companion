@@ -46,16 +46,18 @@ Ce module cherche et trie ; ce qu'il a trouvé se dit en mots, section par secti
 porte aussi deux blocs que d'autres lisent d'ici :
 
 - **le verdict d'un élément**, ce qui décide s'il peut se dire devant qui écoute (``verdict_of``, ``hearing``,
-  ``felt_here``, ``heard_confidence``), avec ce qu'il lit : l'élément relu par son numéro (``items_by_id``,
-  ``item_columns``) et les personnes que ses clés désignent maintenant (``names_of``, ``canon``, ``presumed_of``) —
-  les outils, la relecture de la nuit (``reread``) et la console (``inspect``) s'en servent ;
+  ``felt_here``, ``heard_confidence``), avec ce qu'il lit : l'élément relu par son numéro (``items_by_id``) et les
+  personnes que ses clés désignent maintenant (``names_of``, ``canon``, ``presumed_of``) — les outils, la relecture
+  de la nuit (``reread``) et la console (``inspect``) s'en servent ;
 - **les mots d'une ligne** : ce qui en fait douter (``doubted``, ``contested_line``), ce qu'on en ressent
   (``feelings``, ``tone``), qui il concerne (``concerned_name``), sa nature et selon qui (``knowledge_label``), un
   jour dit comme on le dit (``when_words``), ce qu'elle en attend (``expected_line``), et le temps d'un moment
   (``happens_today``, ``followed_lately``) — l'enrichisseur s'en sert, les sections et les outils en lisent une
   part.
 
-La règle des sujets délicats — ce qui en devient une confidence (ADR 0099) — est dans ``delicate.py``.
+La règle des sujets délicats — ce qui en devient une confidence (ADR 0099) — est dans ``delicate.py`` ; comment se lit
+une ligne de ``memory_items`` ou de ``memory_testimonies`` (ses colonnes, ``item_columns``, ``testimony_of``), dans
+``tables.py``.
 """
 
 from __future__ import annotations
@@ -83,7 +85,6 @@ from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, ove
 from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
 from mika.faculties.memory.likelihood import likely_words
-from mika.faculties.memory.projections import ITEM_COLUMNS, testimony_columns, testimony_of
 from mika.faculties.memory.salience import (
     Item,
     Verdict,
@@ -100,7 +101,14 @@ from mika.faculties.memory.salience import (
     valence_sign,
 )
 from mika.faculties.memory.speakers import mention_scope, scope_of
-from mika.faculties.memory.tables import batches, handle_key
+from mika.faculties.memory.tables import (
+    ITEM_COLUMNS,
+    batches,
+    handle_key,
+    item_columns,
+    testimony_columns,
+    testimony_of,
+)
 from mika.faculties.memory.veiled import Candidate, Veiled, asks_news, choose
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Audience, Frame
@@ -312,12 +320,6 @@ def about_any(keys: Sequence[str]) -> Any:
     """La condition « l'élément concerne l'une de ces clés » (``memory_about``, indexée par personne)."""
     ab = tb.about()
     return tb.items().c.id.in_(select(ab.c.item).where(ab.c.person.in_(sorted({handle_key(k) for k in keys}))))
-
-
-def item_columns() -> list[Any]:
-    """Les colonnes de ``memory_items`` dans l'ordre de ``ITEM_COLUMNS`` (ce que lit ``Item.of``)."""
-    t = tb.items()
-    return [t.c[n] for n in ITEM_COLUMNS]
 
 
 def about_us(text: str) -> bool:

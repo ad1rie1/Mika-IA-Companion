@@ -26,7 +26,6 @@ from mika.faculties.memory import tables as tb
 from mika.faculties.memory.archive import LifeArchive
 from mika.faculties.memory.night import joinable_pairs
 from mika.faculties.memory.projections import (
-    ITEM_COLUMNS,
     RETIRED_VIEWS,
     Chunks,
     ExtractionQueue,
@@ -34,6 +33,7 @@ from mika.faculties.memory.projections import (
     Readings,
     Told,
 )
+from mika.faculties.memory.tables import ITEM_COLUMNS
 from mika.kernel.clock import DAY
 from mika.kernel.events import Content, VoiceProvenance
 from mika.ports.sql import HANDLE_MAX, PROJECTIONS, Key, create_view

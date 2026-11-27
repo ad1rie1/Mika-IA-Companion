@@ -16,8 +16,7 @@ from mika.contracts import memory as c
 from mika.contracts import runtime as rt
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.faculty import MEMORY, MemoryState
-from mika.faculties.memory.projections import ITEM_COLUMNS
-from mika.faculties.memory.tables import batches, keys_of
+from mika.faculties.memory.tables import ITEM_COLUMNS, batches, keys_of
 from mika.kernel.clock import MINUTE
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
