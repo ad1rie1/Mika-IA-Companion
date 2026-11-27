@@ -171,7 +171,7 @@ async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
     if args.status == c.HONORED and promise.due is not None and kept_too_early(promise, ctx.frame.now, ctx.frame):
         # la règle de la consolidation (ADR 0052) : la veille, « je te le rappellerai » n'est pas la tenir
         return phrase("memory.tools.promise_done.too_early", when=when_words(promise.due, ctx.frame))
-    await ctx.emit(c.PROMISE_RESOLVED.draft(promise=args.promise, status=args.status, by="tool"))
+    await ctx.emit(c.PROMISE_RESOLVED.draft(promise=args.promise, status=args.status, by=c.TOOL_BY))
     if args.status == c.HONORED:
         return phrase("memory.tools.promise_done.honored")
     return phrase("memory.tools.promise_done.dropped")

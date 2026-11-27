@@ -94,6 +94,11 @@ REMINDER_BY = "rappel"
 #: relecture n'a pas vu (ADR 0230) — une correction, pas un moment de sa vie : ni « laissée filer », ni émotion, ni
 #: leçon sur qui annonce
 OPERATOR_BY = "opératrice"
+#: qui règle une promesse qu'elle dit tenue ou abandonnée en appelant son outil (``memory_promise_done``)
+TOOL_BY = "tool"
+#: qui règle une promesse que la relecture d'une conversation dit tenue ou abandonnée (``kept.py``) : le défaut de
+#: ``PromiseResolved.by``
+CONSOLIDATION_BY = "consolidation"
 
 #: À partir de cette importance, un moment de la vie de quelqu'un compte (un entretien, un examen, un départ, une
 #: opération) : envers une amie, c'est la première chose qu'on demande après. En dessous (un rendez-vous de
@@ -435,7 +440,7 @@ class PromiseNoticed(Payload):
 class PromiseResolved(Payload):
     promise: int
     status: str  # HONORED | DROPPED
-    by: str = "consolidation"
+    by: str = CONSOLIDATION_BY
 
 
 class EventNoted(Payload):
