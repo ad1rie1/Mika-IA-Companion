@@ -67,7 +67,7 @@ from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY
-from mika.faculties.memory.knowledge import Testimony, pooled
+from mika.faculties.memory.knowledge import pooled
 from mika.faculties.memory.tables import (
     DEFERRED_TABLE,
     EMOTION,
@@ -75,6 +75,7 @@ from mika.faculties.memory.tables import (
     READING_COLUMNS,
     READINGS_TABLE,
     TESTIMONY_COLUMNS,
+    Testimony,
     about,
     batches,
     changes,

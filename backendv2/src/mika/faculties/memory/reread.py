@@ -40,11 +40,12 @@ from mika.faculties.memory import tables as tb
 from mika.faculties.memory.extraction import Lenient
 from mika.faculties.memory.faculty import MEMORY, MemoryState, over
 from mika.faculties.memory.hearing import items_by_id, names_of, verdict_of
-from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
+from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, judge
 from mika.faculties.memory.life import resolution
 from mika.faculties.memory.life_archive import decode
 from mika.faculties.memory.params import MemoryParams, params
 from mika.faculties.memory.salience import Item, age_words
+from mika.faculties.memory.tables import Testimony
 from mika.faculties.memory.testimonies import target_of, testimonies_of, twin_of
 from mika.kernel.clock import DAY, local_date_of_night
 from mika.kernel.events import Content, Draft

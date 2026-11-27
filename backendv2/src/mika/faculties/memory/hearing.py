@@ -30,9 +30,16 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.delicate import sensitivity_of
-from mika.faculties.memory.knowledge import Testimony, pooled
+from mika.faculties.memory.knowledge import pooled
 from mika.faculties.memory.salience import Item
-from mika.faculties.memory.tables import ITEM_COLUMNS, batches, item_columns, testimony_columns, testimony_of
+from mika.faculties.memory.tables import (
+    ITEM_COLUMNS,
+    Testimony,
+    batches,
+    item_columns,
+    testimony_columns,
+    testimony_of,
+)
 from mika.kernel.frame import Audience, Frame
 from mika.vocab.people import named_label, phone_label, read_source
 from mika.vocab.privacy import Sensitivity, Verdict, admissible

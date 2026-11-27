@@ -20,7 +20,7 @@ son statut, suffit à ne relire que ses quasi-doublons.
 la nuit, l'index, la console, ce que le code garde d'une relecture — comme pour la projection qui l'écrit
 (``projections.py``) : les colonnes d'un élément (``ITEM_COLUMNS``, ``item_columns`` ; la forme lue est
 ``salience.Item``), celles d'un témoignage et sa forme lue (``TESTIMONY_COLUMNS``, ``testimony_columns``,
-``testimony_of`` : un ``knowledge.Testimony``), celles d'une lecture (``READING_COLUMNS``), une liste de clés
+``testimony_of`` : un ``Testimony``, déclaré ici), celles d'une lecture (``READING_COLUMNS``), une liste de clés
 (``keys_of``) et l'empreinte d'un texte (``fingerprint``). On les lit ici, jamais par l'écrivain.
 """
 
@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
@@ -35,7 +36,6 @@ from sqlalchemy import BigInteger, Column, Double, Index, PrimaryKeyConstraint, 
 from sqlalchemy.exc import DBAPIError
 
 from mika.contracts import memory as c
-from mika.faculties.memory.knowledge import Testimony
 from mika.kernel.codec import digest
 from mika.ports.paging import fold_text
 from mika.ports.sql import HANDLE_MAX, Key, LongText, fit, projection_table
@@ -273,6 +273,29 @@ def testimonies(sfx: str = "") -> Table:
         _int("first_hand", default=0),
         PrimaryKeyConstraint("item", "seq", name=f"{name}_pk"),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Testimony:
+    seq: int
+    told_by: tuple[str, ...]
+    heard_by: tuple[str, ...]
+    sensitivity: int
+    secret: bool
+    confidence: float
+    informants: tuple[str, ...] = ()
+    origin: str = c.TOLD
+    at: int = 0
+    between_us: bool = False
+    #: un témoignage d'avant (un ancien renforcement) : la confiance, jamais la diffusion
+    speaks: bool = True
+    #: de première main : la personne concernée qui parle d'elle-même, ou un témoin qui l'a vu (ADR 0081)
+    first_hand: bool = False
+
+    @property
+    def informant(self) -> str:
+        """Qui le lui a appris (``""`` : elle-même, ou personne de nommé)."""
+        return ",".join(sorted(self.informants or self.told_by))
 
 
 def testimony_of(row: Sequence[Any]) -> Testimony:

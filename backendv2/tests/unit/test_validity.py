@@ -16,7 +16,6 @@ from mika.contracts import attention as attention_c
 from mika.contracts import memory as mc
 from mika.faculties.attention.faculty import AttentionParams, AttentionState, _revised
 from mika.faculties.memory import kept
-from mika.faculties.memory import knowledge as kn
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryState
@@ -25,6 +24,7 @@ from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, judge
 from mika.faculties.memory.lines import contested_line
 from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.speakers import People
+from mika.faculties.memory.tables import Testimony
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
 from mika.vocab.privacy import Sensitivity
@@ -66,10 +66,10 @@ def _belief(out):
 
 
 def test_judge_ranks_who_speaks():
-    told = kn.Testimony(1, (BOB,), (BOB,), 2, False, 0.8, origin="told")
-    subject = kn.Testimony(2, (ALICE,), (ALICE,), 2, False, 0.8, origin="told", first_hand=True)
-    other = kn.Testimony(3, (CAROL,), (CAROL,), 2, False, 0.8, origin="told")
-    again = kn.Testimony(4, (BOB,), (BOB,), 2, False, 0.8, origin="told")
+    told = Testimony(1, (BOB,), (BOB,), 2, False, 0.8, origin="told")
+    subject = Testimony(2, (ALICE,), (ALICE,), 2, False, 0.8, origin="told", first_hand=True)
+    other = Testimony(3, (CAROL,), (CAROL,), 2, False, 0.8, origin="told")
+    again = Testimony(4, (BOB,), (BOB,), 2, False, 0.8, origin="told")
     assert judge([told], other) == CONTEST  # un autre, pas plus sûr : elle doute
     assert judge([told], subject) == SUPERSEDE  # la personne concernée : elle la croit
     assert judge([told], again) == SUPERSEDE  # le même qui se corrige

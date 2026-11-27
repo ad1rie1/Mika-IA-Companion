@@ -1,7 +1,7 @@
 """Une proposition et ses témoignages (ADR 0080) — fonctions pures.
 
 Ce qu'elle croit est une **proposition** (une ligne de ``memory_items``) ; chaque façon dont elle l'a apprise est un
-**témoignage** (``memory_testimonies``) : qui le lui a dit (ou elle-même : ``told_by`` vide), qui l'a entendu, à quel
+**témoignage** (``memory_testimonies`` ; sa forme lue, ``tables.Testimony``) : qui le lui a dit (ou elle-même : ``told_by`` vide), qui l'a entendu, à quel
 point c'est sensible, si on lui a demandé de le garder pour soi, et ce que ce témoin y croit.
 
 - **La confiance se met en commun** sur des témoins distincts : la meilleure confiance de chacun, puis celle du plus
@@ -19,38 +19,15 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 from mika.contracts import memory as memory_c
+from mika.faculties.memory.tables import Testimony
 
 #: ce qu'un témoin de plus apporte, en part de ses log-cotes : deux témoins à 0,8 font ~0,89 (un ancien renfort
 #: corroboré ajoutait 0,1)
 CORROBORATION_WEIGHT = 0.5
 #: aucune croyance n'est jamais tout à fait sûre
 CEILING = 0.95
-
-
-@dataclass(frozen=True, slots=True)
-class Testimony:
-    seq: int
-    told_by: tuple[str, ...]
-    heard_by: tuple[str, ...]
-    sensitivity: int
-    secret: bool
-    confidence: float
-    informants: tuple[str, ...] = ()
-    origin: str = memory_c.TOLD
-    at: int = 0
-    between_us: bool = False
-    #: un témoignage d'avant (un ancien renforcement) : la confiance, jamais la diffusion
-    speaks: bool = True
-    #: de première main : la personne concernée qui parle d'elle-même, ou un témoin qui l'a vu (ADR 0081)
-    first_hand: bool = False
-
-    @property
-    def informant(self) -> str:
-        """Qui le lui a appris (``""`` : elle-même, ou personne de nommé)."""
-        return ",".join(sorted(self.informants or self.told_by))
 
 
 def _logit(p: float) -> float:

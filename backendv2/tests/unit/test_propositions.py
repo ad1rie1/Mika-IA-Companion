@@ -14,7 +14,6 @@ from __future__ import annotations
 from mika.contracts import memory as mc
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import kept
-from mika.faculties.memory import knowledge as kn
 from mika.faculties.memory.conversation import Conversation
 from mika.faculties.memory.extraction import Extraction, XCroyance
 from mika.faculties.memory.faculty import MemoryState
@@ -24,7 +23,7 @@ from mika.faculties.memory.night import joinable_pairs
 from mika.faculties.memory.params import MemoryParams
 from mika.faculties.memory.projections import Items
 from mika.faculties.memory.speakers import People
-from mika.faculties.memory.tables import TESTIMONIES_TABLE
+from mika.faculties.memory.tables import TESTIMONIES_TABLE, Testimony
 from mika.faculties.social.faculty import SocialState, _knit
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.events import Content
@@ -86,9 +85,9 @@ def test_the_same_teller_repeating_adds_no_confidence():
     assert rows[0][0] == 2  # deux témoins, deux témoignages
     db.conn.close()
     # … et la mise en commun ne compte qu'une fois chaque témoin, même noté deux fois
-    twice = [kn.Testimony(seq, (CAROL,), (CAROL,), 1, False, 0.8) for seq in (1, 2)]
+    twice = [Testimony(seq, (CAROL,), (CAROL,), 1, False, 0.8) for seq in (1, 2)]
     assert abs(pooled(twice) - 0.8) < 1e-9
-    assert pooled([*twice, kn.Testimony(3, (BOB,), (BOB,), 1, False, 0.8)]) > 0.85
+    assert pooled([*twice, Testimony(3, (BOB,), (BOB,), 1, False, 0.8)]) > 0.85
 
 
 # ── Là où un témoignage le permet ───────────────────────────────────────────

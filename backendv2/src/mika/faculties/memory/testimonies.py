@@ -19,8 +19,7 @@ from sqlalchemy import select
 
 from mika.contracts import memory as c
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.knowledge import Testimony
-from mika.faculties.memory.tables import fingerprint, keys_json, testimony_columns, testimony_of
+from mika.faculties.memory.tables import Testimony, fingerprint, keys_json, testimony_columns, testimony_of
 from mika.vocab.words import same_words
 
 

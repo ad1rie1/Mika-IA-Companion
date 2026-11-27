@@ -32,7 +32,7 @@ from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.conversation import Conversation, Line, pieces_of
 from mika.faculties.memory.faculty import MemoryState, day_of, occurrence
-from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
+from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, judge
 from mika.faculties.memory.life import resolution, same_day, same_task
 from mika.faculties.memory.life_archive import for_people
 from mika.faculties.memory.params import MemoryParams
@@ -40,7 +40,7 @@ from mika.faculties.memory.promises import kept_too_early, reminders_of
 from mika.faculties.memory.retelling import veiled_refusal
 from mika.faculties.memory.shown import Forecast, Shown
 from mika.faculties.memory.speakers import People
-from mika.faculties.memory.tables import batches, fingerprint, handle_key, keys_of
+from mika.faculties.memory.tables import Testimony, batches, fingerprint, handle_key, keys_of
 from mika.faculties.memory.testimonies import former_twin, head_of, target_of, testimonies_of, twin_of
 from mika.kernel.clock import DAY, MINUTE, instant
 from mika.kernel.events import Content, Draft
