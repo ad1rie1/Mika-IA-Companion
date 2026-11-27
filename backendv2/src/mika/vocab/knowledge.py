@@ -66,7 +66,7 @@ class Known:
 def lineage_of(item: int, about: tuple[str, ...], sensitivity: int, *, told_by: tuple[str, ...] = (),
                heard_by: tuple[str, ...] = (), secret: bool = False, holder: str | None = None,
                constraints: tuple[Restriction, ...] = (), internal_only: bool = False) -> Lineage:
-    """Ce qu'exige un élément pour se redire — la règle du rappel (``memory.recall.verdict_of``) : ce qu'elle ne
+    """Ce qu'exige un élément pour se redire — la règle de sa mémoire (``memory.hearing.verdict_of``) : ce qu'elle ne
     garde que pour elle, jamais ; ce qu'elle a repensé, ce que permettait chacune de ses sources ; le reste, ses
     personnes (le porteur d'un avis compris), qui le lui a confié et qui l'a entendu."""
     if internal_only:

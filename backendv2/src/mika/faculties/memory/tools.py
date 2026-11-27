@@ -3,7 +3,11 @@ dire qu'une promesse est tenue ou abandonnée.
 
 Relire ses promesses n'est pas un outil : elles sont déjà dans « ce que tu
 lui as promis » — un outil qui relit ce qui est sous ses yeux l'invite à dire
-« attends, je vérifie » au lieu de parler."""
+« attends, je vérifie » au lieu de parler.
+
+Ce que la recherche trouve passe le verdict de ``hearing.py`` devant qui
+demande, comme le rappel ; elle se classe comme lui et se dit avec les mots
+d'une ligne (``recall.py`` : ``relevance``, ``topic``, ``doubted``…)."""
 
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory import tables as tb
 from mika.faculties.memory.faculty import MEMORY, params
+from mika.faculties.memory.hearing import felt_here, items_by_id, names_of, verdict_of
 from mika.faculties.memory.life import kept_too_early
 from mika.faculties.memory.recall import (
     about_us,
@@ -23,13 +28,9 @@ from mika.faculties.memory.recall import (
     concerned_name,
     doubted,
     feelings,
-    felt_here,
-    items_by_id,
     knowledge_label,
-    names_of,
     relevance,
     topic,
-    verdict_of,
     when_words,
 )
 from mika.faculties.memory.salience import age_words, tag

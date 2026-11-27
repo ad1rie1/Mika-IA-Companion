@@ -156,7 +156,7 @@ async def test_only_in_reply_and_only_when_asked_or_relevant():
 
 
 async def test_what_could_be_said_by_name_is_unchanged():
-    from mika.faculties.memory.recall import items_by_id, verdict_of
+    from mika.faculties.memory.hearing import items_by_id, verdict_of
 
     db = alices_life()
     ask(db, INES)

@@ -5,8 +5,9 @@ qu'elle sait (``memories``, ``shared_memories``), les gens qu'on nomme (``acquai
 promesses, la vie de la personne en face (``life``), ce qui vient (``ahead``), ce qu'elle a déjà dit d'elle
 (``self_said``). L'ordre où elle les lit est déclaré ailleurs (``READING``, ``app/composition.py``, ADR 0151).
 
-Ce que l'enrichisseur ou les outils lisent aussi (``when_words``, ``knowledge_label``, ``happens_today``…) reste dans
-``recall.py`` : ce module l'importe de là, jamais l'inverse.
+Le nom d'une clé (``names_of``) vient de ``hearing.py``, où vit le verdict. Ce que l'enrichisseur ou les outils lisent
+aussi (``when_words``, ``knowledge_label``, ``happens_today``…) reste dans ``recall.py`` : ce module l'importe de là,
+jamais l'inverse.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from mika.contracts import memory as c
 from mika.contracts import social as social_c
 from mika.faculties.memory import timespan
 from mika.faculties.memory.faculty import MEMORY, MemoryState, params
+from mika.faculties.memory.hearing import names_of
 from mika.faculties.memory.likelihood import cautious, likely_words, nature_of
 from mika.faculties.memory.recall import (
     OWNER,
@@ -27,7 +29,6 @@ from mika.faculties.memory.recall import (
     followed_lately,
     happens_today,
     knowledge_label,
-    names_of,
     when_words,
 )
 from mika.faculties.memory.salience import Item, age_words

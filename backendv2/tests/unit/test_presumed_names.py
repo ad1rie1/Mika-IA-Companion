@@ -24,14 +24,9 @@ from mika.faculties.memory.consolidation import Consolidate
 from mika.faculties.memory.conversation import Conversation, Line, Speaker
 from mika.faculties.memory.delicate import sensitivity_of
 from mika.faculties.memory.extraction import CONFIDENCE_CAP, Extraction, XCroyance, born_confidence
+from mika.faculties.memory.hearing import canon, items_by_id, presumed_of
 from mika.faculties.memory.projections import Items
-from mika.faculties.memory.recall import (
-    canon,
-    doubted,
-    items_by_id,
-    named_people,
-    presumed_of,
-)
+from mika.faculties.memory.recall import doubted, named_people
 from mika.faculties.memory.salience import admissible
 from mika.faculties.memory.shown import known_beliefs
 from mika.faculties.memory.speakers import People, mention_scope

@@ -10,8 +10,9 @@ from types import SimpleNamespace as NS
 from mika.contracts import attention as ac
 from mika.contracts import memory as mc
 from mika.faculties.memory.faculty import REFLECTION_MARK, MemoryState, _retained
+from mika.faculties.memory.hearing import verdict_of
 from mika.faculties.memory.night import Reflect, Reflection
-from mika.faculties.memory.recall import Recalled, _add_recalled, verdict_of
+from mika.faculties.memory.recall import Recalled, _add_recalled
 from mika.faculties.memory.salience import Item, Verdict
 from mika.faculties.social.profile import grounded
 from mika.kernel.clock import DAY
@@ -51,7 +52,7 @@ def test_reflection_inherits_its_confidants_permission(tmp_path):
         d = saved[0].data
         assert not d.internal_only and d.constraints and not d.told_by
         saved_result = await kernel.mind.append(saved, emitter='memory', origin=Origin.PROCESS, correlation='review')
-        from mika.faculties.memory.recall import items_by_id
+        from mika.faculties.memory.hearing import items_by_id
         item = items_by_id(kernel.mind.store, saved_result.seqs)[saved_result.seqs[0]]
         aud = Audience(public=False, private_ok=True, level=3)
         assert not verdict_of(kernel.mind.frame(), item, 'user_2', aud, {}).ok
