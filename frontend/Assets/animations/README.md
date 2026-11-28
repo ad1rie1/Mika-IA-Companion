@@ -1,0 +1,87 @@
+# Animations
+
+Les clips que jouait le client web 3D, retiré par l'ADR 0319. Ils restent ici comme sources de l'atelier
+d'animation : `../blender/atelier_mika.py` et `../blender/atelier_audit.py` lisent `manifest.json` et les FBX de
+chaque catégorie. `atelier/` est un lien vers `../atelier/motions/`, les mouvements faits sur le squelette de Mika
+(`<nom>.json.gz`, les os seuls, versionnés), dont `../blender/portraits.py` fige une image par émotion.
+
+## Mixamo — pack de départ (l'ancienne source)
+
+Les FBX de `idle/`, `talk/` et `gesture/` viennent de Mixamo (compte Adobe), téléchargés à la main. Pour en
+refaire un, garder les mêmes réglages et le même nom de fichier.
+
+## Réglages d'export Mixamo (IDENTIQUES pour tous les clips)
+
+| Réglage | Valeur |
+|---|---|
+| Format | **FBX Binary (.fbx)** |
+| Skin | **Without Skin** (squelette seul, ~0.5–2 MB au lieu de 5–15 MB) |
+| Frames per Second | **30** |
+| Keyframe Reduction | **none** |
+| In Place | coché **uniquement** pour les clips de locomotion (v2) |
+
+Après téléchargement, **renomme le fichier** exactement comme dans la
+colonne « Fichier » et dépose-le dans le bon sous-dossier.
+
+## Le pack (~19 clips)
+
+Recherche le nom de la colonne « Recherche Mixamo » ; si Mixamo propose
+plusieurs variantes, prends celle qui te plaît — le manifest ne dépend
+que du nom de fichier.
+
+| # | Recherche Mixamo | Fichier | Usage |
+|---|---|---|---|
+| 1 | Breathing Idle | `idle/idle_breathing.fbx` | idle par défaut + sommeil (ralenti) |
+| 2 | Happy Idle | `idle/idle_happy.fbx` | variation d'idle joyeuse |
+| 3 | Bored | `idle/idle_bored.fbx` | posture « s'ennuie » (émotion bored) |
+| 4 | Sad Idle | `idle/idle_sad.fbx` | posture triste (sad/lonely/melancholic) |
+| 5 | Nervously Look Around | `idle/idle_nervous.fbx` | posture anxieuse (anxious) |
+| 6 | Talking | `talk/talk_main.fbx` | gestuelle de conversation |
+| 6b | Talking (variante 2) | `talk/talk_variant_b.fbx` | rotation de conversation (optionnel) |
+| 6c | Talking (variante 3) | `talk/talk_variant_c.fbx` | rotation de conversation (optionnel) |
+| 7 | Standing Arguing | `talk/talk_heated.fbx` | variante animée de conversation |
+| 8 | Waving | `gesture/gesture_wave.fbx` | salut (manuel/debug, futur greeting) |
+| 9 | Laughing | `gesture/gesture_laugh.fbx` | amused/playful + token [LAUGH] |
+| 10 | Thinking | `gesture/gesture_think.fbx` | thinking/confused (tenu ~4 s) |
+| 11 | Surprised | `gesture/gesture_surprised.fbx` | surprised |
+| 12 | Bashful | `gesture/gesture_bashful.fbx` | embarrassed |
+| 13 | Angry Gesture | `gesture/gesture_angry.fbx` | angry |
+| 14 | Head Nod Yes | `gesture/gesture_nod.fbx` | grateful (acquiescement) |
+| 15 | Shaking Head No | `gesture/gesture_headshake.fbx` | frustrated/disgusted |
+| 16 | Excited | `gesture/gesture_excited.fbx` | excited/happy fort |
+| 17 | Relieved Sigh | `gesture/gesture_sigh.fbx` | relieved + token [SIGH] |
+| 18 | Yawn | `gesture/gesture_yawn.fbx` | bâillement avant de s'endormir (bord éveil → sommeil) |
+| 19 | Stretching | `gesture/gesture_stretch.fbx` | étirement au réveil (bord sommeil → éveil, sauf si elle répond déjà) |
+
+### Réservé v2 (locomotion — ne pas télécharger maintenant)
+
+Walking, Left Turn, Right Turn (**In Place** coché), Sleeping Idle
+(couchée — quand elle pourra rejoindre le lit). Dossier `locomotion/`.
+
+## Astuce : animations ajustées à Perula
+
+Par défaut Mixamo anime son mannequin standard et le retarget adapte les
+rotations — ça marche bien. Pour des clips encore mieux ajustés à ses
+proportions (moins de clipping poitrine/jupe), uploade une fois
+`PerulaVRM_v1.0.6.2.zip → PerulaVRM v1.0.6.2/FBX/Perula.fbx` comme
+personnage sur Mixamo, puis télécharge les clips depuis ce personnage.
+
+## manifest.json — champs utiles
+
+- `category`: `idle` | `talk` | `gesture` | `sleep` | `locomotion`
+- `weight`: probabilité de tirage dans la rotation (**0 = jamais tiré
+  spontanément** — les postures émotionnelles idle_sad/idle_bored/
+  idle_nervous ne s'activent que via l'émotion)
+- `hold`: [min, max] secondes avant de changer de variation
+- `loop`: `true` sur un geste = tenu quelques secondes puis retour
+  (ex. gesture_think) au lieu d'une lecture unique
+- `hands`: formes de doigts `[gauche, droite]` (relaxed/open/tucked/loose/clasp)
+- `fadeIn`/`fadeOut`: durées de crossfade du geste
+- `stripRootXZ`: `true` pour forcer un clip de locomotion « in place »
+- `arousal` / `valence` (−1…1, optionnels) : l'affect que le clip exprime,
+  confronté à l'émotion courante au moment du tirage (`animation/affect.ts`).
+  `talk_heated` déclare `arousal: 0.8` — favorisé pour une réponse en colère,
+  rare pour une réponse rêveuse ; `idle_happy` déclare `valence: 0.7` et
+  n'est presque plus tiré quand elle est triste. Un clip qui ne déclare
+  rien garde son `weight` tel quel. Le tempo du clip de base suit aussi
+  l'arousal de l'émotion (±15 % max), et la durée de `hold` avec lui.

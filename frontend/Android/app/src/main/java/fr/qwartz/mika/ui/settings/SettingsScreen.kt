@@ -120,7 +120,7 @@ class SettingsHomeViewModel(graph: AppGraph) : SettingsModel(graph) {
 /**
  * Paramètres, la rubrique du tiroir (ADR 0235, la maquette `ecrans/plus.js`) : en groupes, « Ton compte », « Ce que Mika
  * touche pour toi » (boîtes, comptes Teams, téléphones, partages, services MCP : l'API par personne, comme le
- * frontendv2), puis « Ce téléphone » (ce qu'il règle pour lui seul), et « Se déconnecter ». Une ligne, une page.
+ * frontend/Web), puis « Ce téléphone » (ce qu'il règle pour lui seul), et « Se déconnecter ». Une ligne, une page.
  */
 @Composable
 fun SettingsScreen(graph: AppGraph) {

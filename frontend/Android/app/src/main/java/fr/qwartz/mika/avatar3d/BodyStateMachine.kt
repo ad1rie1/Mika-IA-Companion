@@ -3,7 +3,7 @@ package fr.qwartz.mika.avatar3d
 import kotlin.random.Random
 
 /**
- * La machine à états du corps — `frontend/Web/src/vtuber/animation/AnimationStateMachine.ts`, portée sur
+ * La machine à états du corps — `vtuber/animation/AnimationStateMachine.ts` de l'ancien client 3D (tag `avant-menage`), portée sur
  * [AvatarAnimator] (sans la marche ni les postures assise/couchée : l'app n'a pas de pièce).
  *
  * États : attente (un tirage pondéré parmi les clips « idle », chacun tenu un moment), parole (le même tirage

@@ -227,7 +227,7 @@ fun rememberMikaStatus(): String {
     val typing by graph.chatEngine.typing.collectAsStateWithLifecycle()
     val mind by graph.mind.state.collectAsStateWithLifecycle()
     val now = rememberNow()
-    return remember(link, typing, mind, now) { StatusLine.of(link, typing, mind, graph.clock.elapsedMs(), graph.clock.wallMs()) }
+    return remember(link, typing, mind, now) { StatusLine.of(link, typing, mind, graph.clock.elapsedMs()) }
 }
 
 /** Un écran de rubrique, dans son cadre : sa barre du haut, puis son contenu. */

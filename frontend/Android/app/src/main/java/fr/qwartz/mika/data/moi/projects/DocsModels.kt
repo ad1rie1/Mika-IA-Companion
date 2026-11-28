@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
  * La documentation d'un projet dans l'API par personne (`backendv2/docs/protocole-moi.md` § 11, « La documentation d'un
  * projet » ; ADR 0289) et ses décisions techniques (« Gérer un projet » ; ADR 0290). Un espace à part de son dépôt : des
  * pages en Markdown rangées en dossiers, leurs versions, des images. Le modèle est le client web
- * (`frontendv2/src/api/projectDocs.ts`).
+ * (`frontend/Web/src/api/projectDocs.ts`).
  *
  * Ce que le serveur dit et que l'app ne refait pas : `rights.write` et `can.write` (elle peut l'écrire), le titre d'une
  * page, ses dossiers, qui a écrit (`author`, selon la règle des noms ; `via_label`), les bornes (`limits`), ce qu'une

@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Le direct (ADR 0308) : ce qui change ce que montrent les routes de `/api/moi` est poussé sur la connexion du chat
  * (`/ws`) que l'app tient déjà, en une trame `changed` qui dit **quoi** a changé, jamais le contenu ; l'écran relit la
  * route qu'il montre. Le contrat — les sujets, leurs clés, ce qu'on relit : `backendv2/docs/protocole-moi.md`, § 2 bis.
- * Porté de `frontendv2/src/live/live.ts` ; du Kotlin pur, testé sur la JVM.
+ * Porté de `frontend/Web/src/live/live.ts` ; du Kotlin pur, testé sur la JVM.
  */
 
 /**

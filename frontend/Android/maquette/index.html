@@ -22,7 +22,7 @@
 </head>
 <body>
 
-<!-- Les icônes : celles du frontendv2 (un trait de 1,7 px sur une grille de 24), et quelques-unes d'Android. -->
+<!-- Les icônes : celles du client web (un trait de 1,7 px sur une grille de 24), et quelques-unes d'Android. -->
 <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
   <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L4 20l1.3-4.4A8 8 0 1 1 20.5 11.5Z"/></symbol>
   <symbol id="i-tools" viewBox="0 0 24 24"><path d="M14.6 6.2a4 4 0 0 0-5.3 5.2L3.5 17.2a1.9 1.9 0 0 0 2.7 2.7l5.8-5.8a4 4 0 0 0 5.2-5.3l-2.4 2.4-2.3-.4-.4-2.3Z"/></symbol>
@@ -108,7 +108,7 @@
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
   <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.5 21V4M5.5 4.5h11l-2 4 2 4h-11"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><circle cx="17.5" cy="5.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17.5" cy="18.5" r="2.5"/><path d="m8.7 10.8 6.6-4M8.7 13.2l6.6 4"/></symbol>
-  <!-- L'écran Projets (ADR 0296) : les icônes de sa maquette web (`frontendv2/src/shell/icons.ts`, `p2-*`, play, pause), pour l'app. -->
+  <!-- L'écran Projets (ADR 0296) : les icônes de sa maquette web (`frontend/Web/src/shell/icons.ts`, `p2-*`, play, pause), pour l'app. -->
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M7.5 5v14l11-7Z"/></symbol>
   <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5.5v13M15 5.5v13"/></symbol>
   <symbol id="i-branch" viewBox="0 0 24 24"><path d="M6.5 4v10.5"/><circle cx="17.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="17.5" r="2.5"/><path d="M17.5 9a8.5 8.5 0 0 1-8.5 8.5"/></symbol>
@@ -173,13 +173,13 @@
   </div>
 </div>
 
-<!-- Les personnes, l'état de Mika et ses portraits : ceux de la maquette du frontendv2, lus là où ils sont. -->
-<script src="../../../frontendv2/maquette/donnees.js"></script>
-<script src="../../../frontendv2/maquette/ecrans/carte-fond.js"></script>
+<!-- Les personnes, l'état de Mika et ses portraits : ceux de la maquette du client web, lus là où ils sont. -->
+<script src="../../../frontend/Web/maquette/donnees.js"></script>
+<script src="../../../frontend/Web/maquette/ecrans/carte-fond.js"></script>
 <script src="maquette.js"></script>
 <!-- L'Agenda (proposé) : ses données sont celles de la maquette web ; le crochet garde les vues des écrans validés,
      pour que l'Agenda se pose par-dessus Paramètres, Outils et le chat sans les retoucher. -->
-<script src="../../../frontendv2/maquette/ecrans/agenda-donnees.js"></script>
+<script src="../../../frontend/Web/maquette/ecrans/agenda-donnees.js"></script>
 <script src="ecrans/agenda-crochet.js"></script>
 <script src="ecrans/chat.js"></script>
 <script src="ecrans/chat-effort.js"></script>

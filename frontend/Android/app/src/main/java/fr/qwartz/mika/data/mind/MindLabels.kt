@@ -3,7 +3,7 @@ package fr.qwartz.mika.data.mind
 /**
  * Tous les libellés français de son état. Les noms restent anglais sur le fil (ceux de
  * `vocab/affect.py`) ; on ne les traduit qu'ici, à un seul endroit — repris de
- * `frontend/Web/src/types/emotions.ts` et `ui/InnerLifePanel.ts`.
+ * `frontend/Web/src/types/emotions.ts` et de `ui/InnerLifePanel.ts` de l'ancien client 3D (tag `avant-menage`).
  */
 object MindLabels {
 
@@ -69,38 +69,6 @@ object MindLabels {
         SleepPhases.REM -> "sommeil paradoxal (elle rêve)"
         SleepPhases.DEEP -> "sommeil profond"
         else -> "éveillée"
-    }
-
-    /** Où elle est dans sa chambre (`contracts/place.py`). */
-    val PLACES: Map<String, String> = linkedMapOf(
-        "center" to "au milieu de sa chambre",
-        "window" to "à la fenêtre",
-        "desk" to "à son bureau",
-        "bed" to "sur son lit",
-        "bookshelf" to "près de sa bibliothèque",
-        "door" to "près de la porte",
-    )
-
-    fun place(place: String?): String? = PLACES[place.orEmpty()]
-
-    /** Ce qu'elle fait, conjugué pour la ligne d'état (les occupations de `faculties/world/chambre.json`). */
-    val ACTIVITIES: Map<String, String> = linkedMapOf(
-        "draw" to "dessine",
-        "work" to "travaille",
-        "browse_books" to "feuillette un livre",
-        "water_plant" to "arrose sa plante",
-        "look_outside" to "regarde dehors",
-    )
-
-    /**
-     * « dessine » ; une occupation que l'app ne connaît pas (un objet ajouté à sa chambre) se dit avec le
-     * libellé du serveur, « en train de jongler » ; sans libellé, rien.
-     */
-    fun activity(name: String?, label: String?): String? {
-        ACTIVITIES[name.orEmpty()]?.let { return it }
-        val raw = label.orEmpty().trim().takeIf { it.isNotEmpty() } ?: return null
-        val of = if (raw.first().lowercaseChar() in "aeiouyàâéèêëîïôöùûü") "d'" else "de "
-        return "en train $of$raw"
     }
 
     /** Le moment de la journée (InnerLifePanel.ts:30-38). */

@@ -34,7 +34,7 @@ private const val EVENTS_TYPE_MS = 400L
 private const val EVENTS_MOVE_MS = 600L
 
 /**
- * Carte › Événements (ADR 0259), porté de `frontendv2/src/screens/carte/events.ts` sans changer ses règles : ce qui se
+ * Carte › Événements (ADR 0259), porté de `frontend/Web/src/screens/carte/events.ts` sans changer ses règles : ce qui se
  * passe autour de toi (ta dernière position, celle de ton téléphone ; à 20 km, le rayon du serveur) ou dans la zone de
  * la carte (recherchée de nouveau quand on la déplace) — quand (aujourd'hui, ce week-end, cette semaine par défaut, des
  * dates), quoi (les thèmes du serveur, « Gratuit »), un texte —, ce que la base sait de la zone ([coverage]), le choisi.

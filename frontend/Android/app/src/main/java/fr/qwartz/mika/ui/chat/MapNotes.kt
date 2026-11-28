@@ -15,7 +15,7 @@ data class MapNote(val kind: String, val text: String, val at: Long, val ref: St
 }
 
 /**
- * Lire et valider les notes de carte d'un message, portées de `frontendv2/src/map/notes.ts::mapNotes` sans changer ses
+ * Lire et valider les notes de carte d'un message, portées de `frontend/Web/src/map/notes.ts::mapNotes` sans changer ses
  * règles : les trois sortes seulement (la bulle 📍, `location`, reste à [ChatItems]) ; une sorte inconnue s'ignore ; une
  * note vidée (un regard oublié, un voyage supprimé : `text` vide, pas de `ref`) ne montre rien ; `ref` en chiffres ;
  * le texte sur une ligne, 300 caractères au plus ; sans doublon (même sorte, même `ref`) ; six au plus.

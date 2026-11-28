@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
-/** Le tracé d'un itinéraire (polyline à six décimales) : les mêmes cas que `frontendv2/src/map/polyline.test.ts`. */
+/** Le tracé d'un itinéraire (polyline à six décimales) : les mêmes cas que `frontend/Web/src/map/polyline.test.ts`. */
 class PolylineTest {
     // Les mêmes points que `backendv2/tests/unit/test_maps_routing.py`, encodés par `mika.ports.maps.encode_polyline6`.
     private val shape = listOf(LatLon(45.899543, 6.128952), LatLon(45.8, 6.05), LatLon(45.564275, 5.91769))

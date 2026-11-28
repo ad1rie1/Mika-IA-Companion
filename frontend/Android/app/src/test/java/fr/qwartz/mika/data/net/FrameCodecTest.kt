@@ -112,7 +112,6 @@ class FrameCodecTest {
         val s = decode<ServerFrame.InnerStateUpdate>("inner_state_full.json").state
         assertEquals("awake", s.sleepPhase)
         assertEquals(0.734, s.energy!!, 1e-9)
-        assertEquals("desk", s.place)
         val circadian = s.circadian!!
         assertEquals("evening", circadian.phase)
         assertEquals(21.0, circadian.hour, 0.0)

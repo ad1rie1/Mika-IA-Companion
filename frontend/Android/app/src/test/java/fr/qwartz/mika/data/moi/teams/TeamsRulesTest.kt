@@ -12,7 +12,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * Les règles de Teams, portées du client web (`frontendv2/src/screens/teams/format.ts`, ses tests `teams.test.ts`) :
+ * Les règles de Teams, portées du client web (`frontend/Web/src/screens/teams/format.ts`, ses tests `teams.test.ts`) :
  * qui a écrit, l'état de ses réponses et de tes messages en attente, les jours et les mentions du fil, ce qui reste du
  * champ, ce qui empêche d'écrire ou de préremplir.
  */

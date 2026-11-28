@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonObject
  * Les formes de l'Agenda dans l'API par personne (`backendv2/docs/protocole-moi.md` § 13, ADR 0309) : ses agendas, une
  * période, une occurrence, une date de « L'agenda de Mika », ce que Mika propose, ses comptes, le tableau de droits
  * d'un agenda. Les instants sont en millisecondes (UTC) avec le nom de leur fuseau ; un champ absent prend son défaut.
- * Les mêmes que `frontendv2/src/api/agenda.ts`.
+ * Les mêmes que `frontend/Web/src/api/agenda.ts`.
  */
 
 /** Les sortes d'agenda : celui du système, ceux qu'on branche, et celui de Mika (sa mémoire). */

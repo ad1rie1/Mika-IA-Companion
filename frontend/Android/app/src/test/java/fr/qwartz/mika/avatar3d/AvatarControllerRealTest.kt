@@ -15,8 +15,8 @@ import kotlin.random.Random
  */
 class AvatarControllerRealTest {
     private val glb = File("src/main/assets/avatar3d/mika.glb")
-    private val motions = File("../../Unity/ArtSource/atelier/motions")
-    private val manifestFile = File("../../Web/public/animations/manifest.json")
+    private val motions = File("../../Assets/atelier/motions")
+    private val manifestFile = File("../../Assets/animations/manifest.json")
 
     private fun controller(): AvatarController {
         val rig = AvatarRig(VrmDocument.fromGlb(ByteBuffer.wrap(glb.readBytes())))

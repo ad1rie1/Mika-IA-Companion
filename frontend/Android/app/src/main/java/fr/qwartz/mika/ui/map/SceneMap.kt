@@ -37,7 +37,7 @@ import fr.qwartz.mika.ui.theme.mika
  * Une carte d'un écran (ADR 0193, 0194, 0235) : la vraie — le fond servi par ce serveur, MapLibre, et la scène de
  * l'écran par-dessus — quand le fond est prêt, qu'il couvre ce que la scène montre et qu'elle ne s'est pas refusée ici ;
  * sinon le plan dessiné ([plan], par défaut [ScenePlan]) et sa note, qui dit pourquoi. Le même cycle de vie pour la
- * Carte et la Position du Téléphone (`frontendv2/src/map/live.ts`) : ses tuiles en échec de suite, MapLibre qui ne se
+ * Carte et la Position du Téléphone (`frontend/Web/src/map/live.ts`) : ses tuiles en échec de suite, MapLibre qui ne se
  * charge pas ou un style qui ne se lit pas laissent le plan de **cette** carte ([refusal]), sans réessayer tant que
  * l'écran est là, jusqu'à un autre fond servi ; les autres cartes de la session n'en savent rien.
  *

@@ -8,7 +8,7 @@ import fr.qwartz.mika.data.net.ServerBase
 import okhttp3.HttpUrl
 
 /*
- * Les règles pures d'Outils, portées du client web (`frontendv2/src/screens/outils/matrix.ts`) sans les réinventer :
+ * Les règles pures d'Outils, portées du client web (`frontend/Web/src/screens/outils/matrix.ts`) sans les réinventer :
  * les mots d'une case et de ce qu'elle garde, le canal dont la colonne se lit sur un téléphone (ADR 0209 : l'app
  * Android d'abord) et ses moments, le nom d'un outil pour toi (ADR 0208), ses ressources et leurs groupes, le résumé
  * d'une ressource pour le canal choisi, ce qui décide d'une case, ce qu'une opératrice voit de plus, les lignes de

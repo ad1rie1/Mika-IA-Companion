@@ -10,7 +10,7 @@ import fr.qwartz.mika.data.moi.thousands
 import fr.qwartz.mika.data.moi.toFill
 
 /*
- * Les règles de Mail, pures (portées de `frontendv2/src/screens/mail/format.ts` et `markup.ts`, sans les réinventer) :
+ * Les règles de Mail, pures (portées de `frontend/Web/src/screens/mail/format.ts` et `markup.ts`, sans les réinventer) :
  * ce qu'un niveau de partage ouvre, le nom d'une boîte partagée, les vues de la liste, à qui répondre, ce qui peut
  * partir et ce qu'on peut joindre. Tout se teste sur la JVM.
  */

@@ -1,7 +1,7 @@
-# Maquette de l'app Android, avec ce que fait le frontendv2
+# Maquette de l'app Android, avec ce que fait le client web
 
 L'app Android d'aujourd'hui (la conversation, « Ce qu'elle fait », les paramètres) à laquelle s'ajoutent les écrans du
-frontendv2 : Mail, Teams, Carte, Téléphone, Outils, et les paramètres de la personne connectée. Elle sert à décider
+frontend/Web : Mail, Teams, Carte, Téléphone, Outils, et les paramètres de la personne connectée. Elle sert à décider
 de la place des boutons et des écrans **avant** d'écrire du Kotlin. Les données sont fictives et rien ne parle au
 moteur. **Validée le 2026-11-17, en variante « Tiroir »** (« en mode tiroir je préfère ») : c'est la navigation de
 l'app (ADR 0235). Les écarts de l'app avec elle, et pourquoi, sont dans `frontend/Android/README.md` (l'ADR 0233 l'emporte
@@ -21,7 +21,7 @@ ou forcé à un niveau) : pour toute la conversation, ou, en mode pro, pour le f
 Forcé, il se voit dans le champ, à côté de « Pro ». Routes : `#chat/effort`, `#chat/pro/effort`.
 
 **Validé le 2026-11-22** (« je valide ta maquette ») : les Contacts (ADR 0298), l'écran Contacts du web validé le même jour
-(`frontendv2/maquette/ecrans/contacts.js`) adapté au téléphone, dans `ecrans/contacts.js` (ses styles : la section
+(`frontend/Web/maquette/ecrans/contacts.js`) adapté au téléphone, dans `ecrans/contacts.js` (ses styles : la section
 « Contacts » de `maquette.css`). Il se pose par-dessus sans retoucher les écrans validés :
 
 - une rubrique « Contacts » dans le tiroir, après Téléphone (sous « Plus » dans la variante barre), et la ligne
@@ -42,8 +42,8 @@ refusé), `#contacts/lumen` (une organisation), `#contacts/claire/fait/1` et `#c
 ouvertes), `#mail/ecrire/a/<adresse>`, `#mail/ecrire/suggestions`.
 
 **Proposé le 2026-11-23, pas encore validé** : l'Agenda (`output/agenda/CONCEPTION.md`), l'écran Agenda de la maquette
-web (`frontendv2/maquette/ecrans/agenda*.js`) avec les codes d'un agenda de téléphone (Google Agenda, Samsung Calendar),
-sur les mêmes données fictives, lues dans `frontendv2/maquette/ecrans/agenda-donnees.js`. Il se pose par-dessus sans
+web (`frontend/Web/maquette/ecrans/agenda*.js`) avec les codes d'un agenda de téléphone (Google Agenda, Samsung Calendar),
+sur les mêmes données fictives, lues dans `frontend/Web/maquette/ecrans/agenda-donnees.js`. Il se pose par-dessus sans
 retoucher les écrans validés :
 
 - une rubrique « Agenda » dans le tiroir, après Teams, avec ce qui attend ta décision (sous « Plus » dans la variante
@@ -96,9 +96,9 @@ Paramètres d'adresse : `?theme=dark|light`, `?nav=barre|tiroir`, puis la route 
 
 ## Ce qu'elle lit ailleurs, sans le copier
 
-- les personnes, l'état de Mika et ses portraits : `frontendv2/maquette/donnees.js` ;
-- le fond de carte (la France simplifiée, © OpenStreetMap) : `frontendv2/maquette/ecrans/carte-fond.js` ;
-- les agendas, leurs comptes et leurs événements (proposé) : `frontendv2/maquette/ecrans/agenda-donnees.js` ;
+- les personnes, l'état de Mika et ses portraits : `frontend/Web/maquette/donnees.js` ;
+- le fond de carte (la France simplifiée, © OpenStreetMap) : `frontend/Web/maquette/ecrans/carte-fond.js` ;
+- les agendas, leurs comptes et leurs événements (proposé) : `frontend/Web/maquette/ecrans/agenda-donnees.js` ;
 - les portraits pré-rendus : `app/src/main/assets/avatar/` (sous licence, non versionnés ; sans eux, un rond coloré) ;
 - la police Inter de la console, si Roboto manque.
 

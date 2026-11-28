@@ -72,17 +72,17 @@ room {
     schemaDirectory("$projectDir/schemas")
 }
 
-// Les mouvements de l'atelier (os seuls, versionnés : la source commune avec Unity) et le manifeste des animations
-// du client web, copiés dans les assets de l'app à chaque construction — jamais une seconde copie à tenir à jour.
+// Les mouvements de l'atelier (os seuls, versionnés) et le manifeste des animations, tous deux dans frontend/Assets,
+// copiés dans les assets de l'app à chaque construction — jamais une seconde copie à tenir à jour.
 val avatarMotions = layout.buildDirectory.dir("generated/avatarMotions")
 val copyAvatarMotions by tasks.registering(Copy::class) {
     into(avatarMotions.map { it.dir("avatar3d") })
-    from(rootProject.file("../Unity/ArtSource/atelier/motions")) {
+    from(rootProject.file("../Assets/atelier/motions")) {
         include("*.json.gz")
         into("motions")
     }
-    // Le manifeste des animations du client web : poids, durées, humeur des clips — une seule source.
-    from(rootProject.file("../Web/public/animations/manifest.json"))
+    // Le manifeste des animations : poids, durées, humeur des clips — une seule source.
+    from(rootProject.file("../Assets/animations/manifest.json"))
 }
 android.sourceSets.getByName("main").assets.srcDir(avatarMotions.get().asFile)
 tasks.named("preBuild") { dependsOn(copyAvatarMotions) }

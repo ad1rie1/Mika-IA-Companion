@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
  * accords, conjugaison, homophones, ponctuation et ses espaces), sans changer tes mots. `POST /api/moi/correct`
  * (`backendv2/docs/protocole-moi.md` § 2) ; il marche quand un modèle est donné au rôle `correct` (`GET /api/moi` →
  * `correct`, [Me.correct]). Le texte corrigé remplace le tien aussitôt, et « Annuler » te le rend. Porté de
- * `frontendv2/src/screens/mail/compose.ts` (`correctField`), pur et testé sur la JVM ; les mots sont dans
+ * `frontend/Web/src/screens/mail/compose.ts` (`correctField`), pur et testé sur la JVM ; les mots sont dans
  * `strings.xml` ([CorrectWords]).
  */
 

@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Paramètres › Téléphones (`frontendv2/src/screens/telephone/settings.ts`) : l'ordre de la liste, ce téléphone reconnu, ce qui s'y révoque. */
+/** Paramètres › Téléphones (`frontend/Web/src/screens/telephone/settings.ts`) : l'ordre de la liste, ce téléphone reconnu, ce qui s'y révoque. */
 class PhoneSettingsRulesTest {
     // ── tes téléphones ──
 

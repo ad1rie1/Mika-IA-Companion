@@ -10,11 +10,11 @@ Réalise un audit de sécurité en profondeur du module. Ne te limite pas à une
 Ce n'est **pas** une application d'entreprise multi-utilisateurs. C'est un moteur personnel, servi sur loopback par défaut, où l'opératrice est la propriétaire. Ce qui a de la valeur ici :
 
 1. **Le journal de sa vie et ce qu'elle sait des personnes** — intimes par nature : confidences, secrets, fiches.
-2. **Les identifiants** : clés de fournisseurs LLM, jetons de dépôts git, mots de passe de boîtes mail, chiffrés dans les réglages ; jetons de client (application Android, client Unity) qui ouvrent un compte sans mot de passe.
-3. **Les capacités** : envoyer un mail, pousser vers un dépôt, exécuter du code dans un atelier ou une app de la Forge, agir dans le monde 3D.
+2. **Les identifiants** : clés de fournisseurs LLM, jetons de dépôts git, mots de passe de boîtes mail, chiffrés dans les réglages ; jetons de client (application Android) qui ouvrent un compte sans mot de passe, et clés de l'extension Teams (`mtk_…`).
+3. **Les capacités** : envoyer un mail, poser un message dans Teams, pousser vers un dépôt, exécuter du code dans un atelier ou une app de la Forge.
 
 Les trois attaquants réalistes, dans l'ordre :
-- **Une page web tierce** que l'opératrice visite pendant sa session (CSRF, WebSocket cross-site sur `/ws` ou `/ws/world`, CORS, redirection ouverte).
+- **Une page web tierce** que l'opératrice visite pendant sa session (CSRF, WebSocket cross-site sur `/ws`, CORS, redirection ouverte).
 - **Du contenu hostile qui entre par un canal** : corps de mail, entrée RSS, pièce jointe, fichier partagé vers l'application Android, sortie d'une app forgée, perception d'un capteur. Il traverse un préprocesseur puis atterrit dans un prompt qui pilote des outils.
 - **Un autre poste du LAN** quand l'écoute n'est pas sur loopback.
 - **Une autre application sur le téléphone** : intention reçue par un composant exporté, fichier lu par un `FileProvider` trop large.

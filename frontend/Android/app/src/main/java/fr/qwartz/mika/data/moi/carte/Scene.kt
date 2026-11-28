@@ -5,7 +5,7 @@ import kotlin.math.cos
 import kotlin.math.max
 
 /*
- * Ce qu'une carte montre par-dessus le fond, sans MapLibre ni Compose, porté de `frontendv2/src/map/scene.ts` (et de
+ * Ce qu'une carte montre par-dessus le fond, sans MapLibre ni Compose, porté de `frontend/Web/src/map/scene.ts` (et de
  * `hereFocus`, `pinRank` de `view.ts`) : des épingles (numérotées, lettrées, roses pour ce que Mika a fait ;
  * secondaires, plus petites et sans numéro, pour les lieux d'à côté comme ceux de « Sur la route »), des tracés (un
  * itinéraire calculé, ou des points reliés à vol d'oiseau), la position de la personne et, quand on la connaît, sa

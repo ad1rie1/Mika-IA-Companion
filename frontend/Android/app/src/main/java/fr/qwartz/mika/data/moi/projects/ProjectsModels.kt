@@ -7,7 +7,7 @@ import kotlinx.serialization.json.JsonObject
 /*
  * Les formes des projets dans l'API par personne (`backendv2/docs/protocole-moi.md` § 11 ; ADR 0282, 0290, 0293) : ses
  * projets, ce qui l'y attend (« À faire »), la fiche d'un projet, son registre (tickets), le diagramme de ses
- * objectifs. Le modèle est le client web (`frontendv2/src/api/projects.ts`).
+ * objectifs. Le modèle est le client web (`frontend/Web/src/api/projects.ts`).
  *
  * Ce que le serveur calcule et que l'app ne refait jamais : l'ordre d'« À faire », `mine` et `can` de chaque attente,
  * son geste (`gesture`), `rights` de la fiche, `can` d'un objet, `ticket_born`, `veiled`, `hand` / `yours`, tous les

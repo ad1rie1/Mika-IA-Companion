@@ -11,7 +11,7 @@
  * Fonctions pures, à part du DOM comme `chatSync.ts` et `approvals.ts` : la
  * validation d'une trame, la fusion par `reply_to` et `episode`, les libellés
  * français (« 4 outils · 3,2 s »), et où poser chaque carte dans le fil.
- * ChatOverlay ne fait que peindre. Arguments et résultats restent du texte
+ * L'écran du chat ne fait que peindre. Arguments et résultats restent du texte
  * brut : rien ici ne les interprète, et la carte les pose en `textContent`.
  */
 

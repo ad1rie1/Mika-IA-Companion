@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * Le manifeste des animations du client web (`frontend/Web/public/animations/manifest.json`), embarqué tel quel
+ * Le manifeste des animations (`frontend/Assets/animations/manifest.json`), embarqué tel quel
  * (`avatar3d/manifest.json`) : une seule source pour les poids des attentes, leurs durées, l'humeur d'un clip
  * (valence, arousal) et les fondus des gestes. Les noms sont ceux des mouvements de l'atelier.
  */

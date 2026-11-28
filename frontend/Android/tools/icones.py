@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Les icônes de l'app (ADR 0235), tirées du jeu de la maquette (`frontend/Android/maquette/index.html`, le même trait
-que le frontendv2 : 1,7 sur une grille de 24) : un vecteur Android par symbole, `res/drawable/ic_m_<nom>.xml`.
+que le client web : 1,7 sur une grille de 24) : un vecteur Android par symbole, `res/drawable/ic_m_<nom>.xml`.
 
 Une seule source : on retouche une icône dans la maquette, puis on relance
 

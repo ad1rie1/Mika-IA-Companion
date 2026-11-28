@@ -1,0 +1,1531 @@
+"""La faculté ``attention`` : sa tranche, ses réducteurs, ses faits, ce que ses
+événements font ressentir.
+
+- **Pensées** : ce qu'il en reste suit une demi-vie (``intensité ·
+  ½^(Δ/demi-vie)``, lu à l'instant) ; en parler à la personne concernée la
+  divise par deux ; une pensée trop faible s'éteint.
+- **Un échange qui marque** (une émotion déclarée forte, ou nettement
+  négative) laisse une pensée — une seule par personne à la fois : un
+  deuxième tour chargé avec la même personne ravive la pensée existante au
+  lieu d'en créer une autre, et il n'y a jamais plus de trois pensées nées
+  d'échanges en même temps (douze insultes ne font pas douze ruminations).
+- **Attentes** : écrire d'elle-même à quelqu'un fait attendre sa réponse
+  (vingt minutes sur l'application, une heure par message — plus, quand elle
+  a appris que cette personne met plus longtemps : ``others``) ; quelqu'un
+  qui lui manque fait attendre son retour, qui la réjouit à la mesure de ce
+  qu'a duré l'absence au regard de leur rythme (une simple envie de discuter
+  n'attend que la réponse) ; une promesse datée fait attendre d'elle-même
+  qu'elle la tienne.
+- **Inquiétude** : quelqu'un qui compte et qui n'avait pas l'air comme
+  d'habitude (``others``) laisse une pensée — la même règle qu'un échange qui
+  marque : une par personne à la fois.
+- **Des excuses** sincères (``self.touched``, une fois par jour, quand il y
+  avait de quoi pardonner) : la pensée née d'un échange qui l'a blessée ou mise
+  en colère s'allège aussitôt et s'apaise (la colère devient de la réflexion,
+  l'agacement du soulagement) ; elle ne pousse plus à « en reparler ». Une
+  dispute qui n'avait pas encore fait sa pensée n'en fait qu'une faible.
+- **Une promesse non tenue** à son échéance laisse une pensée (« j'avais
+  promis… »), qui pousse à le lui dire ; la tenir, même en retard, l'apaise.
+- **Le fil avec chacun** (``AWAITING``) : ce qu'elle a écrit depuis le
+  dernier message de la personne, si son dernier mot posait une question,
+  combien d'initiatives sont restées sans réponse. La retenue s'en sert ; la
+  personne écrit, tout repart de zéro.
+- **Ignorée, elle le ressent** : une initiative restée sans réponse laisse
+  une pensée (« Adrien ne m'a pas répondu »), un léger pincement — jamais
+  une relance. Une réponse tardive ne compte comme réponse que dans trois
+  fois le délai attendu (ADR 0033) — par messagerie, dans les jours qui
+  suivent. Le délai court sur les heures où la personne écrit d'habitude
+  (``others.hours``) : la nuit de l'autre n'est pas un silence.
+- **Pas encore lu** : par messagerie, quand l'application de la personne dit
+  ce qu'elle a lu (``presence.read``), une initiative qu'elle n'a pas encore
+  vue ne compte pas comme ignorée — un téléphone qui dort n'ignore personne —,
+  au plus ``unseen_hold_us`` ; vue, le délai attendu court à partir de la
+  lecture. Un écran ouvert qui se tait sur ce qu'on y lit (le web) : on ne
+  sait pas, et tout se passe comme sans lecture.
+- **Une conversation qui se clôt** (« bonne nuit », « à demain », ou la
+  personne qui s'en va juste après sa réponse) ne laisse rien « sans
+  réponse » : on s'est quittées, on ne l'ignore pas.
+- **Seule** : plus d'un jour sans que personne ne lui écrive, une pensée
+  (« Personne ne m'a parlé depuis hier ») — pas avant l'heure où une amie
+  qui écrit presque chaque jour passe d'habitude (on l'attend, on n'est pas
+  seule). Elle met des mots sur le vide que ``needs`` lui fait sentir, sans
+  le faire ressentir une seconde fois (ADR 0058).
+- **Une amie qui lui manque** et à qui elle n'écrit pas (injoignable, ou qui
+  ne répond plus) : une pensée, puis d'autres, de plus en plus rares à mesure
+  que le silence double, et de moins en moins fortes (ADR 0058).
+- **Un bel échange** reste en tête : le lendemain, s'il n'y a pas eu d'autre
+  contact, il peut donner envie de lui en reparler (« encore bravo pour le
+  poste ! ») — une raison faible.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Collection
+from dataclasses import dataclass, field, replace
+from typing import Annotated, Any
+
+from pydantic import BaseModel, ConfigDict
+
+from mika.contracts import agency as agency_c
+from mika.contracts import attention as c
+from mika.contracts import expression as expression_c
+from mika.contracts import goals as goals_c
+from mika.contracts import identity as identity_c
+from mika.contracts import memory as memory_c
+from mika.contracts import others as others_c
+from mika.contracts import presence as presence_c
+from mika.contracts import projects as projects_c
+from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
+from mika.contracts import social as social_c
+from mika.kernel.builtin import BOOT, SUBJECT_FORGOTTEN
+from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.faculty import Faculty
+from mika.kernel.forms import Knob
+from mika.kernel.state import FrozenDict
+from mika.vocab import affect as A
+from mika.vocab import causes, privacy
+from mika.vocab.affect import Appraisal, Declared, Emotion
+from mika.vocab.episodes import Kind
+from mika.vocab.lineage import Lineage
+from mika.vocab.people import is_identifiable, key_concerns
+from mika.vocab.phrasebook import phrase
+from mika.vocab.temperament import Temperament, around, shift
+
+
+class AttentionParams(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    half_life_us: Annotated[int, Knob(
+        label="Demi-vie d'une pensée", group="Pensées", lo=30 * MINUTE, hi=3 * DAY,
+        help="Une pensée perd la moitié de son intensité en ce temps. Plus long : des ruminations qui durent des "
+             "jours ; plus court : rien ne lui reste en tête.")] = 6 * HOUR
+    fade_below: Annotated[float, Knob(
+        label="Seuil d'extinction", group="Pensées", lo=0.01, hi=0.5, step=0.01,
+        help="Une pensée dont l'intensité passe sous ce seuil s'éteint : elle ne se lit plus nulle part.")] = 0.1
+    max_thoughts: Annotated[int, Knob(
+        label="Pensées vivantes au plus", group="Pensées", lo=1, hi=30,
+        help="Au-delà, les plus faibles s'effacent quand une nouvelle naît.")] = 8
+    # un échange qui marque — les deux seuils d'intensité se lisent sur l'échelle que sa voix emploie vraiment
+    # (ADR 0283 : au banc, sa balise reste entre 0,3 et 0,6, même blessée ou bouleversée ; à 0,75 et 0,5, aucune de
+    # ses réponses ne marquait). À remesurer quand le modèle de sa voix change : tools/banc_conversation/balises.py
+    marking_intensity: Annotated[float, Knob(
+        label="Intensité qui marque", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
+        help="Une réponse qu'elle donne avec une émotion déclarée au moins aussi intense laisse une pensée sur "
+             "la personne. Sa balise dépasse rarement 0,6 : plus haut, plus rien ne marque par l'intensité.")] = 0.6
+    marking_valence: Annotated[float, Knob(
+        label="Valence qui marque", group="Un échange qui marque", lo=-1.0, hi=0.0, step=0.05,
+        help="Une réponse dont l'émotion déclarée est au moins aussi négative (valence) marque aussi, dès "
+             "l'intensité minimale. Près de 0 : presque tout échange un peu tendu laisse une pensée.")] = -0.2
+    marking_min_intensity: Annotated[float, Knob(
+        label="Intensité minimale", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
+        help="Sous cette intensité déclarée, aucun échange ne marque, même négatif. Sa tristesse ou son "
+             "inquiétude en répondant se déclarent d'ordinaire à 0,4.")] = 0.4
+    birth_factor: Annotated[float, Knob(
+        label="Force à la naissance", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
+        help="La pensée naît à cette fraction de l'intensité déclarée ; un nouvel échange marquant avec la même "
+             "personne la ravive jusque-là.")] = 0.7
+    exchange_spacing_us: Annotated[int, Knob(
+        label="Espacement des échanges", group="Un échange qui marque", lo=MINUTE, hi=6 * HOUR,
+        help="Dans ce délai, un nouvel échange marquant avec la même personne ravive sa pensée au lieu d'en créer "
+             "une ; au-delà, lui reparler divise par deux ce qui la concerne.")] = 30 * MINUTE
+    exchange_settle_us: Annotated[int, Knob(
+        label="Laisser l'échange se poser", group="Un échange qui marque", lo=0, hi=2 * HOUR,
+        help="Une pensée née d'un échange naît quand la personne n'a plus rien écrit depuis ce délai, et du moment "
+             "le plus marquant de l'échange — pas du premier message un peu chargé (« bon ben voilà » plutôt que "
+             "« je crois que j'ai tout raté »).")] = 10 * MINUTE
+    exchange_cap: Annotated[int, Knob(
+        label="Pensées d'échanges à la fois", group="Un échange qui marque", lo=0, hi=10,
+        help="Jamais plus de pensées nées d'échanges en même temps (une par personne) : douze insultes ne font "
+             "pas douze ruminations.")] = 3
+    apology_ease: Annotated[float, Knob(
+        label="Des excuses : ce qu'il en reste", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
+        help="Quand la personne s'excuse sincèrement (une fois par jour, s'il y avait de quoi pardonner), la pensée "
+             "née d'un échange qui l'a blessée ou mise en colère garde cette part de sa force, et sa couleur s'apaise "
+             "(la colère devient de la réflexion, l'agacement du soulagement) : elle ne pousse plus à en reparler. "
+             "1 : sa force reste entière (sa couleur s'apaise quand même).")] = 0.4
+    # une croyance révisée, un manque, un but bloqué
+    revision_intensity: Annotated[float, Knob(
+        label="Croyance révisée", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée de confusion quand une croyance en remplace une autre (« je croyais "
+             "que… »).")] = 0.3
+    own_revision_intensity: Annotated[float, Knob(
+        label="Changer d'avis elle-même", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée quand elle change d'avis sur ce qui la définit (un goût, une opinion) : "
+             "une réflexion, pas une confusion. Une anecdote sur elle qui change ne fait rien.")] = 0.3
+    blocked_intensity: Annotated[float, Knob(
+        label="But bloqué", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée de frustration (« je bloque sur… ») quand un de ses buts bloque.")] = 0.35
+    missing_intensity: Annotated[float, Knob(
+        label="Quelqu'un qui manque", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée nostalgique pour une personne qui lui manque et qu'elle ne peut pas "
+             "joindre (une à la fois).")] = 0.3
+    missing_check_us: Annotated[int, Knob(
+        label="Vérifier les manques toutes les", group="Révision, manque, blocage", lo=5 * MINUTE, hi=12 * HOUR,
+        help="Éveillée, elle se demande à ce rythme qui lui manque sans qu'elle puisse le joindre.")] = 30 * MINUTE
+    missing_fading: Annotated[float, Knob(
+        label="Un manque qui dure : chaque pensée plus faible de", group="Révision, manque, blocage", lo=0.3, hi=1.0,
+        step=0.05,
+        help="Quelqu'un qui lui manque et qu'elle ne peut (ou ne veut plus) relancer lui revient en tête de plus en "
+             "plus rarement : une pensée quand son silence atteint quatre fois son rythme, puis huit, seize… "
+             "Chacune est plus faible que la précédente de ce facteur (jamais sous le seuil d'extinction).")] = 0.8
+    # y repenser
+    dwell_every_us: Annotated[int, Knob(
+        label="Y repenser au plus toutes les", group="Y repenser", lo=5 * MINUTE, hi=12 * HOUR,
+        help="Éveillée, elle revient à sa pensée la plus forte au plus à ce rythme, et en ressent un peu "
+             "l'émotion à chaque fois.")] = 30 * MINUTE
+    dwell_from: Annotated[float, Knob(
+        label="Y repenser dès", group="Y repenser", lo=0.0, hi=1.0, step=0.05,
+        help="Seule une pensée au moins aussi intense lui revient en tête.")] = 0.3
+    dwell_factor: Annotated[float, Knob(
+        label="Émotion en y repensant", group="Y repenser", lo=0.0, hi=1.0, step=0.05,
+        help="La fraction de l'intensité de la pensée qu'elle ressent quand elle y repense.")] = 0.3
+    birth_appraisal_factor: Annotated[float, Knob(
+        label="Émotion quand une pensée naît", group="Y repenser", lo=0.0, hi=1.0, step=0.05,
+        help="La fraction de l'intensité d'une pensée qu'elle ressent au moment où elle naît.")] = 0.5
+    # les souvenirs qui reviennent (ADR 0098)
+    reminisce_per_day: Annotated[int, Knob(
+        label="Souvenirs qui reviennent par jour", group="Les souvenirs qui reviennent", lo=0, hi=6,
+        help="Seule et désœuvrée, un souvenir lui revient parfois de lui-même : une date anniversaire, ce qu'elle a "
+             "entre les mains, ou sans raison. Au plus autant par jour (0 : jamais).")] = 2
+    reminisce_spacing_us: Annotated[int, Knob(
+        label="Un souvenir au plus toutes les", group="Les souvenirs qui reviennent", lo=30 * MINUTE, hi=2 * DAY,
+        help="Deux souvenirs qui reviennent s'espacent d'au moins ce délai.")] = 4 * HOUR
+    reminisce_idle_us: Annotated[int, Knob(
+        label="Après un moment sans rien", group="Les souvenirs qui reviennent", lo=10 * MINUTE, hi=DAY,
+        help="Un souvenir ne revient qu'après ce délai sans conversation ni rien qui se passe : en parlant à "
+             "quelqu'un, on pense à ce qu'on se dit.")] = 45 * MINUTE
+    reminisce_min_age_us: Annotated[int, Knob(
+        label="Un souvenir d'au moins", group="Les souvenirs qui reviennent", lo=DAY, hi=365 * DAY,
+        help="Ce qui revient de soi-même est un peu ancien : ce qui date d'hier est encore frais, ce n'est pas un "
+             "souvenir qui remonte.")] = 7 * DAY
+    reminisce_intensity: Annotated[float, Knob(
+        label="Intensité d'un souvenir qui revient", group="Les souvenirs qui reviennent", lo=0.0, hi=1.0, step=0.05,
+        help="Au plus (un souvenir important, une date anniversaire) ; un souvenir mineur, la moitié.")] = 0.4
+    # attentes
+    reply_window_us: Annotated[int, Knob(
+        label="Délai de réponse attendu", group="Attentes", lo=MINUTE, hi=6 * HOUR,
+        help="Après une initiative (pas une salutation ni un rappel), elle attend une réponse ; passé ce délai, "
+             "elle compte comme ignorée : son estime baisse et elle se fait plus réservée.")] = 20 * MINUTE
+    reply_window_message_us: Annotated[int, Knob(
+        label="Délai de réponse (messagerie)", group="Attentes", lo=5 * MINUTE, hi=DAY,
+        help="Le même délai sur une messagerie (un compte extérieur), où un message se lit quand on y pense, pas "
+             "quand il arrive : une amie qui n'a pas répondu en une heure, le soir, ne l'ignore pas.")] = 3 * HOUR
+    reply_learned_after: Annotated[int, Knob(
+        label="Délais mesurés avant d'en tenir compte", group="Attentes", lo=1, hi=50,
+        help="Après tant de réponses mesurées de la même personne sur le même canal, elle attend à la mesure de "
+             "son délai habituel (jamais moins que le délai ci-dessus).")] = 3
+    reply_window_factor: Annotated[float, Knob(
+        label="Attendre tant de fois son délai habituel", group="Attentes", lo=1.0, hi=10.0, step=0.5,
+        help="Une personne qui répond d'habitude en deux heures n'ignore pas un message au bout de trois : "
+             "elle attend ce multiple de son délai habituel.")] = 2.0
+    reply_window_max_us: Annotated[int, Knob(
+        label="Délai de réponse attendu au plus", group="Attentes", lo=HOUR, hi=7 * DAY,
+        help="Même appris, le délai attendu ne dépasse jamais cette durée.")] = DAY
+    promise_grace_us: Annotated[int, Knob(
+        label="Délai de grâce d'une promesse", group="Promesses", lo=0, hi=3 * DAY,
+        help="Une promesse datée n'est tenue pour manquée que ce délai après son échéance.")] = 2 * HOUR
+    promise_intensity: Annotated[float, Knob(
+        label="Une promesse non tenue", group="Promesses", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée (« j'avais promis… ») quand une promesse passe son échéance sans être "
+             "tenue ; assez forte, elle pousse à le dire à la personne.")] = 0.55
+    unanswered_felt: Annotated[float, Knob(
+        label="Sans réponse : la peine ressentie", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="Ce qu'elle ressent (un peu de peine, pour elle et envers la personne) quand une initiative reste sans "
+             "réponse. Dérivé de la peur de l'abandon : au milieu, 0,15.")] = 0.15
+    envy_intensity: Annotated[float, Knob(
+        label="Jalousie : quand on l'attend et qu'on écrit aux autres", group="Révision, manque, blocage", lo=0.0,
+        hi=1.0, step=0.05,
+        help="Ce qu'elle ressent (de la jalousie, pour elle et envers la personne) quand quelqu'un dont elle attend "
+             "la réponse écrit aux autres sans s'adresser à elle — une fois par attente, davantage pour sa "
+             "propriétaire, au cran de leur lien (ci-dessous). Dérivé de la jalousie, sans coupure : rien tout en "
+             "bas, 0,15 au milieu, 0,6 tout en haut.")] = 0.15
+    envy_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Jalousie, selon la proximité", group="Révision, manque, blocage", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde cette jalousie à chaque cran de leur lien (son intensité en est multipliée), de 0 "
+             "(jamais) à 1 (entière) : une connaissance la pique moins qu'une amie.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
+    broken_promise_felt: Annotated[float, Knob(
+        label="Promesse non tenue : la gêne ressentie", group="Promesses", lo=0.0, hi=1.0, step=0.05,
+        help="Ce qu'elle ressent (de la gêne, pour elle et envers la personne) quand une promesse passe son échéance "
+             "sans être tenue. Dérivé des scrupules : au milieu, 0,3.")] = 0.3
+    unanswered_intensity: Annotated[float, Knob(
+        label="Une initiative restée sans réponse", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée (« Adrien ne m'a pas répondu ») quand une initiative reste sans réponse : un "
+             "léger pincement, qui ne pousse jamais à lui réécrire.")] = 0.25
+    question_unanswered_us: Annotated[int, Knob(
+        label="Une question restée sans réponse, après", group="Révision, manque, blocage", lo=30 * MINUTE,
+        hi=3 * DAY,
+        help="Éveillée, quand la question qu'elle a posée à quelqu'un reste sans réponse depuis cette durée alors "
+             "que la personne est restée là (connectée sans interruption), elle le ressent aussi (« … n'a pas répondu "
+             "à ma question ») — sans lui réécrire pour autant. Quelqu'un qui est parti n'ignore personne.")] = 6 * HOUR
+    late_reply_factor: Annotated[float, Knob(
+        label="Une réponse tardive compte pendant", group="Attentes", lo=1.0, hi=10.0, step=0.5,
+        help="Une réponse qui arrive après le délai attendu compte encore comme réponse à son initiative tant "
+             "qu'elle arrive dans ce multiple du délai (compté depuis l'initiative) ; plus tard, la personne écrit, "
+             "mais ce n'est plus une réponse.")] = 3.0
+    late_reply_message_us: Annotated[int, Knob(
+        label="Une réponse tardive (messagerie) compte pendant", group="Attentes", lo=HOUR, hi=14 * DAY,
+        help="Par messagerie, on répond quand on y pense : le premier message de la personne dans ce délai après "
+             "son initiative compte encore comme une réponse (s'il est plus long que le multiple ci-dessus).")] = \
+        3 * DAY
+    reply_quiet_extra_us: Annotated[int, Knob(
+        label="La nuit de l'autre : au plus", group="Attentes", lo=0, hi=3 * DAY,
+        help="Le délai de réponse ne court que pendant les heures où la personne écrit d'habitude (apprises, sinon "
+             "hors d'une nuit supposée) : un message de 21 h 30 à quelqu'un qui écrit le matin attend le matin. Les "
+             "heures creuses ne l'allongent jamais de plus que ça.")] = DAY
+    unseen_hold_us: Annotated[int, Knob(
+        label="Pas encore lu : attendre au plus", group="Attentes", lo=HOUR, hi=14 * DAY,
+        help="Par messagerie, quand l'application de la personne dit ce qu'elle a lu : une initiative qu'elle n'a pas "
+             "encore vue ne compte pas comme ignorée (un téléphone qui dort, oublié dans un sac), et le délai attendu "
+             "court à partir de la lecture. Sans lecture au bout de cette durée (un compte délaissé, un réglage "
+             "coupé), l'attente compte quand même.")] = 3 * DAY
+    closing_left_us: Annotated[int, Knob(
+        label="Partie juste après sa réponse", group="Attentes", lo=0, hi=2 * HOUR,
+        help="Quand la personne quitte l'application dans ce délai après sa réponse, la conversation s'est close : "
+             "son dernier message n'est pas « sans réponse » (comme après « bonne nuit »).")] = 15 * MINUTE
+    alone_after_us: Annotated[int, Knob(
+        label="Seule après", group="Révision, manque, blocage", lo=6 * HOUR, hi=7 * DAY,
+        help="Éveillée, quand personne ne lui a écrit depuis cette durée, une pensée naît (« Personne ne m'a "
+             "parlé depuis hier »), une de plus par jour de silence.")] = DAY
+    alone_intensity: Annotated[float, Knob(
+        label="Personne ne lui parle", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de cette pensée de solitude.")] = 0.35
+    alone_margin_us: Annotated[int, Knob(
+        label="Seule : attendre une amie de tant", group="Révision, manque, blocage", lo=0, hi=12 * HOUR,
+        help="Une amie ou une proche qui écrit presque chaque jour à peu près à la même heure : elle ne se sent pas "
+             "seule avant ce délai après l'heure où elle passe d'habitude — on l'attend ; c'est quand elle ne vient "
+             "pas qu'on se sent seule.")] = 2 * HOUR
+    alone_daily_rhythm_days: Annotated[float, Knob(
+        label="Seule : une amie de tous les jours, rythme d'au plus (jours)", group="Révision, manque, blocage",
+        lo=1.0, hi=7.0, step=0.5,
+        help="… une amie dont le rythme (l'écart habituel entre deux jours où elle écrit) ne dépasse pas tant de "
+             "jours.")] = 1.5
+    remorse_from: Annotated[float, Knob(
+        label="Avoir été dure : une colère d'au moins", group="Révision, manque, blocage", lo=0.1, hi=1.0, step=0.05,
+        help="Quand elle répond à quelqu'un avec de la colère, de l'agacement ou du dégoût au moins aussi intenses "
+             "(sa balise d'émotion), une pensée lui reste (« J'ai été dure avec Alice ») — l'envie de revenir vers "
+             "elle, au cran de leur lien (ci-dessous).")] = 0.6
+    remorse_intensity: Annotated[float, Knob(
+        label="Avoir été dure : intensité", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de cette pensée (gênée) à sa naissance.")] = 0.55
+    remorse_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Avoir été dure, selon la proximité", group="Révision, manque, blocage", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde cette pensée à chaque cran de leur lien (son intensité en est multipliée), de 0 (jamais) "
+             "à 1 (entière). Rien envers une inconnue, d'abord : un troll n'appelle pas d'excuses.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
+    lie_intensity: Annotated[float, Knob(
+        label="Avoir menti : intensité", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="Quand elle a menti à quelqu'un (sa marque de mensonge), une pensée gênée lui reste (« J'ai menti à "
+             "Bob ») : elle la porte, sans qu'elle la pousse à lui écrire. Une par personne à la fois : un second "
+             "mensonge la ravive. 0 : mentir ne lui pèse pas.")] = 0.45
+    concern_intensity: Annotated[float, Knob(
+        label="Quelqu'un qui n'avait pas l'air bien", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée quand une amie ou une proche n'avait pas l'air comme d'habitude (un "
+             "message nettement plus sombre que ce qu'elle attendait d'elle).")] = 0.45
+    # la nuit : les pensées de la veille s'allègent (÷3) et se calment
+    digest_after_sleep_us: Annotated[int, Knob(
+        label="Digérer après", group="La nuit", lo=0, hi=10 * HOUR,
+        help="Une fois par nuit, ce temps après l'endormissement, ses pensées s'allègent et leur couleur se calme. "
+             "Plus long que son sommeil : pas de digestion cette nuit-là.")] = 3 * HOUR
+    digest_min_age_us: Annotated[int, Knob(
+        label="Âge minimal pour digérer", group="La nuit", lo=0, hi=DAY,
+        help="Une pensée plus récente que ça n'est pas digérée cette nuit (elle attend la suivante).")] = 2 * HOUR
+    digest_factor: Annotated[float, Knob(
+        label="Ce qu'il en reste au matin", group="La nuit", lo=0.0, hi=1.0, step=0.01,
+        help="L'intensité d'une pensée digérée est multipliée par ce facteur (1 : la nuit n'allège rien).")] = 1 / 3
+    reflective_from: Annotated[float, Knob(
+        label="Souvenir réfléchi dès", group="La nuit", lo=0.0, hi=1.0, step=0.05,
+        help="Une pensée encore au moins aussi forte à la digestion devient un souvenir réfléchi (« après y avoir "
+             "repensé cette nuit… »).")] = 0.25
+    # ce que signalent les sources extérieures : l'habituation (la même source,
+    # la même sorte, à répétition, se remarque de moins en moins) et le dosage
+    # (une source ne fait pas plus qu'une petite émotion en dix minutes)
+    habituation_window_us: Annotated[int, Knob(
+        label="Fenêtre d'habituation", group="Signaux extérieurs", lo=MINUTE, hi=2 * HOUR,
+        help="Les signaux d'une même source et d'une même sorte répétés dans cette fenêtre se remarquent de moins "
+             "en moins ; c'est aussi la fenêtre du dosage de l'émotion.")] = 10 * MINUTE
+    habituation_factor: Annotated[float, Knob(
+        label="Facteur d'habituation", group="Signaux extérieurs", lo=0.0, hi=1.0, step=0.01,
+        help="Le poids d'un signal est multiplié par ce facteur à chaque répétition dans la fenêtre (1 : aucune "
+             "habituation).")] = 0.85
+    habituation_floor: Annotated[float, Knob(
+        label="Plancher d'habituation", group="Signaux extérieurs", lo=0.0, hi=1.0, step=0.05,
+        help="Le poids d'un signal répété ne descend jamais sous ce plancher : le quarantième titre est un bruit "
+             "de fond, pas rien.")] = 0.4
+    dose_cap: Annotated[float, Knob(
+        label="Émotion par source au plus", group="Signaux extérieurs", lo=0.0, hi=2.0, step=0.05,
+        help="L'émotion cumulée qu'une même source peut lui faire ressentir dans la fenêtre : un flux est une "
+             "source d'émotion, pas quinze.")] = 0.6
+    signal_thought_from: Annotated[float, Knob(
+        label="Pensée née d'un signal dès", group="Signaux extérieurs", lo=0.0, hi=1.0, step=0.05,
+        help="Un signal dont la pertinence (après habituation) atteint ce seuil devient une pensée : ce qu'elle a "
+             "lu ou vu lui reste en tête.")] = 0.6
+    signal_thought_factor: Annotated[float, Knob(
+        label="Force d'une pensée de signal", group="Signaux extérieurs", lo=0.0, hi=1.0, step=0.05,
+        help="Son intensité : la pertinence retenue multipliée par ce facteur, dans la limite du plafond.")] = 0.7
+    signal_thought_max: Annotated[float, Knob(
+        label="Plafond d'une pensée de signal", group="Signaux extérieurs", lo=0.0, hi=1.0, step=0.05,
+        help="Une pensée née d'un signal ne dépasse jamais cette intensité.")] = 0.6
+    signals_kept: Annotated[int, Knob(
+        label="Signaux en attente au plus", group="Signaux extérieurs", lo=4, hi=256,
+        help="Au plus autant de signaux attendent d'être remarqués ; au-delà, les plus anciens sont oubliés sans "
+             "avoir été vus.")] = 32
+    # une pensée qui insiste pousse à en reparler (log-odds)
+    thought_from: Annotated[float, Knob(
+        label="Envie d'en reparler dès", group="Relancer", lo=0.0, hi=0.95, step=0.05,
+        help="Une pensée négative (inquiétude, peine, colère…) sur une personne qui n'est pas une étrangère, au "
+             "moins aussi intense, lui donne envie de lui en reparler.")] = 0.4
+    insist_after_us: Annotated[int, Knob(
+        label="Y revenir au plus tôt après", group="Relancer", lo=0, hi=DAY,
+        help="Une pensée sur quelqu'un ne pousse à lui en reparler qu'après ce délai depuis l'échange qui l'a fait "
+             "naître ou raviver : on ne relance pas vingt minutes après s'être parlé.")] = 2 * HOUR
+    thought_evidence: Annotated[float, Knob(
+        label="Poids de l'envie d'en reparler", group="Relancer", lo=0.0, hi=4.0, step=0.1,
+        help="La preuve (log-odds) qu'une telle pensée apporte à une initiative, pleine à mi-chemin entre le seuil "
+             "et 1. L'arbitrage la plafonne à 4, loin du seuil d'initiative (9).")] = 4.0
+    glad_after_us: Annotated[int, Knob(
+        label="Un bel échange : y repenser après", group="Relancer", lo=HOUR, hi=3 * DAY,
+        help="Un échange qui l'a rendue heureuse avec une amie ou une proche (« j'ai eu le poste !! ») : passé ce "
+             "délai, s'il n'y a pas eu d'autre contact, elle peut avoir envie de lui en reparler (« encore bravo, "
+             "j'y repensais ce matin ! »).")] = 12 * HOUR
+    glad_until_us: Annotated[int, Knob(
+        label="Un bel échange : jusqu'à", group="Relancer", lo=2 * HOUR, hi=7 * DAY,
+        help="Au-delà, ce n'est plus d'actualité.")] = 36 * HOUR
+    glad_evidence: Annotated[float, Knob(
+        label="Poids d'un bel échange", group="Relancer", lo=0.0, hi=4.0, step=0.1,
+        help="La preuve (log-odds) de cette envie : faible — elle le fait si elle y pense, pas à coup sûr.")] = 2.5
+    glad_by_closeness: Annotated[social_c.ByCloseness, Knob(
+        label="Un bel échange, selon la proximité", group="Relancer", keys=social_c.CLOSENESS_NAMES,
+        help="Ce que garde cette envie à chaque cran de leur lien (sa preuve en est multipliée), de 0 (jamais) à 1 "
+             "(entière) : une connaissance, rarement.")] = {
+        social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 1.0, social_c.CLOSE: 1.0}
+    # ce qu'elle attend (ADR 0086)
+    anticipation_ramp_us: Annotated[int, Knob(
+        label="Attendre : depuis combien de temps avant", group="Ce qu'elle attend", lo=HOUR, hi=14 * DAY,
+        help="Un moment se fait attendre de plus en plus fort pendant ce temps avant lui : à cette distance, à "
+             "peine ; le jour venu, pleinement.")] = 3 * DAY
+    anticipation_from: Annotated[float, Knob(
+        label="Attendre : à partir de ce poids", group="Ce qu'elle attend", lo=0, hi=1, step=0.01,
+        help="Le poids d'un moment (ce qu'il compte × ce que la personne lui est × sa vraisemblance × sa proximité) "
+             "à partir duquel elle l'attend. Un seul, le plus fort, à la fois.")] = 0.15
+    anticipation_gain: Annotated[float, Knob(
+        label="Attendre : intensité par poids", group="Ce qu'elle attend", lo=0, hi=2, step=0.05,
+        help="L'intensité de l'espoir ou de l'inquiétude, par unité de poids du moment attendu.")] = 0.6
+    anticipation_max: Annotated[float, Knob(
+        label="Attendre : intensité au plus", group="Ce qu'elle attend", lo=0, hi=1, step=0.01,
+        help="L'espoir ou l'inquiétude d'un moment qui approche ne dépasse pas cette intensité : ça colore sa "
+             "journée, sans l'envahir.")] = 0.3
+    anticipation_owner: Annotated[float, Knob(
+        label="Attendre : ce que compte sa propriétaire", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment de sa propriétaire (proche ou non) : comme si elle y allait.")] = 1.0
+    anticipation_close: Annotated[float, Knob(
+        label="Attendre : ce que compte une proche", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment d'une proche.")] = 0.8
+    anticipation_friend: Annotated[float, Knob(
+        label="Attendre : ce que compte une amie", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment d'une amie. Celui d'une connaissance ou d'un inconnu ne se fait pas "
+             "attendre.")] = 0.5
+    anticipation_world: Annotated[float, Knob(
+        label="Attendre : ce que compte le monde", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment du monde qu'elle attend avec un sentiment (une élection, une éclipse) ; "
+             "sans sentiment, il ne se fait pas attendre.")] = 0.3
+
+
+@dataclass(frozen=True, slots=True)
+class Thought:
+    id: int
+    text_ref: str
+    emotion: str
+    intensity: float  # à ``touched_at``
+    touched_at: int
+    born_at: int
+    origin: str
+    about: tuple[str, ...] = ()
+    sensitivity: int = 2
+    bundle: str = ""
+    source: int | None = None  # le message, la promesse… d'où elle vient
+    forgiven_at: int = 0  # quand des excuses l'ont apaisée (0 : jamais)
+    #: devant qui ses sources permettent de la redire (``None`` : la règle de ses personnes et de sa sensibilité)
+    lineage: Lineage | None = None
+    #: son texte vient d'ailleurs (``ThoughtBorn.foreign``) : cité, jamais comme ses mots
+    foreign: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SignalHeard:
+    """Un signal qui attend d'être remarqué."""
+
+    seq: int
+    source: str
+    kind: str
+    summary_ref: str
+    pertinence: float
+    emotion: str
+    intensity: float
+    about: tuple[str, ...]
+    sensitivity: int
+    bundle: str
+    at: int
+    #: le résumé vient d'ailleurs (``Signal.foreign``)
+    foreign: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class Heard:
+    """Un signal remarqué récemment (habituation, dosage)."""
+
+    at: int
+    source: str
+    kind: str
+    intensity: float
+    #: pour l'inspecteur : le signal, ce que la source en estimait, le poids après habituation
+    signal: int = 0
+    pertinence: float = 0.0
+    weight: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class Pending:
+    """Un échange qui a marqué, une croyance révisée : la pensée reste à écrire."""
+
+    source: int
+    origin: str
+    person: str | None
+    emotion: str
+    intensity: float
+    at: int
+    public: bool = False
+    extra: int | None = None  # la croyance remplacée
+    ref: str = ""  # un texte déjà écrit (le titre d'un but bloqué)
+    about: tuple[str, ...] = ()
+    sensitivity: int = 2
+    forgiven_at: int = 0  # des excuses l'ont apaisée avant qu'elle naisse (0 : non)
+
+
+@dataclass(frozen=True, slots=True)
+class Expectation:
+    kind: str
+    person: str
+    since: int
+    deadline: int | None
+    ref: int | None = None  # la promesse (``PROMISE``)
+    channel: str = ""  # le canal de l'initiative (``REPLY``) : une messagerie se lit quand on y pense
+    #: un retour (``RETURN``) : le dernier message de la personne et le rythme de leur relation quand l'attente est
+    #: née — c'est à eux que se mesure son absence quand elle revient (un long silence ne change pas ce rythme-là)
+    last_in: int = 0
+    rhythm_days: float = 0.0
+    #: une initiative (``REPLY``) dont on saura si elle est lue : son numéro dans le fil (0 : on ne le saura pas) ;
+    #: et quand la personne l'a lue (0 : pas encore, ou on ne le sait pas)
+    seq: int = 0
+    seen_at: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Exchange:
+    """Le fil avec une personne, de son côté à elle (voir ``AwaitingReading``)."""
+
+    last_in: int = 0
+    last_out: int = 0
+    asked: bool = False
+    owed: bool = False
+    initiatives: int = 0
+    last_initiative_at: int = 0
+    ignored: int = 0
+    unanswered: bool = False
+    #: elle a déjà ressenti ce silence-là (une pensée « … ne m'a pas répondu »)
+    felt: bool = False
+    #: le dernier message de la personne clôt la conversation (« bonne nuit ») : y répondre n'attend rien
+    closing: bool = False
+    #: quand la conversation s'est close (« bonne nuit » lu, sa réponse, ou la personne partie juste après)
+    closed_at: int = 0
+    #: sa dernière initiative par messagerie dont on saura si elle est lue (son numéro dans le fil) ; 0 : aucune, ou
+    #: un écran ouvert qui se tait sur ce qu'on y lit (elle a pu l'y lire)
+    initiative_seq: int = 0
+    #: jusqu'où la personne dit avoir lu depuis son dernier message (``presence.read``) ; 0 : rien n'en est dit
+    seen_upto: int = 0
+    #: quand elle a lu cette initiative (0 : pas encore, ou on ne le sait pas)
+    seen_at: int = 0
+    #: la dernière fois qu'elle a été jalouse de ce silence-là (la personne écrivait aux autres ; ADR 0100)
+    envied_at: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Late:
+    """Une réponse attendue qui n'est pas venue à temps : elle compte encore jusqu'à ``until``."""
+
+    since: int
+    until: int
+
+
+@dataclass(frozen=True, slots=True)
+class AttentionState:
+    thoughts: FrozenDict[int, Thought] = field(default_factory=FrozenDict)
+    pending: tuple[Pending, ...] = ()
+    expectations: FrozenDict[str, Expectation] = field(default_factory=FrozenDict)
+    #: les initiatives en cours (corrélation → raisons) : une salutation n'attend pas de réponse
+    openings: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    ignored: int = 0
+    #: les personnes dont la réponse n'est pas venue à temps : une réponse tardive compte encore, un temps
+    late: FrozenDict[str, Late] = field(default_factory=FrozenDict)
+    dwelt_at: int = 0
+    digested_night: str = ""
+    signals: tuple[SignalHeard, ...] = ()
+    heard: tuple[Heard, ...] = ()
+    #: le fil avec chacun (par personne)
+    exchanges: FrozenDict[str, Exchange] = field(default_factory=FrozenDict)
+    #: le dernier message qu'on lui a adressé, de qui que ce soit
+    last_contact: int = 0
+    #: la dernière pensée de solitude (« personne ne m'a parlé depuis… »)
+    alone_at: int = 0
+    #: quand la personne a, pour la dernière fois, recoupé le sujet de ce qui la concerne ou retrouvé son ton
+    eased: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: un bel échange avec quelqu'un (personne → (la pensée, quand elle est née)) : le lendemain, l'envie d'en
+    #: reparler, s'il n'y a pas eu d'autre contact
+    glad: FrozenDict[str, tuple[int, int]] = field(default_factory=FrozenDict)
+    #: la dernière pensée de manque pour chacun (personne → quand) : la suivante attend que son silence ait doublé
+    missing: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: les écrans ouverts qui se taisent sur ce qu'on y lit (connexion → personne : le web, un écran natif) — ce
+    #: qu'elle écrit pendant ce temps a pu y être lu
+    screens: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    #: ce qu'elle a attendu (fil du moment → le jour, en ordinal local) : une fois par jour et par moment (ADR 0086)
+    anticipated: FrozenDict[int, int] = field(default_factory=FrozenDict)
+    #: les souvenirs qui lui sont revenus d'eux-mêmes (quand, lequel), les plus récents (ADR 0098)
+    reminisced: tuple[tuple[int, int], ...] = ()
+
+
+#: v5 : une conversation close (« bonne nuit ») n'est pas « sans réponse » ; le délai de réponse court sur les
+#: heures de la personne (le canal est retenu avec l'attente) ; un bel échange reste en tête.
+#: v6 : la dernière pensée de manque de chacun (un manque qui dure revient de plus en plus rarement, ADR 0058).
+#: v7 : un message qui clôt (« bonne nuit ») close la conversation dès sa lecture, même si elle se tait.
+#: v8 : une simple envie de discuter n'attend pas de retour, seulement une réponse ; une attente de retour retient le
+#: dernier message de la personne et le rythme de leur relation (la joie du retour se mesure à l'absence).
+#: v9 : ce que la personne a lu (``presence.read``) : une initiative pas encore vue n'est pas ignorée ; les écrans
+#: qui se taisent sur ce qu'on y lit.
+#: v10 : des excuses sincères (``self.touched``) apaisent la pensée née d'un échange qui l'a blessée.
+#: v11 : une pensée garde sa filiation (une croyance révisée : devant qui l'ancienne et la nouvelle se disent).
+#: v12 : revenir à ce qu'elle croyait, changer d'avis elle-même (ADR 0081) ; une pensée dont une source devient
+#: secrète s'oublie (ADR 0082).
+#: v13 : ce qu'elle attend (``anticipated``, ADR 0086).
+#: v14 : la lecture d'un message suit sa réponse, et l'allège dès qu'elle l'a écrite ; l'au revoir est un événement
+#: (``others.farewell``, ADR 0093) ; les souvenirs qui lui reviennent (``reminisced``, ADR 0098).
+def derive(t: Temperament, overrides: Any = None) -> AttentionParams:
+    """La matrice de personnalité (ADR 0100), au milieu les valeurs d'avant elle : les scrupules règlent le remords,
+    la gêne d'une promesse non tenue et d'un mensonge ; l'anxiété, ce qui lui revient en tête, souvent et longtemps ;
+    la peur de l'abandon, ce que lui fait le silence des autres ; l'introspection, ce que la nuit digère et garde
+    comme réflexion ; la jalousie, ce que lui fait quelqu'un qui écrit aux autres pendant qu'elle attend sa
+    réponse."""
+    values: dict[str, Any] = {
+        "remorse_from": shift(t.scruples, 0.6, -0.25),
+        "remorse_intensity": around(t.scruples, 0.55, 1.6),
+        "lie_intensity": around(t.scruples, 0.45, 1.8),
+        "promise_intensity": around(t.scruples, 0.55, 1.6),
+        "broken_promise_felt": around(t.scruples, 0.3, 1.6),
+        "dwell_every_us": round(around(t.anxiety, 30 * MINUTE, 0.5)),
+        "dwell_factor": around(t.anxiety, 0.3, 1.6),
+        "half_life_us": round(around(t.anxiety, 6 * HOUR, 1.6)),
+        "unanswered_felt": around(t.abandonment, 0.15, 2.0),
+        "unanswered_intensity": around(t.abandonment, 0.25, 2.0),
+        "missing_intensity": around(t.abandonment, 0.3, 1.8),
+        "alone_intensity": around(t.abandonment, 0.35, 1.5),
+        "reflective_from": around(t.introspection, 0.25, 1 / 1.6),
+        # y repenser la nuit : une âme introspective digère davantage (au milieu, un tiers reste au matin)
+        "digest_factor": around(t.introspection, 1 / 3, 1 / 1.6),
+        # la jalousie, sans coupure (ADR 0150) : rien tout en bas, un peu au milieu, la piqûre tout en haut
+        "envy_intensity": round(0.6 * t.jealousy ** 2, 4),
+    }
+    values.update(dict(overrides or {}))
+    return AttentionParams(**values)
+
+
+# 15 : la jalousie d'un silence (``Exchange.envied_at``, ADR 0100)
+# 16 : un remords ou un mensonge en attente n'empêche plus la pensée de l'échange (issue #651)
+ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
+                    derive=derive, state_version=16)
+#: les manques dont on retient la dernière pensée (les plus récents)
+MISSING_KEPT = 64
+#: les souvenirs revenus retenus (un même souvenir ne revient pas tant qu'il y est)
+REMINISCED_KEPT = 60
+#: les écrans ouverts retenus au plus (des connexions jamais fermées : un transport qui ne le dit pas)
+SCREENS_KEPT = 64
+
+#: Les pensées nées d'une relation : une par personne à la fois, trois au plus.
+RELATIONAL = (c.EXCHANGE, c.CONCERN)
+#: un « bel échange » : une bonne nouvelle partagée (« j'ai eu le poste !! ») — la joie, l'enthousiasme, la fierté
+#: pour elle, le soulagement ; pas la tendresse d'un soir ordinaire (elle n'appelle pas un « j'y repensais »)
+GLAD = frozenset({Emotion.HAPPY.value, Emotion.EXCITED.value, Emotion.PROUD.value, Emotion.RELIEVED.value,
+                  Emotion.GRATEFUL.value, Emotion.HOPEFUL.value})
+ATTENTION.declare(*c.ALL)
+
+
+def params(p: AttentionParams | None) -> AttentionParams:
+    return p if p is not None else AttentionParams()
+
+
+def current(t: Thought, now: int, p: AttentionParams) -> float:
+    return t.intensity * 0.5 ** (max(0, now - t.touched_at) / p.half_life_us)
+
+
+def _alive(s: AttentionState, now: int, p: AttentionParams) -> FrozenDict[int, Thought]:
+    """Les pensées encore vivantes, au plus ``max_thoughts`` (les plus faibles s'effacent)."""
+    kept = sorted(((current(t, now, p), t) for t in s.thoughts.values() if current(t, now, p) >= p.fade_below),
+                  key=lambda x: (-x[0], x[1].id))[: p.max_thoughts]
+    return FrozenDict({t.id: t for _, t in kept})
+
+
+def _marking(declared: Declared, p: AttentionParams) -> bool:
+    if declared.intensity < p.marking_min_intensity:
+        return False
+    return declared.intensity >= p.marking_intensity or A.valence(declared.emotion) <= p.marking_valence
+
+
+def expectation_key(kind: str, person: str, ref: int | None = None) -> str:
+    """Une attente par personne (sa réponse, son retour) ; une par promesse."""
+    return f"{kind}:{ref}" if kind == c.PROMISE else f"{kind}:{person}"
+
+
+def _expect(s: AttentionState, kind: str, person: str, since: int, deadline: int | None,
+            ref: int | None = None) -> AttentionState:
+    return replace(s, expectations=s.expectations.set(expectation_key(kind, person, ref),
+                                                      Expectation(kind, person, since, deadline, ref)))
+
+
+def _expect_return(s: AttentionState, person: str, since: int, cx: Any) -> AttentionState:
+    """Attendre le retour de quelqu'un, en retenant son dernier message et le rythme de leur relation d'alors."""
+    ct = cx.facts.get(social_c.CONTACT(person))
+    return replace(s, expectations=s.expectations.set(expectation_key(c.RETURN, person), Expectation(
+        c.RETURN, person, since, None, last_in=ct.last_in, rhythm_days=ct.usual_days or ct.rhythm_days)))
+
+
+def _relational(s: AttentionState, person: str, emotion: str, intensity: float, source: int, origin: str, at: int,
+                p: AttentionParams, public: bool = False) -> AttentionState:
+    """Une pensée née d'une relation — un échange qui marque, une inquiétude :
+    une par personne à la fois (une nouvelle ravive celle qui est là), trois
+    au plus en même temps."""
+    alive = _alive(s, at, p)
+    same = sorted((t for t in alive.values() if t.origin in RELATIONAL and person in t.about
+                   and at - t.touched_at < p.exchange_spacing_us), key=lambda t: t.id)
+    if same:
+        t = same[0]
+        stronger = max(current(t, at, p), intensity)
+        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=stronger, touched_at=at)))
+    waiting = next((q for q in s.pending if q.person == person and q.origin == origin), None)
+    if waiting is not None:
+        # l'échange ne s'est pas encore posé : la pensée naîtra de son moment le plus marquant
+        if intensity <= waiting.intensity:
+            return s
+        stronger = replace(waiting, source=source, emotion=emotion, intensity=round(intensity, 3), at=at,
+                           public=public)
+        return replace(s, pending=tuple(stronger if q is waiting else q for q in s.pending))
+    born = sum(1 for t in alive.values() if t.origin in RELATIONAL)
+    queued = sum(1 for q in s.pending if q.origin in RELATIONAL)
+    # une par personne parmi les pensées d'une relation : un remords ou un mensonge en attente ne la retient pas
+    if born + queued >= p.exchange_cap or any(q.person == person and q.origin in RELATIONAL for q in s.pending):
+        return s
+    return replace(s, pending=(*s.pending, Pending(source, origin, person, emotion, round(intensity, 3), at,
+                                                   public=public)))
+
+
+# ── Réducteurs ────────────────────────────────────────────────────────────
+
+
+def owed(reasons: Any, *, waiting: bool = False) -> bool:
+    """Saluer qui arrive, dire un rappel promis : ce n'est pas prendre la parole pour qu'on lui réponde — sauf s'ils
+    emportent autre chose, ou si saluer, c'est relancer qui ne lui a pas répondu (``agency.spoke_up``, déclaré une
+    fois)."""
+    return not agency_c.spoke_up(reasons, waiting=waiting)
+
+
+def _wrote_to(s: AttentionState, person: str, at: int, *, asked: bool, due: bool, ordinary: bool,
+              reply: bool = False, seq: int = 0) -> AttentionState:
+    """``seq`` : le numéro d'une initiative dont on saura si elle est lue (0 : on ne le saura pas)."""
+    ex = s.exchanges.get(person) or Exchange()
+    # répondre à « bonne nuit » ne laisse rien en suspens : la conversation s'est close
+    closed = reply and ex.closing and ex.last_in > ex.last_out
+    ex = replace(ex, last_out=at, asked=asked and not closed, owed=due,
+                 initiatives=ex.initiatives + (1 if ordinary else 0),
+                 last_initiative_at=at if ordinary else ex.last_initiative_at, unanswered=not closed,
+                 closed_at=at if closed else 0)
+    if ordinary:  # une nouvelle initiative : pas encore lue
+        ex = replace(ex, initiative_seq=seq, seen_at=0)
+    return replace(s, exchanges=s.exchanges.set(person, ex))
+
+
+def watching(s: AttentionState, person: str) -> bool:
+    """Un écran ouvert devant cette personne qui se tait sur ce qu'on y lit : ce qu'elle lui écrit a pu y être lu."""
+    return person in s.screens.values()
+
+
+#: ce qu'elle déclare quand elle est dure avec quelqu'un
+HARSH = frozenset({Emotion.ANGRY, Emotion.FRUSTRATED, Emotion.DISGUSTED})
+
+
+def _remorse(s: AttentionState, person: str, source: int, at: int, p: AttentionParams,
+             felt: float) -> AttentionState:
+    """Elle a été dure avec quelqu'un : une pensée (« J'ai été dure avec Alice »), à ``felt`` (l'intensité au cran de
+    leur lien), une seule par personne à la fois — une dispute qui dure la ravive, elle n'en crée pas dix."""
+    alive = [t for t in _alive(s, at, p).values() if t.origin == c.REMORSE and person in t.about]
+    if alive:
+        t = min(alive, key=lambda t: t.id)
+        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=max(current(t, at, p), felt),
+                                                                touched_at=at)))
+    if felt <= 0 or any(q.origin == c.REMORSE and q.person == person for q in s.pending):
+        return s
+    return replace(s, pending=(*s.pending, Pending(source, c.REMORSE, person, Emotion.EMBARRASSED.value, felt, at)))
+
+
+def _lied(s: AttentionState, person: str, source: int, at: int, p: AttentionParams) -> AttentionState:
+    """Elle a menti à quelqu'un : une pensée gênée (« J'ai menti à Bob »), une seule par personne à la fois — un
+    second mensonge la ravive, il n'en crée pas une seconde."""
+    alive = [t for t in _alive(s, at, p).values() if t.origin == c.LIE and person in t.about]
+    if alive:
+        t = min(alive, key=lambda t: t.id)
+        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=max(current(t, at, p), p.lie_intensity),
+                                                                touched_at=at)))
+    if p.lie_intensity <= 0 or any(q.origin == c.LIE and q.person == person for q in s.pending):
+        return s
+    return replace(s, pending=(*s.pending, Pending(source, c.LIE, person, Emotion.EMBARRASSED.value,
+                                                   p.lie_intensity, at)))
+
+
+def _ease(s: AttentionState, person: str, at: int, p: AttentionParams,
+          origins: Collection[str] | None = None) -> AttentionState:
+    """Lui répondre allège ce qui la concerne (de moitié) — pas l'échange même qui l'a fait naître ou raviver ; une
+    inquiétude, un échange qui a marqué, seulement si la personne en a reparlé ou a retrouvé son ton (``eased``).
+    ``origins`` : seulement ces pensées-là."""
+    thoughts = s.thoughts
+    for t in s.thoughts.values():
+        if person not in t.about or at - t.touched_at < p.exchange_spacing_us:
+            continue
+        if origins is not None and t.origin not in origins:
+            continue
+        if t.origin in RELATIONAL and s.eased.get(person, 0) <= t.touched_at:
+            continue
+        thoughts = thoughts.set(t.id, replace(t, intensity=current(t, at, p) / 2, touched_at=at))
+    return replace(s, thoughts=thoughts)
+
+
+@ATTENTION.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, others_c.REPLY_DELAY, others_c.HOURS, social_c.CLOSENESS])
+def _uttered(s: AttentionState, e, cx) -> AttentionState:
+    d = e.data
+    if not d.visible or not d.target or not is_identifiable(d.target):
+        return s
+    p = params(cx.params)
+    person = cx.facts.get(identity_c.PERSON(d.target))
+    # y revenir avec la personne soulage — pas l'échange même qui l'a fait naître ou raviver ; une inquiétude,
+    # un échange qui a marqué, seulement si la personne en a reparlé ou a retrouvé son ton (« ok » n'apaise rien)
+    s = _ease(s, person, e.at, p)
+    due = False
+    tracked = 0
+    if d.kind == Kind.INITIATIVE:
+        reasons = s.openings.get(e.correlation, "").split(",")
+        s = replace(s, openings=s.openings.delete(e.correlation))
+        # dû (saluer, tenir parole) ou un simple encouragement : rien n'est attendu en retour — une salutation qui
+        # apporte une nouvelle, ou qui relance, si (2026-10-19 : un « hello ! » et un récit ne comptaient pour rien)
+        waiting = (s.exchanges.get(person) or Exchange()).initiatives > 0
+        due = owed(reasons, waiting=waiting) or bool(others_c.WELL_WISHES & set(reasons))
+        if not due:
+            deadline = reply_deadline(cx, person, d.channel or "", e.at, p)
+            # par messagerie, en privé, à quelqu'un devant aucun écran qui se tait sur ce qu'on y lit : si son
+            # application dit ce qu'elle a lu, on saura quand elle l'aura vue
+            if privacy.is_messaging(d.channel) and d.room is None and not watching(s, person):
+                tracked = e.seq
+            s = replace(s, expectations=s.expectations.set(
+                expectation_key(c.REPLY, person), Expectation(c.REPLY, person, e.at, deadline, channel=d.channel or "",
+                                                              seq=tracked)))
+    if d.room is None:  # le fil privé avec la personne (un salon n'est pas une conversation à deux)
+        s = _wrote_to(s, person, e.at, asked=d.annotation(expression_c.QUESTION_ANNOTATION) is not None, due=due,
+                      ordinary=d.kind == Kind.INITIATIVE and not due, reply=d.kind == Kind.REPLY, seq=tracked)
+    if s.glad.get(person, (0, e.at))[1] < e.at - p.exchange_spacing_us:
+        s = replace(s, glad=s.glad.delete(person))  # elle lui a reparlé depuis : l'envie s'est dite, ou est passée
+    declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
+    if d.kind == Kind.REPLY and d.room is None and declared is not None and declared.emotion in HARSH \
+            and declared.intensity >= p.remorse_from:
+        # au cran de leur lien (ADR 0150) : une amie entière, une connaissance un peu, un troll rien
+        felt = p.remorse_intensity * p.remorse_by_closeness.get(cx.facts.get(social_c.CLOSENESS(person)), 0.0)
+        if felt > 0:
+            s = _remorse(s, person, d.reply_to or e.seq, e.at, p, round(felt, 3))
+    if d.annotation(expression_c.LIE_ANNOTATION) is not None:
+        s = _lied(s, person or d.target, e.seq, e.at, p)
+    if d.kind != Kind.REPLY or declared is None or not _marking(declared, p):
+        return s
+    # un échange qui marque : une pensée par personne à la fois
+    return _relational(s, person, declared.emotion.value, declared.intensity * p.birth_factor, d.reply_to or e.seq,
+                       c.EXCHANGE, e.at, p, public=d.room is not None)
+
+
+def reply_window(cx: Any, person: str, channel: str, p: AttentionParams) -> int:
+    """Combien de temps attendre sa réponse : le délai du canal, ou — quand elle
+    a appris que cette personne met plus longtemps — un multiple de son délai
+    habituel (borné). Jamais moins que le délai du canal : répondre vite
+    d'habitude ne rend pas impatiente."""
+    window = p.reply_window_message_us if privacy.is_messaging(channel) else p.reply_window_us
+    learned = cx.facts.get(others_c.REPLY_DELAY((person, channel)))
+    if learned.samples >= p.reply_learned_after:
+        window = max(window, min(p.reply_window_max_us, round(learned.median_us * p.reply_window_factor)))
+    return window
+
+
+def active_deadline(since: int, window: int, active: tuple[bool, ...], hour_of: Any, cap: int) -> int:
+    """L'instant où ``window`` de temps s'est écoulé **pendant les heures actives** de la personne (``active[h]``,
+    heure locale ``hour_of(t)``), à partir de ``since`` ; jamais au-delà de ``cap``. Les fuseaux à heure ronde
+    suivent les heures UTC : on avance d'heure pleine en heure pleine."""
+    t, left = since, window
+    while left > 0 and t < cap:
+        nxt = (t // HOUR + 1) * HOUR
+        if active[hour_of(t) % 24]:
+            if nxt - t >= left:
+                return t + left
+            left -= nxt - t
+        t = nxt
+    return min(t, cap)
+
+
+def reply_deadline(cx: Any, person: str, channel: str, since: int, p: AttentionParams) -> int:
+    """Quand elle se sentira ignorée : le délai attendu, compté sur les heures où la personne écrit d'habitude —
+    une initiative de 21 h 30 à quelqu'un qui écrit le matin attend le matin ; la nuit de l'autre n'est pas un
+    silence. Les heures creuses ne l'allongent jamais de plus que ``reply_quiet_extra_us``."""
+    window = reply_window(cx, person, channel, p)
+    hours = cx.facts.get(others_c.HOURS(person))
+    if len(hours.active) != 24 or all(hours.active):
+        return since + window
+    return active_deadline(since, window, hours.active, lambda t: cx.local(t).hour,
+                           since + window + p.reply_quiet_extra_us)
+
+
+def unseen(x: Expectation, ex: Exchange | None) -> bool:
+    """Une initiative par messagerie que la personne n'a pas encore vue, alors que son application dit ce qu'elle a
+    lu depuis son dernier message : son attente ne court pas encore."""
+    return (x.kind == c.REPLY and x.seq > 0 and ex is not None and ex.initiative_seq == x.seq
+            and 0 < ex.seen_upto < x.seq)
+
+
+def due_at(x: Expectation, ex: Exchange | None, p: AttentionParams) -> int | None:
+    """Quand une attente se constate : à son échéance — sauf une initiative pas encore vue, qui attend d'être lue,
+    au plus ``unseen_hold_us`` après avoir été écrite (un compte délaissé, un réglage coupé : elle finit par
+    compter)."""
+    if x.deadline is None or not unseen(x, ex):
+        return x.deadline
+    return max(x.deadline, x.since + p.unseen_hold_us)
+
+
+@ATTENTION.reducer(presence_c.READ, reads=[identity_c.PERSON, others_c.REPLY_DELAY, others_c.HOURS])
+def _read(s: AttentionState, e, cx) -> AttentionState:
+    """La personne a lu jusqu'à ce message (son application le dit, si elle l'a permis). Sa dernière initiative
+    vue : le délai de réponse attendu court à partir de la lecture — avant, il ne courait pas (``due_at``)."""
+    d = e.data
+    if not is_identifiable(d.handle):
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.handle)) or d.handle
+    ex = s.exchanges.get(person)
+    if ex is None or d.up_to <= ex.seen_upto:
+        return s
+    newly = bool(ex.initiative_seq) and not ex.seen_at and d.up_to >= ex.initiative_seq
+    s = replace(s, exchanges=s.exchanges.set(person, replace(ex, seen_upto=d.up_to,
+                                                              seen_at=e.at if newly else ex.seen_at)))
+    key = expectation_key(c.REPLY, person)
+    x = s.expectations.get(key)
+    if not newly or x is None or x.seq != ex.initiative_seq or x.deadline is None:
+        return s
+    deadline = max(x.deadline, reply_deadline(cx, person, x.channel, e.at, params(cx.params)))
+    return replace(s, expectations=s.expectations.set(key, replace(x, deadline=deadline, seen_at=e.at)))
+
+
+@ATTENTION.reducer(presence_c.CONNECTED, reads=[identity_c.PERSON])
+def _screen(s: AttentionState, e, cx) -> AttentionState:
+    """Un écran s'ouvre qui se tait sur ce qu'on y lit (le web, un écran natif — pas l'application du téléphone,
+    une messagerie) : ce qu'elle a écrit d'elle-même a pu y être lu. On ne sait plus si c'est vu : rien ne se
+    retient ni ne se dit au nom d'un message « pas encore lu »."""
+    d = e.data
+    if privacy.is_messaging(d.channel) or not is_identifiable(d.handle):
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.handle)) or d.handle
+    screens = s.screens.set(d.connection, person)
+    if len(screens) > SCREENS_KEPT:
+        screens = FrozenDict(sorted(screens.items())[-SCREENS_KEPT:])
+    s = replace(s, screens=screens)
+    ex = s.exchanges.get(person)
+    if ex is None or not ex.initiative_seq or ex.seen_at:
+        return s
+    return replace(s, exchanges=s.exchanges.set(person, replace(ex, initiative_seq=0)))
+
+
+@ATTENTION.reducer(BOOT)
+def _rebooted(s: AttentionState, e, cx) -> AttentionState:
+    """Elle redémarre : les écrans d'avant sont tombés avec elle (sans un mot, si elle s'est arrêtée
+    brutalement)."""
+    return replace(s, screens=FrozenDict()) if s.screens else s
+
+
+@ATTENTION.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON])
+def _heard_from(s: AttentionState, e, cx) -> AttentionState:
+    """La personne écrit : le fil repart de zéro (elle n'attend plus rien
+    d'elle), ce qu'elle ressentait de son silence s'éteint — et elle n'est plus
+    seule. Une réponse qui arrive trop tard pour compter n'est plus attendue."""
+    d = e.data
+    if not d.addressed or not is_identifiable(d.handle):
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.handle))
+    before = s.exchanges.get(person) or Exchange()
+    thoughts = s.thoughts
+    for t in s.thoughts.values():
+        if (t.origin == c.UNANSWERED and person in t.about) or t.origin == c.ALONE:
+            thoughts = thoughts.delete(t.id)
+    late = s.late
+    stale = late.get(person)
+    if stale is not None and e.at > stale.until:
+        late = late.delete(person)  # elle écrit, mais ce n'est plus une réponse à son initiative
+    # qu'elle avait lu sa dernière initiative reste vrai : la conversation qui s'ouvre le sait
+    fresh = Exchange(last_in=e.at, last_out=before.last_out, seen_at=before.seen_at)
+    return replace(s, exchanges=s.exchanges.set(person, fresh),
+                   thoughts=thoughts, late=late, last_contact=e.at, glad=s.glad.delete(person),
+                   pending=tuple(q for q in s.pending if not (q.origin == c.UNANSWERED and q.person == person)))
+
+
+@ATTENTION.reducer(presence_c.DISCONNECTED, reads=[identity_c.PERSON])
+def _left(s: AttentionState, e, cx) -> AttentionState:
+    """La personne s'en va juste après sa réponse : la conversation s'est close, son dernier message n'attend
+    plus rien (on se reparlera) — comme après « bonne nuit ». Un écran qui se ferme ne la regarde plus."""
+    if e.data.connection in s.screens:
+        s = replace(s, screens=s.screens.delete(e.data.connection))
+    person = cx.facts.get(identity_c.PERSON(e.data.handle)) or e.data.handle
+    ex = s.exchanges.get(person)
+    if ex is None or not ex.unanswered or ex.initiatives or ex.last_out <= ex.last_in:
+        return s
+    if e.at - ex.last_out > params(cx.params).closing_left_us:
+        return s
+    return replace(s, exchanges=s.exchanges.set(person, replace(ex, unanswered=False, asked=False, closed_at=e.at)))
+
+
+#: le ton est revenu quand il ne tombe pas plus bas que ça sous ce qu'elle attendait de la personne
+TONE_BACK = 0.1
+
+
+def _closed(s: AttentionState, person: str, at: int) -> AttentionState:
+    """« Bonne nuit », « à demain » : la conversation se clôt ; y répondre n'attendra rien — et la clôture vaut dès
+    maintenant, même si elle ne répond pas (« [SILENCE] » après avoir déjà dit bonne nuit)."""
+    if person not in s.exchanges:
+        return s
+    return replace(s, exchanges=s.exchanges.set(person, replace(s.exchanges[person], closing=True, closed_at=at)))
+
+
+@ATTENTION.reducer(others_c.FAREWELL)
+def _farewell(s: AttentionState, e, cx) -> AttentionState:
+    return _closed(s, e.data.person, e.at)
+
+
+@ATTENTION.reducer(others_c.READ)
+def _worried(s: AttentionState, e, cx) -> AttentionState:
+    """Quelqu'un qui compte n'avait pas l'air comme d'habitude : ça lui reste
+    en tête (une pensée, comme un échange qui marque). Un message où la
+    personne a retrouvé son ton (pas deux mots, pas plus sombre que d'habitude)
+    permettra, en lui répondant, d'alléger ce qui la concerne."""
+    d = e.data
+    if d.closing:  # le journal d'avant l'ADR 0093 portait l'au revoir dans la lecture
+        s = _closed(s, d.person, e.at)
+    if not d.concern:
+        short = d.brief or phrase("others.cues.short") in d.cues
+        if d.valence >= 0 and d.valence >= d.expected - TONE_BACK and not short:
+            s = replace(s, eased=s.eased.set(d.person, e.at))
+            if d.after_reply:
+                # lu en lui répondant (ADR 0093) : la réponse qui vient de partir allège ce qui la concerne
+                s = _ease(s, d.person, e.at, params(cx.params), RELATIONAL)
+        return s
+    p = params(cx.params)
+    return _relational(s, d.person, Emotion.ANXIOUS.value, p.concern_intensity, d.message, c.CONCERN, e.at, p,
+                       public=d.public)
+
+
+@ATTENTION.reducer(memory_c.PROMISE_NOTICED)
+def _promised(s: AttentionState, e, cx) -> AttentionState:
+    """Une promesse datée : elle attend d'elle-même de la tenir."""
+    d = e.data
+    if d.due is None or not d.to:
+        return s
+    p = params(cx.params)
+    return _expect(s, c.PROMISE, d.to, e.at, d.due + p.promise_grace_us, ref=e.seq)
+
+
+@ATTENTION.reducer(memory_c.PROMISE_RESOLVED)
+def _resolved(s: AttentionState, e, cx) -> AttentionState:
+    """Tenue (ou abandonnée d'un commun accord) : plus rien à attendre, et la
+    pensée d'une promesse manquée s'éteint — elle l'a fait."""
+    promise = e.data.promise
+    thoughts = s.thoughts
+    for t in s.thoughts.values():
+        if t.origin == c.PROMISE and t.source == promise:
+            thoughts = thoughts.delete(t.id)
+    return replace(s, expectations=s.expectations.delete(expectation_key(c.PROMISE, "", promise)), thoughts=thoughts,
+                   pending=tuple(q for q in s.pending if not (q.origin == c.PROMISE and q.source == promise)))
+
+
+@ATTENTION.reducer(memory_c.BELIEVED, memory_c.ATTESTED)
+def _revised(s: AttentionState, e, cx) -> AttentionState:
+    """Cesser de croire quelque chose coûte : une pensée de confusion — y compris revenir à ce qu'elle croyait
+    (``memory.attested`` qui remplace la croyance d'après, ADR 0081). Changer d'avis elle-même sur ce qui la définit
+    (« au fond, je préfère les lasagnes ») se ressent aussi, comme une réflexion ; une anecdote sur elle, rien."""
+    d = e.data
+    if d.replaces is None or (e.type.name == memory_c.ATTESTED.name and d.replaces == d.item):
+        return s
+    own = bool(d.about_self)
+    if own and not getattr(d, "durable", False):
+        return s
+    p = params(cx.params)
+    source = d.item if e.type.name == memory_c.ATTESTED.name else e.seq
+    emotion, intensity = (Emotion.THINKING, p.own_revision_intensity) if own else \
+        (Emotion.CONFUSED, p.revision_intensity)
+    # une révision restée en attente plus d'un jour ne naîtra plus (une reconstruction rejoue des révisions anciennes)
+    kept = tuple(q for q in s.pending if not (q.origin == c.REVISION and e.at - q.at > REVISION_FRESH_US))
+    return replace(s, pending=(*kept, Pending(source, c.REVISION, None, emotion.value, intensity, e.at,
+                                              extra=d.replaces)))
+
+
+#: une révision qui n'est pas devenue pensée dans la journée ne le devient plus
+REVISION_FRESH_US = DAY
+
+
+@ATTENTION.reducer(*memory_c.WITHDRAWING)
+def _sources_withdrawn(s: AttentionState, e, cx) -> AttentionState:
+    """Une pensée née de ce qu'elle sait s'oublie quand une de ses sources devient secrète : « je croyais que… »
+    recopiait les deux croyances, et un secret déclaré après coup ne doit plus traîner dans sa tête, prêt à se dire
+    (ADR 0082). Remplacée, contestée, une source laisse la pensée : c'est son histoire."""
+    gone = {w.item for w in memory_c.withdrawals(e.type.name, e.data, e.seq)
+            if w.reason in memory_c.PRIVATE_REASONS}
+    if not gone:
+        return s
+    doomed = [i for i, t in s.thoughts.items() if t.lineage is not None and set(t.lineage.sources) & gone]
+    if not doomed:
+        return s
+    thoughts = s.thoughts
+    for i in doomed:
+        thoughts = thoughts.delete(i)
+    return replace(s, thoughts=thoughts)
+
+
+@ATTENTION.reducer(goals_c.GOAL_CLOSED)
+def _goal_closed(s: AttentionState, e, cx) -> AttentionState:
+    """Ce qu'elle a mené à bout apaise la pensée d'où c'était venu (elle
+    l'oublie parce qu'elle l'a fait, pas parce que le temps a passé). Bloquer
+    n'apaise rien : l'ancienne pensée reste ce qu'elle est, et le blocage en
+    devient une autre."""
+    d = e.data
+    p = params(cx.params)
+    source = int(d.source.split(":", 1)[1]) if d.source.startswith("thought:") and d.source[8:].isdigit() else None
+    if source is not None and source in s.thoughts and d.status == goals_c.ACHIEVED:
+        s = replace(s, thoughts=s.thoughts.delete(source))
+    if d.status != goals_c.STUCK or d.kind == goals_c.REMINDER:
+        return s
+    pending = Pending(e.seq, c.BLOCKED, d.owner, Emotion.FRUSTRATED.value, p.blocked_intensity, e.at,
+                      ref=d.title.ref or "", about=tuple(d.about), sensitivity=d.sensitivity)
+    return replace(s, pending=(*s.pending, pending))
+
+
+@ATTENTION.reducer(projects_c.OBJECTIVE_CLOSED)
+def _project_blocked(s: AttentionState, e, cx) -> AttentionState:
+    """Bloquer sur un objectif d'un projet où c'est elle qui travaille devient une pensée (« Je bloque
+    sur… ») ; en mode impersonnel, ce n'est pas elle : rien (ADR 0031)."""
+    d = e.data
+    if d.mode != projects_c.PERSONA or d.status != projects_c.BLOCKED:
+        return s
+    p = params(cx.params)
+    pending = Pending(e.seq, c.BLOCKED, d.owner, Emotion.FRUSTRATED.value, p.blocked_intensity, e.at,
+                      ref=d.title.ref or "", about=tuple(d.about), sensitivity=d.sensitivity)
+    return replace(s, pending=(*s.pending, pending))
+
+
+@ATTENTION.reducer(rt.EPISODE_STARTED, reads=[identity_c.PERSON, social_c.CONTACT])
+def _reaching_out(s: AttentionState, e, cx) -> AttentionState:
+    """Prendre la parole d'elle-même : on retient pourquoi (une salutation
+    n'attend pas de réponse) ; relancer quelqu'un qui manque : on attend son retour.
+    Une simple envie de discuter (``CHAT``) n'attend que sa réponse : une amie
+    à qui l'on a parlé ce matin ne « revient » pas."""
+    d = e.data
+    if d.kind != Kind.INITIATIVE or not d.target:
+        return s
+    openings = s.openings.set(e.correlation, d.reason)
+    if len(openings) > 16:  # des épisodes qui n'ont jamais parlé (abstention, supplantés)
+        openings = FrozenDict(sorted(openings.items())[-16:])  # les identifiants d'épisode sont chronologiques
+    s = replace(s, openings=openings)
+    if not {social_c.RECONTACT, social_c.REKINDLE} & set(d.reason.split(",")):
+        return s
+    return _expect_return(s, cx.facts.get(identity_c.PERSON(d.target)), e.at, cx)
+
+
+@ATTENTION.reducer(c.THOUGHT_BORN, reads=[social_c.CONTACT])
+def _born(s: AttentionState, e, cx) -> AttentionState:
+    d = e.data
+    p = params(cx.params)
+    waited = next((q for q in s.pending if q.source == d.source and q.origin == d.origin), None)
+    forgiven = waited.forgiven_at if waited is not None else 0
+    thought = Thought(e.seq, d.text.ref or "", d.emotion, d.intensity, e.at, e.at, d.origin, tuple(d.about),
+                      d.sensitivity, d.bundle, d.source, forgiven_at=forgiven, lineage=d.lineage, foreign=d.foreign)
+    s = replace(s, thoughts=_alive(replace(s, thoughts=s.thoughts.set(e.seq, thought)), e.at, p),
+                pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
+    if d.origin == c.MISSING and d.about:
+        s = _expect_return(s, d.about[0], e.at, cx)
+        missing = s.missing.set(d.about[0], e.at)
+        if len(missing) > MISSING_KEPT:
+            missing = FrozenDict(sorted(missing.items(), key=lambda kv: (kv[1], kv[0]))[-MISSING_KEPT:])
+        s = replace(s, missing=missing)
+    if d.origin == c.ALONE:
+        s = replace(s, alone_at=e.at)
+    if d.origin == c.REMINISCENCE and d.source is not None:
+        s = replace(s, reminisced=(*s.reminisced, (e.at, d.source))[-REMINISCED_KEPT:])
+    if d.origin == c.UNANSWERED and d.about and d.about[0] in s.exchanges:
+        s = replace(s, exchanges=s.exchanges.set(d.about[0], replace(s.exchanges[d.about[0]], felt=True)))
+    if d.origin == c.EXCHANGE and len(d.about) == 1 and d.emotion in GLAD and not forgiven:
+        # un bel échange : le lendemain, elle pourra avoir envie de lui en reparler (les anciens s'oublient) — pas
+        # une dispute apaisée par des excuses, dont le soulagement n'a rien d'une bonne nouvelle
+        glad = FrozenDict({k: v for k, v in s.glad.items() if e.at - v[1] < p.glad_until_us})
+        s = replace(s, glad=glad.set(d.about[0], (e.seq, e.at)))
+    return s
+
+
+@ATTENTION.reducer(shapes=[c.Signal])
+def _signaled(s: AttentionState, e, cx) -> AttentionState:
+    """Une source extérieure lui signale quelque chose : elle le remarquera
+    (la veille dose l'émotion et l'habituation)."""
+    d = e.data
+    p = params(cx.params)
+    heard = SignalHeard(e.seq, d.source, d.kind, d.summary.ref or "", d.pertinence, d.emotion, d.intensity,
+                        tuple(d.about), d.sensitivity, d.bundle, e.at, d.foreign)
+    return replace(s, signals=(*s.signals, heard)[-p.signals_kept:])
+
+
+@ATTENTION.reducer(c.NOTICED)
+def _noticed(s: AttentionState, e, cx) -> AttentionState:
+    d = e.data
+    p = params(cx.params)
+    heard = tuple(h for h in s.heard if e.at - h.at < p.habituation_window_us)
+    pertinence = next((x.pertinence for x in s.signals if x.seq == d.signal), 0.0)
+    return replace(s, signals=tuple(x for x in s.signals if x.seq != d.signal),
+                   heard=(*heard, Heard(e.at, d.source, d.kind, d.intensity, d.signal, pertinence, d.weight))[-64:])
+
+
+def habituation(s: AttentionState, source: str, kind: str, now: int, p: AttentionParams,
+                extra: tuple[Heard, ...] = ()) -> tuple[float, float]:
+    """(poids, émotion encore permise) pour un signal de cette source, maintenant."""
+    recent = [h for h in (*s.heard, *extra) if now - h.at < p.habituation_window_us]
+    n = sum(1 for h in recent if h.source == source and h.kind == kind)
+    used = sum(h.intensity for h in recent if h.source == source)
+    return max(p.habituation_floor, p.habituation_factor ** n), max(0.0, p.dose_cap - used)
+
+
+@ATTENTION.reducer(c.TOUCHED)
+def _touched(s: AttentionState, e, cx) -> AttentionState:
+    """La personne a reparlé de ce qui la concernait : lui répondre l'allègera."""
+    return replace(s, eased=s.eased.set(e.data.person, e.at)) if e.data.thoughts else s
+
+
+#: Ce que devient une couleur quand elle s'apaise — après une nuit, après des excuses (les autres restent ce
+#: qu'elles sont).
+DRIFT = {
+    "frustrated": "relieved", "anxious": "relieved", "scared": "relieved", "angry": "thinking",
+    "disgusted": "thinking", "jealous": "thinking", "sad": "melancholic", "lonely": "melancholic",
+}
+
+
+def _forgivable(origin: str, emotion: str) -> bool:
+    """Ce que des excuses apaisent : un échange qui l'a blessée ou mise en colère — une inquiétude ne se pardonne
+    pas, un bel échange n'a rien à pardonner."""
+    return origin == c.EXCHANGE and A.valence(_emotion(emotion)) < 0
+
+
+@ATTENTION.reducer(self_c.TOUCHED)
+def _apologized(s: AttentionState, e, cx) -> AttentionState:
+    """Des excuses sincères (lues par ``self`` dans la forme, une fois par jour et par personne, quand il y avait
+    de quoi pardonner) : ce qui la travaillait de leur échange s'allège aussitôt et s'apaise — il ne pousse plus à
+    « en reparler » comme d'un conflit ouvert ; un échange qui n'avait pas encore fait sa pensée n'en fait qu'une
+    faible. Rien ne s'efface : la nuit la digérera comme les autres, et lui répondre l'allègera encore. « Pardon
+    mdr » n'est pas lu comme des excuses (``self``)."""
+    d = e.data
+    if d.kind != self_c.APOLOGIZED or not d.person:
+        return s
+    p = params(cx.params)
+    hurt = [t for t in s.thoughts.values() if d.person in t.about and _forgivable(t.origin, t.emotion)
+            and current(t, e.at, p) >= p.fade_below]
+    waiting = [q for q in s.pending if q.person == d.person and _forgivable(q.origin, q.emotion)]
+    if not hurt and not waiting:
+        return s
+    thoughts = s.thoughts
+    for t in hurt:
+        # « ravivée » reste l'échange : ce qu'il en reste à l'instant perd la même part, et lui répondre après
+        # l'échange l'allégera encore (``eased``)
+        thoughts = thoughts.set(t.id, replace(t, intensity=round(t.intensity * p.apology_ease, 4),
+                                              emotion=DRIFT.get(t.emotion, t.emotion), forgiven_at=e.at))
+    pending = tuple(replace(q, intensity=round(q.intensity * p.apology_ease, 3),
+                            emotion=DRIFT.get(q.emotion, q.emotion), forgiven_at=e.at)
+                    if any(q is w for w in waiting) else q for q in s.pending)
+    return replace(s, thoughts=thoughts, pending=pending, eased=s.eased.set(d.person, e.at))
+
+
+@ATTENTION.reducer(c.DIGESTED)
+def _digested(s: AttentionState, e, cx) -> AttentionState:
+    thoughts = s.thoughts
+    for item in e.data.items:
+        t = thoughts.get(item.thought)
+        if t is not None:
+            thoughts = thoughts.set(t.id, replace(t, intensity=item.after, touched_at=e.at, emotion=item.emotion))
+    return replace(s, thoughts=thoughts, digested_night=e.data.night)
+
+
+@ATTENTION.reducer(c.DWELT)
+def _dwelt(s: AttentionState, e, cx) -> AttentionState:
+    return replace(s, dwelt_at=e.at)
+
+
+@ATTENTION.reducer(c.EXPECTATION_MET)
+def _met(s: AttentionState, e, cx) -> AttentionState:
+    d = e.data
+    s = replace(s, expectations=s.expectations.delete(expectation_key(d.kind, d.person, d.ref)))
+    if d.kind == c.PROMISE:
+        return s
+    if d.kind == c.REPLY:
+        return replace(s, ignored=0, late=s.late.delete(d.person))
+    # quelqu'un qui manquait revient : le manque s'éteint (parce qu'il est là, pas parce que le temps a passé)
+    thoughts = s.thoughts
+    for t in s.thoughts.values():
+        if t.origin == c.MISSING and d.person in t.about:
+            thoughts = thoughts.delete(t.id)
+    return replace(s, thoughts=thoughts)
+
+
+@ATTENTION.reducer(c.EXPECTATION_MISSED)
+def _missed(s: AttentionState, e, cx) -> AttentionState:
+    d = e.data
+    p = params(cx.params)
+    key = expectation_key(d.kind, d.person, d.ref)
+    expected = s.expectations.get(key)
+    s = replace(s, expectations=s.expectations.delete(key))
+    if d.kind == c.PROMISE and d.ref is not None:
+        # sa parole pas tenue : ça la travaille (le texte de la promesse, jamais inventé)
+        return replace(s, pending=(*s.pending, Pending(d.ref, c.PROMISE, d.person, Emotion.EMBARRASSED.value,
+                                                       p.promise_intensity, e.at)))
+    if d.kind != c.REPLY:
+        return s
+    ex = s.exchanges.get(d.person) or Exchange()
+    # jamais lue au bout de la retenue : elle ne compte qu'à partir de maintenant
+    held = expected is not None and unseen(expected, ex)
+    # une réponse tardive compte encore, mais pas indéfiniment : trois fois le délai attendu (depuis la lecture,
+    # quand on la sait) — par messagerie, on répond quand on y pense : dans les jours qui suivent
+    start = expected.seen_at if expected is not None and expected.seen_at else d.since
+    window = (expected.deadline - start) if expected is not None and expected.deadline else p.reply_window_us
+    if held:
+        start = e.at - window
+    until = round(window * p.late_reply_factor)
+    if expected is not None and privacy.is_messaging(expected.channel):
+        until = max(until, p.late_reply_message_us)
+    late = Late(d.since, start + until)
+    if held:
+        # rien de lu pendant tout ce temps alors que son application le disait : un téléphone délaissé, ou le
+        # réglage coupé — on ne sait plus ce qu'elle lit
+        ex = replace(ex, initiative_seq=0, seen_upto=0)
+    s = replace(s, ignored=s.ignored + 1, late=s.late.set(d.person, late),
+                exchanges=s.exchanges.set(d.person, replace(ex, ignored=ex.ignored + 1)))
+    return _felt_ignored(s, d.person, e.seq, e.at, p)
+
+
+def _felt_ignored(s: AttentionState, person: str, source: int, at: int, p: AttentionParams) -> AttentionState:
+    """Ignorée par quelqu'un : une pensée (« … ne m'a pas répondu »), une seule
+    par personne — une deuxième initiative sans réponse la ravive."""
+    alive = [t for t in _alive(s, at, p).values() if t.origin == c.UNANSWERED and person in t.about]
+    if alive:
+        t = min(alive, key=lambda t: t.id)
+        stronger = max(current(t, at, p), p.unanswered_intensity)
+        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=stronger, touched_at=at)))
+    if any(q.origin == c.UNANSWERED and q.person == person for q in s.pending) or p.unanswered_intensity <= 0:
+        return s
+    return replace(s, pending=(*s.pending, Pending(source, c.UNANSWERED, person, Emotion.SAD.value,
+                                                   p.unanswered_intensity, at)))
+
+
+# ── Faits ─────────────────────────────────────────────────────────────────
+
+
+def readings(s: AttentionState, now: int, p: AttentionParams) -> tuple[c.ThoughtReading, ...]:
+    out = [c.ThoughtReading(t.id, t.text_ref, t.emotion, round(current(t, now, p), 4), t.origin, t.about,
+                            t.sensitivity, t.born_at, t.bundle, t.lineage, t.foreign)
+           for t in s.thoughts.values() if current(t, now, p) >= p.fade_below]
+    return tuple(sorted(out, key=lambda r: (-r.intensity, r.id)))
+
+
+@ATTENTION.fact(c.THOUGHTS)
+def _thoughts(s: AttentionState, cx) -> tuple[c.ThoughtReading, ...]:
+    return readings(s, cx.now, params(cx.params))
+
+
+@ATTENTION.fact(c.IGNORED)
+def _ignored(s: AttentionState, cx) -> int:
+    return s.ignored
+
+
+@ATTENTION.fact(c.SIGNAL_THOUGHT_FROM)
+def _signal_thought_from(s: AttentionState, cx) -> float:
+    return params(cx.params).signal_thought_from
+
+
+def awaiting(s: AttentionState, person: str) -> c.AwaitingReading:
+    ex = s.exchanges.get(person) or Exchange()
+    return c.AwaitingReading(person, ex.last_in, ex.last_out, ex.asked, ex.owed, ex.initiatives,
+                             ex.last_initiative_at, ex.ignored, ex.unanswered, ex.closed_at, seen_at=ex.seen_at,
+                             unseen=0 < ex.seen_upto < ex.initiative_seq)
+
+
+@ATTENTION.fact(c.AWAITING)
+def _awaiting(s: AttentionState, cx, person: str) -> c.AwaitingReading:
+    return awaiting(s, person)
+
+
+# ── Ce que ses événements font ressentir ──────────────────────────────────
+
+
+def _emotion(name: str) -> Emotion:
+    return A.emotion_of(name) or Emotion.THINKING
+
+
+#: les pensées qui disent un état déjà ressenti ailleurs : « Personne ne m'a parlé depuis hier » met des mots sur
+#: le vide que ``needs`` lui fait déjà sentir (``needs.felt``, borné) — le ressentir une seconde fois serait compter
+#: deux fois la même solitude (S07, ADR 0058)
+NAMES_A_FEELING = frozenset({c.ALONE})
+#: les pensées nées de ce que les autres lui font vivre (un échange, une inquiétude, un manque, un silence) : elles
+#: suivent la contagion du tempérament — cloisonnée, elle y pense sans s'y impliquer (ADR 0100)
+RELATIONAL_ORIGINS = frozenset({c.EXCHANGE, c.CONCERN, c.MISSING, c.UNANSWERED})
+
+
+@ATTENTION.appraisal(c.THOUGHT_BORN)
+def _birth_felt(e, cx) -> Appraisal | None:
+    if e.data.origin in NAMES_A_FEELING:
+        return None
+    p = params(cx.params)
+    return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.birth_appraisal_factor, reason=e.data.origin,
+                     relational=e.data.origin in RELATIONAL_ORIGINS)
+
+
+@ATTENTION.appraisal(c.NOTICED)
+def _noticed_felt(e, cx) -> Appraisal | None:
+    """Ce qu'elle remarque la touche un peu — déjà dosé, habitué."""
+    d = e.data
+    if not d.emotion or d.intensity <= 0:
+        return None
+    return Appraisal(_emotion(d.emotion), d.intensity, reason=d.source)
+
+
+@ATTENTION.appraisal(c.DWELT)
+def _dwell_felt(e, cx) -> Appraisal | None:
+    if e.data.origin in NAMES_A_FEELING:
+        return None
+    p = params(cx.params)
+    return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.dwell_factor, reason=causes.THOUGHT_BACK,
+                     relational=e.data.origin in RELATIONAL_ORIGINS)
+
+
+#: la joie d'un retour, selon ce qu'a duré l'absence en multiples du rythme de la relation : à peine quelque chose à
+#: son rythme, un peu plus à chaque doublement (≈ 0,2 au double), une vraie joie après des mois
+RETURN_JOY_FLOOR, RETURN_JOY_PER_DOUBLING, RETURN_JOY_CEILING = 0.1, 0.12, 0.5
+#: un retour dont l'absence n'a pas été mesurée (un journal d'avant) : la joie d'alors
+RETURN_JOY_UNMEASURED = 0.4
+#: la part de cette joie tournée vers la personne revenue, selon ce qu'elle est pour elle
+RETURN_TOWARD = {social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 0.8, social_c.CLOSE: 1.0}
+
+
+def return_joy(absence: float) -> float:
+    """La joie d'un retour, à la mesure de l'absence : une amie revenue au double de son rythme réjouit un peu, une
+    amie revenue après des mois réjouit vraiment."""
+    doublings = math.log2(absence) if absence > 1.0 else 0.0
+    return round(min(RETURN_JOY_CEILING, RETURN_JOY_FLOOR + RETURN_JOY_PER_DOUBLING * doublings), 3)
+
+
+@ATTENTION.appraisal(c.EXPECTATION_MET, reads=[social_c.CLOSENESS, social_c.WEIGHT])
+def _met_felt(e, cx) -> list[Appraisal]:
+    d = e.data
+    if d.kind == c.RETURN:
+        # enfin : de la joie, pour elle et envers la personne revenue — à la mesure de son absence, et de ce
+        # qu'elle est pour elle (sa propriétaire, davantage : ``social.WEIGHT``)
+        # (ce que les autres lui font vivre suit la contagion du tempérament, ADR 0100)
+        if d.absence is None:
+            return [Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, reason=causes.CAME_BACK, relational=True),
+                    Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, toward=d.person, reason=causes.CAME_BACK,
+                              relational=True)]
+        joy = round(min(1.0, return_joy(d.absence) * cx.facts.get(social_c.WEIGHT(d.person))), 3)
+        toward = RETURN_TOWARD.get(cx.facts.get(social_c.CLOSENESS(d.person)), 0.0)
+        return [Appraisal(Emotion.HAPPY, joy, reason=causes.CAME_BACK, relational=True),
+                Appraisal(Emotion.HAPPY, round(joy * toward, 3), toward=d.person, reason=causes.CAME_BACK,
+                          relational=True)]
+    return [Appraisal(Emotion.RELIEVED, 0.25, reason=causes.ANSWERED, relational=True)]
+
+
+# Ce que la digestion a apaisé se ressent au réveil, pas en pleine nuit (une teinte posée à 3 h
+# s'efface avant le matin) : c'est ``self.woke_with`` qui le porte (ADR 0036).
+
+
+@ATTENTION.reducer(c.ENVIED)
+def _envied(s: AttentionState, e, cx) -> AttentionState:
+    """Jalouse de ce silence-là : une fois par attente (la personne lui répond, ça repart de zéro)."""
+    ex = s.exchanges.get(e.data.person)
+    if ex is None:
+        return s
+    return replace(s, exchanges=s.exchanges.set(e.data.person, replace(ex, envied_at=e.at)))
+
+
+@ATTENTION.appraisal(c.ENVIED)
+def _envied_felt(e, cx) -> list[Appraisal]:
+    """De la jalousie, pour elle et envers la personne — ce que les autres lui font vivre : la contagion s'applique."""
+    d = e.data
+    return [Appraisal(Emotion.JEALOUS, d.intensity, reason=causes.ENVIED, relational=True),
+            Appraisal(Emotion.JEALOUS, d.intensity, toward=d.person, reason=causes.ENVIED, relational=True)]
+
+
+def envy(s: AttentionState, person: str, closeness: str, weight: float, p: Any) -> float:
+    """Ce que lui fait une personne qui écrit aux autres sans s'adresser à elle (0 : rien) : quelqu'un dont son dernier
+    message attend encore la réponse, une fois par attente, au cran de leur lien (``envy_by_closeness``, ADR 0150) —
+    davantage pour sa propriétaire (``social.WEIGHT``)."""
+    ex = s.exchanges.get(person)
+    share = p.envy_by_closeness.get(closeness, 0.0)
+    if p.envy_intensity <= 0 or share <= 0 or ex is None or not ex.unanswered or ex.envied_at >= ex.last_out:
+        return 0.0
+    return round(min(1.0, p.envy_intensity * weight * share), 3)
+
+
+@ATTENTION.appraisal(c.EXPECTATION_MISSED)
+def _missed_felt(e, cx) -> list[Appraisal]:
+    """Une promesse qu'elle n'a pas tenue : de la gêne, pour elle et envers la personne à qui elle l'avait faite ;
+    une réponse qui ne vient pas : un peu de peine, et envers elle aussi."""
+    d = e.data
+    p = params(cx.params if cx is not None else None)
+    if d.kind == c.PROMISE:
+        felt = (Emotion.EMBARRASSED, p.broken_promise_felt, causes.BROKEN_PROMISE, False)
+    elif d.kind == c.REPLY:
+        # le silence d'un autre : ce que les autres lui font vivre suit la contagion du tempérament (ADR 0100)
+        felt = (Emotion.SAD, p.unanswered_felt, causes.UNANSWERED, True)
+    else:
+        return []
+    emotion, intensity, reason, relational = felt
+    out = [Appraisal(emotion, intensity, reason=reason, relational=relational)]
+    if d.person:
+        out.append(Appraisal(emotion, intensity, toward=d.person, reason=reason, relational=relational))
+    return out
+
+
+# ── L'oubli d'une personne, l'expiration d'une inconnue de passage (audit du 2026-10-26) ──────────────
+
+
+def _without_person(s: AttentionState, person: str) -> AttentionState:
+    def drop(k: object) -> bool:
+        return key_concerns(k, person)
+
+    return replace(s, exchanges=s.exchanges.without(drop), eased=s.eased.without(drop), glad=s.glad.without(drop),
+                   missing=s.missing.without(drop), late=s.late.without(drop),
+                   expectations=s.expectations.without(drop),
+                   screens=s.screens.without(lambda k: s.screens[k] == person))
+
+
+@ATTENTION.reducer(identity_c.EXPIRED)
+def _stranger_expired(s: AttentionState, e, cx) -> AttentionState:
+    """Une inconnue de passage oubliée : plus rien d'attendu d'elle, plus de fil avec elle."""
+    return _without_person(s, e.data.person)
+
+
+@ATTENTION.reducer(SUBJECT_FORGOTTEN)
+def _person_forgotten(s: AttentionState, e, cx) -> AttentionState:
+    return _without_person(s, e.data.subject)

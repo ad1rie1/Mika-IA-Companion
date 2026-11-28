@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
 /*
  * « Corriger » (ADR 0307), dans le champ de Mail et de Teams — une petite forme qu'ils partagent : les fautes de ce que
  * tu écris, sans changer tes mots (ses règles pures : `data/moi/Correct.kt`). Porté de
- * `frontendv2/src/screens/mail/compose.ts` (`correctField`) : le texte corrigé remplace le tien aussitôt, et le message
+ * `frontend/Web/src/screens/mail/compose.ts` (`correctField`) : le texte corrigé remplace le tien aussitôt, et le message
  * offre « Annuler » ; rien n'est posé si tu as continué d'écrire. Sans modèle au rôle `correct`, le bouton reste
  * atténué et dit pourquoi quand on le touche (comme ✦ « Préremplir » dans Teams).
  */

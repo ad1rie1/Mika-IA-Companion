@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 
 /*
- * Les règles pures de Paramètres › Comptes Teams, portées du client web (`frontendv2/src/screens/teams/settings.ts`) :
+ * Les règles pures de Paramètres › Comptes Teams, portées du client web (`frontend/Web/src/screens/teams/settings.ts`) :
  * ce qu'un formulaire en envoie et les noms de ses champs, ce que l'on sait de son extension, un compte qu'on te
  * partage. Tout se teste sur la JVM.
  */

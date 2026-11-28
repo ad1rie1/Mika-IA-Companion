@@ -15,7 +15,7 @@ import kotlinx.serialization.json.jsonObject
 
 /*
  * Les règles pures de Paramètres › Boîtes mail, portées du client web sans les réinventer
- * (`frontendv2/src/screens/mail/words.ts` et `settings.ts`) : l'état d'une boîte, comment elle y écrit, une boîte
+ * (`frontend/Web/src/screens/mail/words.ts` et `settings.ts`) : l'état d'une boîte, comment elle y écrit, une boîte
  * qu'on te partage, ses fournisseurs et leurs préréglages, une boîte nouvelle, ses dossiers, ce qu'un formulaire en
  * envoie, ses bornes, les secrets à redonner, les noms de ses champs. Les codes sont ceux du moteur
  * (`adapters/mail/config.py`, `app/domains/mail/account_settings.py`). Tout se teste sur la JVM.

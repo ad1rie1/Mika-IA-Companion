@@ -15,7 +15,7 @@ import org.junit.Test
 
 /**
  * Les règles de la Carte (Explorer, la vraie carte ou le plan), portées du web : leurs cas viennent de
- * `frontendv2/src/screens/carte/requests.test.ts`, `carte.test.ts` et `map/map.test.ts`.
+ * `frontend/Web/src/screens/carte/requests.test.ts`, `carte.test.ts` et `map/map.test.ts`.
  */
 class CarteRulesTest {
     private fun place(name: String, distance: Double? = null, id: String = "", lat: Double? = 45.9, lon: Double? = 6.1) =

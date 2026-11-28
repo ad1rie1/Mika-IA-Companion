@@ -13,7 +13,7 @@ import kotlinx.serialization.json.contentOrNull
 
 /*
  * Les règles pures que les pages de Paramètres partagent, portées du client web sans les réinventer
- * (`frontendv2/src/shared/sharing.ts`, `shared/settings.ts`, `shared/sendrules.ts`, `screens/parametres/account.ts`) :
+ * (`frontend/Web/src/shared/sharing.ts`, `shared/settings.ts`, `shared/sendrules.ts`, `screens/parametres/account.ts`) :
  * les niveaux d'un partage et ce qu'ils ouvrent, ce qu'un formulaire a changé, les refus par champ, ton compte, la
  * règle d'envoi d'un compte (ADR 0207) et sa version, les lignes de la page racine. Celles d'un domaine sont dans son
  * paquet : `mail/MailSettingsRules.kt`, `teams/TeamsSettingsRules.kt`, `tools/ToolsSettingsRules.kt`,

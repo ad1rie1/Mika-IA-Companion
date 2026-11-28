@@ -20,7 +20,7 @@ Analyse les fichiers fournis pour identifier et corriger les problèmes de quali
 - Corrige UNIQUEMENT les problèmes significatifs, pas les micro-optimisations
 - Chaque correction doit être minimale et ciblée
 - Ne change PAS la logique métier
-- **Relis les règles de backendv2 dans le contexte projet.** Une couche ou un contrat d'import n'est pas une duplication à fusionner
+- **Relis les règles de backend dans le contexte projet.** Une couche ou un contrat d'import n'est pas une duplication à fusionner
 - Respecte les conventions de nommage existantes du projet (pas de renommage)
 - NE PAS ajouter de docstrings, commentaires ou type hints
 - NE PAS ajouter de gestion d'erreurs spéculative

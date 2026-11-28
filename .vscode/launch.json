@@ -11,8 +11,8 @@
             "request": "launch",
             "module": "mika",
             "args": ["--data", "data/v2", "serve", "--port", "8001"],
-            "cwd": "${workspaceFolder}/backendv2",
-            "python": "${workspaceFolder}/backendv2/.venv/bin/python",
+            "cwd": "${workspaceFolder}/backend",
+            "python": "${workspaceFolder}/backend/.venv/bin/python",
             "console": "integratedTerminal",
             "justMyCode": false,
             "autoStartBrowser": false

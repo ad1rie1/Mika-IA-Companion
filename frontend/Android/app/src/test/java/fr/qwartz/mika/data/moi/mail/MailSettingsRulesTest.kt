@@ -19,7 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Les règles de Paramètres › Boîtes mail, portées du client web (`frontendv2/src/screens/mail/words.ts`, ses tests
+ * Les règles de Paramètres › Boîtes mail, portées du client web (`frontend/Web/src/screens/mail/words.ts`, ses tests
  * `settings.test.ts`) : l'état d'une boîte, ce que la liste en dit, ses fournisseurs, une boîte nouvelle, ses dossiers,
  * ce qu'un formulaire envoie (et ce qu'il garde), ses bornes, les secrets à redonner.
  */

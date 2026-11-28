@@ -32,7 +32,7 @@ import kotlinx.coroutines.async
 
 /*
  * Les cartes miniatures d'une liste qui défile (la liste des voyages ; demain le fil du chat, lot 7), portées de
- * `frontendv2/src/map/minis.ts` : chacune montre d'abord son plan dessiné ; quand elle paraît, ce qu'elle montre se lit
+ * `frontend/Web/src/map/minis.ts` : chacune montre d'abord son plan dessiné ; quand elle paraît, ce qu'elle montre se lit
  * au serveur, puis une vraie carte, non interactive, prend sa place — **au plus quatre à la fois** ([MiniSlots]) : au-delà,
  * le plan reste. Une miniature qui sort de la vue rend sa place, qu'une autre visible reprend ; une qui reste au plan
  * (hors de la zone du fond, fond pas prêt, refusée, rien à montrer) n'en prend pas. Une miniature dont la carte ne se

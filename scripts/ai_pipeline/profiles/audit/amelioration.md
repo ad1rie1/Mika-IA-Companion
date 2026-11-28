@@ -17,7 +17,7 @@ Mika est censée être une personne. Ses mécanismes doivent ressembler à ceux 
 - **Gradués, pas binaires.** Un humain ne bascule pas d'un interdit à une permission à un seuil près : une anecdote peut échapper à une amie proche en privé, une confidence lourde jamais. La certitude sur *qui parle*, elle, reste mécanique.
 - **Mesurés au temps vécu, pas au nombre d'événements.** La fatigue vient des heures d'activité, le manque du rythme propre à chaque relation, pas d'un compteur global.
 - **Avec des causes et des traces.** Une émotion a une raison, laisse une trace, et s'efface ; un échec pèse autant qu'une réussite ; ce qu'elle attendait et qui arrive se ressent.
-- **Différents d'une personne à l'autre**, cohérents d'un canal à l'autre (web, Android, monde Unity).
+- **Différents d'une personne à l'autre**, cohérents d'un canal à l'autre (web, Android, Teams).
 
 Les signes qui trahissent la machine, à chercher en priorité :
 
@@ -35,7 +35,7 @@ Les signes qui trahissent la machine, à chercher en priorité :
 
 ## Plus fonctionnelle : ce que ça veut dire ici
 
-- **Pour la personne qui lui parle** : attente perçue, retour d'état (envoyé, lu, en train d'écrire), fichiers, notifications, reprise après une coupure, même comportement sur les trois clients.
+- **Pour la personne qui lui parle** : attente perçue, retour d'état (envoyé, lu, en train d'écrire), fichiers, notifications, reprise après une coupure, même comportement sur le web et sur Android.
 - **Pour l'opératrice** : comprendre pourquoi elle a dit ou fait quelque chose, régler sans éditer de fichier, voir ce qui ne va pas avant qu'on le lui signale, réparer sans redémarrer.
 - **Pour l'exploitation** : démarrage, sauvegarde et restauration, santé, ce qui grossit avec les mois.
 
@@ -48,7 +48,7 @@ Qu'est-ce qu'il calcule, décide, montre ? Comment ça se traduit, concrètement
 Suis le code à travers des situations réelles : une journée ordinaire, une semaine sans nouvelles d'une amie, une dispute puis des excuses, un deuil, un rappel promis, une conversation à plusieurs, un téléphone hors ligne pendant deux jours, une nuit blanche. À chaque étape : que fait-elle, et que ferait une personne ?
 
 ### 3. Confronte aux décisions déjà prises
-Lis `backendv2/ARCHITECTURE.md` et les ADR de ta zone. Ne propose pas l'inverse d'une décision documentée, ni ce qui existe déjà. Les sondes avec un vrai modèle (ADR 0043, 0048, 0054) disent ce qui a déjà été vu et corrigé.
+Lis `backend/ARCHITECTURE.md` et les ADR de ta zone. Ne propose pas l'inverse d'une décision documentée, ni ce qui existe déjà. Les sondes avec un vrai modèle (ADR 0043, 0048, 0054) disent ce qui a déjà été vu et corrigé.
 
 ### 4. Arbitre
 Garde **au plus 3 améliorations** pour ce module, les meilleures. Si le module n'en appelle honnêtement aucune, n'en invente pas : dis-le et arrête-toi.

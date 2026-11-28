@@ -5,7 +5,7 @@ import fr.qwartz.mika.data.moi.mail.MailContact
 import kotlin.math.roundToInt
 
 /*
- * Les règles pures de Contacts (ADR 0298), portées du client web (`frontendv2/src/screens/contacts/view.ts`) et de la
+ * Les règles pures de Contacts (ADR 0298), portées du client web (`frontend/Web/src/screens/contacts/view.ts`) et de la
  * maquette validée (`frontend/Android/maquette/ecrans/contacts.js`) sans rien réinventer : ce qu'une ligne et une
  * fiche disent en mots, ce qui identifie un contact, d'où vient un fait, où vous vous croisez ; et, pour Écrire, les
  * destinataires proposés depuis tous tes contacts — une ligne par adresse, une adresse générique marquée. Tout se teste

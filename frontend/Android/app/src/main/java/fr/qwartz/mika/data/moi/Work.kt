@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
  * Une seule ligne — l'étape (elle s'y met, elle réfléchit, tel outil tourne) et son chrono, qui court entre deux
  * étapes. Le moteur la dit dans `work` (`backendv2/docs/protocole-moi.md`, « `work`, en direct ») et pousse chaque
  * étape qui commence (`mail.work`, `teams.work`, ADR 0308) : l'écran relit alors `work` ; rien n'en est gardé. Porté
- * de `frontendv2/src/mika/work.ts`, pur et testé sur la JVM.
+ * de `frontend/Web/src/mika/work.ts`, pur et testé sur la JVM.
  */
 
 /** Les étapes de [Work]. */

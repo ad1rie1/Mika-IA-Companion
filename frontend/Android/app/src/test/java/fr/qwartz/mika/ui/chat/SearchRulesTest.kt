@@ -9,7 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** « Rechercher » : ce qui se cherche où, et comment se classe ce qui est trouvé (`frontendv2/src/shell/palette.ts`). */
+/** « Rechercher » : ce qui se cherche où, et comment se classe ce qui est trouvé (`frontend/Web/src/shell/palette.ts`). */
 class SearchRulesTest {
     private fun msg(text: String, ts: Long, sender: Sender = Sender.MIKA, strand: String? = null, inner: Boolean = false) =
         StoredMessage(text, sender, ts, id = ts, localId = ts, strand = strand, inner = inner)

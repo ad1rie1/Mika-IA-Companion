@@ -4,7 +4,7 @@ import java.time.ZoneId
 import kotlin.math.max
 
 /*
- * Les règles d'un voyage, sans Compose ni réseau, portées de `frontendv2/src/screens/carte/format.ts`, `view.ts` et
+ * Les règles d'un voyage, sans Compose ni réseau, portées de `frontend/Web/src/screens/carte/format.ts`, `view.ts` et
  * `map/cards.ts` sans changer leurs règles : l'ordre de ses arrêts et où un geste les met (un geste qui ne change rien,
  * ce qu'en dit un lecteur d'écran), un arrêt retiré, une note changée — montrés avant que le serveur les dise —, ce dont
  * son trajet dépend, le jour et la place d'un lieu croisé le long du trajet (« Sur la route »), ce que la fenêtre d'un

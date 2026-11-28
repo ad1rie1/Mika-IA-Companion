@@ -2,14 +2,14 @@
 
 Des agents (Claude Code ou Codex) auditent le dépôt, ouvrent des issues, les
 corrigent en PR, et tiennent ces PR à jour. Cible : le moteur vivant
-(`backendv2/`) et ses trois clients (`frontend/Web/`, `frontend/Android/`,
-`frontend/Unity/Mika/`).
+(`backend/`) et ses clients web (`frontend/Web/`) et Android
+(`frontend/Android/`).
 
 Un **module** est un dossier qu'un agent traite en un passage
 (`AVAILABLE_MODULES` dans `config.sh`). Il n'est retenu que s'il existe sur
 `origin/main` : c'est cet état que l'agent lit, un dossier pas encore poussé
 serait vide pour lui. Son label GitHub est `module:<chemin>`, abrégé pour
-Android (`module:android/…`) et Unity (`module:unity/…`).
+Android (`module:android/…`).
 
 ## Lancer
 
@@ -18,7 +18,7 @@ scripts/ai_pipeline/run.sh                    # boucle : rebase → worker → a
 scripts/ai_pipeline/run.sh --max-tasks 3      # s'arrête après 3 tâches
 scripts/ai_pipeline/run.sh --dry-run          # montre ce qui serait lancé, sans appel d'agent
 
-scripts/ai_pipeline/orchestrator.sh --audit --profile bugs --modules backendv2/src/mika/kernel
+scripts/ai_pipeline/orchestrator.sh --audit --profile bugs --modules backend/src/mika/kernel
 scripts/ai_pipeline/orchestrator.sh --worker  # issues Propose_AI_PR → PR
 scripts/ai_pipeline/orchestrator.sh --issue 42
 scripts/ai_pipeline/orchestrator.sh --rebase  # PR en conflit → rebase ; PR obsolètes → fermées
@@ -44,8 +44,8 @@ label du groupe. En direct : `orchestrator.sh --audit --profile bugs --group noy
 
 Les modules sont rangés en **groupes** (`MODULE_GROUPS` dans `config.sh`) :
 `noyau`, `exploitation`, `relations`, `vie-interieure`, `parole`, `projets`,
-`monde`, `canaux`, `web`, `android`, `unity`. Chaque issue et chaque PR porte
-le label `groupe:<nom>`, pour filtrer sur GitHub.
+`canaux`, `web`, `android`. Chaque issue et chaque PR porte le label
+`groupe:<nom>`, pour filtrer sur GitHub.
 
 Prérequis : `git`, `gh` authentifié, `jq`, `flock`, `timeout`, et le CLI de
 l'agent. Le dépôt GitHub est déduit du remote `origin`.
@@ -61,10 +61,8 @@ Ce qu'un agent laisse non commité est sauvegardé en patch dans `logs/`
 
 `frontend/Web/node_modules` et `frontend/Android/local.properties` sont liés
 depuis la copie principale. Android se vérifie par `:app:compileDebugKotlin`,
-sous le garde-fou mémoire `scripts/borne.sh`. Unity ne peut pas être
-compilé hors de l'éditeur : l'agent ne touche qu'au C# existant et le dit
-dans la PR. Le Python est
-celui de `backendv2/.venv`, appelé avec `PYTHONPATH=src` : son paquet `mika`
+sous le garde-fou mémoire `scripts/borne.sh`. Le Python est celui de
+`backend/.venv`, appelé avec `PYTHONPATH=src` : son paquet `mika`
 est installé en mode éditable sur la copie principale, et sans cette variable
 les tests de l'agent porteraient sur ta copie au lieu de son travail.
 
@@ -93,15 +91,14 @@ Le profil `coherence` ne cherche pas un défaut dans une pièce, mais un écart
 **entre** deux pièces : un champ que le serveur envoie et qu'Android lit sous un
 autre nom, une limite de pièce jointe qui diffère entre le web et le serveur,
 un README qui décrit une commande retirée, une émotion connue du noyau et pas
-d'Unity, un reste de Telegram. Un audit par module ne voit pas ces écarts :
+d'Android, un reste de Telegram. Un audit par module ne voit pas ces écarts :
 celui-ci s'audite donc par **axe**, chaque passage lisant tout le dépôt vivant
-(moteur, trois clients, extension, `INJECTION/` hors données privées, docs,
-scripts) :
+(moteur, clients web et Android, extension Teams, docs, scripts) :
 
 | Axe | Regarde |
 |---|---|
-| `protocoles` | ce que le serveur envoie et ce que chaque client lit (chat, monde 3D, Teams) |
-| `vocabulaire` | les listes fermées recopiées : émotions, lieux, phases, statuts, libellés, phrases |
+| `protocoles` | ce que le serveur envoie et ce que chaque client lit (chat, API par personne, Teams) |
+| `vocabulaire` | les listes fermées recopiées : émotions, phases, statuts, libellés, phrases |
 | `documentation` | README, ARCHITECTURE, ADR, `CLAUDE.md` et docs face au code |
 | `reglages` | limites, délais et seuils recopiés d'une pièce à l'autre |
 | `restes` | code mort entre pièces, références à ce qui n'existe plus, fichiers suivis par erreur |

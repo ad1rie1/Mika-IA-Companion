@@ -7,7 +7,7 @@ Analyse les fichiers fournis pour identifier et corriger les vulnérabilités de
 
 ## Modèle de menace
 
-Moteur personnel servi sur loopback, opératrice propriétaire. Ce qui a de la valeur : le journal de sa vie et ce qu'elle sait des personnes (confidences, secrets), les identifiants (clés LLM, jetons git, boîtes mail, jetons des clients Android et Unity), et les capacités (mail, push git, ateliers, Forge, monde 3D). Les attaquants réalistes sont, dans l'ordre : une page web tierce visitée pendant la session, du contenu hostile entrant par un canal (mail, RSS, pièce jointe, fichier partagé vers l'appli, sortie d'app forgée, capteur), un autre poste du LAN si l'écoute n'est pas sur loopback, une autre application sur le téléphone.
+Moteur personnel servi sur loopback, opératrice propriétaire. Ce qui a de la valeur : le journal de sa vie et ce qu'elle sait des personnes (confidences, secrets), les identifiants (clés LLM, jetons git, boîtes mail, jetons de l'application Android, clés de l'extension Teams), et les capacités (mail, Teams, push git, ateliers, Forge). Les attaquants réalistes sont, dans l'ordre : une page web tierce visitée pendant la session, du contenu hostile entrant par un canal (mail, RSS, pièce jointe, fichier partagé vers l'appli, sortie d'app forgée, capteur), un autre poste du LAN si l'écoute n'est pas sur loopback, une autre application sur le téléphone.
 
 ## Catégories à vérifier
 
@@ -27,7 +27,7 @@ Moteur personnel servi sur loopback, opératrice propriétaire. Ce qui a de la v
 - Corrige UNIQUEMENT les vrais problèmes de sécurité, exploitables par un des attaquants ci-dessus
 - Chaque correction doit être minimale et ciblée
 - Ne change PAS la logique métier
-- **Relis les règles de backendv2 dans le contexte projet.** L'écoute sur loopback, les garde-fous gradués et le fournisseur Claude Code par sa CLI sont assumés : ne les « durcis » pas
+- **Relis les règles de backend dans le contexte projet.** L'écoute sur loopback, les garde-fous gradués et le fournisseur Claude Code par sa CLI sont assumés : ne les « durcis » pas
 - **Si la correction exige de modifier un fichier protégé, ne la fais pas** : décris-la dans ton résumé, un humain l'appliquera
 - Respecte les conventions de nommage existantes du projet (pas de renommage)
 

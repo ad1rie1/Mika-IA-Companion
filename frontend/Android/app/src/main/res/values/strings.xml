@@ -1285,7 +1285,7 @@
     <string name="chat_tray_teams_list" tools:ignore="PluralsCandidate">Ses réponses · %1$d à relire</string>
     <string name="chat_tray_open_in">Ouvrir dans %1$s</string>
 
-    <!-- Rechercher (Route.Search) : le Ctrl K du frontendv2 devenu un écran à puces -->
+    <!-- Rechercher (Route.Search) : le Ctrl K du client web devenu un écran à puces -->
     <string name="search_hint">Rechercher partout</string>
     <string name="search_hint_chat">Rechercher dans la conversation</string>
     <string name="search_chip_all">Tout</string>

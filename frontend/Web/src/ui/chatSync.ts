@@ -115,8 +115,8 @@ export interface StoredMessage {
    * Les pièces d'un message de la personne (ADR 0215), telles que le fil relu
    * les dit : nom, sorte, et de quoi reprendre sa copie quand elle a été
    * gardée — validées par `userAttachments`. Le texte, lui, garde leurs noms
-   * (`withAttachments`) : c'est ainsi que le client web les affiche et qu'une
-   * bulle se reconnaît au retour du serveur.
+   * (`withAttachments`) : c'est ainsi qu'une bulle se reconnaît au retour du
+   * serveur.
    */
   attachments?: HistoryAttachment[];
   /**
@@ -231,7 +231,7 @@ export function ackReason(status: string): string {
   return ACK_REASONS[status] ?? "refusé par le serveur";
 }
 
-/** Pourquoi une pièce jointe n'est pas passée (backendv2/src/mika/adapters/web/protocol.py). */
+/** Pourquoi une pièce jointe n'est pas passée (backend/src/mika/adapters/web/protocol.py). */
 const REJECT_REASONS: Record<string, string> = {
   too_large: "trop volumineux",
   too_many: "au-delà de la limite de pièces jointes",

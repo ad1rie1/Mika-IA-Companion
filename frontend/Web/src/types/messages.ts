@@ -1,5 +1,4 @@
 import type { SleepPhase } from "./sleep";
-import type { AvatarStateSnapshot } from "./animation";
 
 // ── Wire payload fragments ──────────────────────────────────────────
 
@@ -76,8 +75,7 @@ export interface PendingProjectAction {
 
 /**
  * Les sortes de rêve que le serveur envoie (`contracts/self_.py::DREAM_KINDS`,
- * via `app/mindport.py`). `InnerLifePanel` a un libellé pour chacune
- * (vérifié par le compilateur) ; un test côté serveur confronte cette liste
+ * via `app/mindport.py`) ; un test côté serveur confronte cette liste
  * à la sienne.
  */
 export const DREAM_TYPES = [
@@ -89,31 +87,9 @@ export const DREAM_TYPES = [
 ] as const;
 export type DreamType = (typeof DREAM_TYPES)[number];
 
-/**
- * Ce qu'elle fait dans sa chambre (faculté `world` du serveur,
- * `adapters/web/protocol.py::activity`) : un état, comme `place`.
- */
-export interface InnerStateActivity {
-  /** `draw`, `work`, `look_outside`, `browse_books`, `water_plant`… — une
-   * table du client (vtuber/animation/activity.ts) ; un nom inconnu se tait. */
-  name: string;
-  /** Comment elle le dit : « regarder dehors ». */
-  label: string;
-  /** Début, en millisecondes depuis l'époque. */
-  since: number;
-  /** Fin prévue (ms) ; null : jusqu'à ce qu'elle s'arrête (le serveur le dira). */
-  until: number | null;
-}
-
 export interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
   energy?: number;
-  /** Where she is in her room — decided by the backend (the AI), one of
-   * the places of vtuber/locomotion/roomLayout.ts. */
-  place?: string;
-  /** Ce qu'elle y fait ; null : rien ; absent : un serveur plus ancien (on
-   * n'y touche pas). */
-  activity?: InnerStateActivity | null;
   /** Estime de soi ∈ [0,1] — la variable lente ; absente si illisible. */
   estime?: number;
   circadian?: {
@@ -237,7 +213,7 @@ export interface SpeechMessage {
   voice_persona?: VoicePersona;
   voice_profile?: VoiceProfile;
   /**
-   * Persistence cursors (backendv2/src/mika/adapters/web/protocol.py; a `message_id`
+   * Persistence cursors (backend/src/mika/adapters/web/protocol.py; a `message_id`
    * is the message's transcript `seq`). `message_id` is
    * this reply's row; the client keeps the highest it has rendered and asks
    * for everything after it on reconnect. Null when the turn was not
@@ -250,7 +226,7 @@ export interface SpeechMessage {
   client_msg_id?: string | null;
   /**
    * Les fichiers qu'elle envoie avec ce message (un texte écrit, un dessin —
-   * backendv2, ADR 0062 et 0063) ; `[]` quand il n'y en a pas.
+   * backend, ADR 0062 et 0063) ; `[]` quand il n'y en a pas.
    */
   attachments?: SentFile[];
   /** Ce qu'elle a fait en écrivant ce message (ADR 0119) ; absent s'il n'y en a pas. */
@@ -275,7 +251,7 @@ export interface MessageNote {
 
 /**
  * Un fichier qu'elle a envoyé avec un message (`docs/protocole-chat.md` §6
- * de backendv2) : il se télécharge par `url` (`/files/<id>`, relatif au
+ * de backend) : il se télécharge par `url` (`/files/<id>`, relatif au
  * serveur), avec la session du navigateur, seulement par le compte dont le
  * fil le porte. `available` faux : retiré par la rétention.
  */
@@ -470,7 +446,7 @@ export interface StrandHistoryFrame {
 
 /**
  * Une pièce jointe que la validation serveur a écartée
- * (backendv2/src/mika/adapters/web/protocol.py, `rejected_attachments`).
+ * (backend/src/mika/adapters/web/protocol.py, `rejected_attachments`).
  */
 export interface RejectedAttachment {
   name: string;
@@ -544,7 +520,7 @@ export interface InnerStateUpdateMessage {
 }
 
 /**
- * Live emotional state, pushed between turns (backendv2/src/mika/adapters/web/hub.py).
+ * Live emotional state, pushed between turns (backend/src/mika/adapters/web/hub.py).
  * Same emotion fields as `speech`, no text and no inner state: the PAD
  * oscillators keep moving while Mika is silent, and this is what stops the
  * face and the readout from freezing on the last reply. Applied as ambient
@@ -560,18 +536,7 @@ export interface EmotionUpdateMessage {
 }
 
 /**
- * v2 (reserved, not yet emitted by the backend): authoritative body
- * state broadcast so all clients render the same pose. The frontend
- * will interpolate toward it and demote its local sleep-phase→pose
- * inference to a fallback.
- */
-export interface AvatarStateMessage {
-  type: "avatar_state";
-  state: AvatarStateSnapshot;
-}
-
-/**
- * Une carte d'accord (backendv2, ADR 0064 ; `docs/protocole-chat.md` §4) :
+ * Une carte d'accord (backend, ADR 0064 ; `docs/protocole-chat.md` §4) :
  * un appel qu'elle veut faire à un service extérieur et qui attend l'accord
  * de la personne à qui elle parle. Seul le bouton compte — un « oui » tapé
  * dans le chat n'est jamais un accord.
@@ -713,7 +678,6 @@ export interface ServerMessageMap {
   pong: PongMessage;
   inner_state_update: InnerStateUpdateMessage;
   emotion_update: EmotionUpdateMessage;
-  avatar_state: AvatarStateMessage;
   approvals: ApprovalsMessage;
   approval_result: ApprovalResultMessage;
   verdict_result: VerdictResultMessage;

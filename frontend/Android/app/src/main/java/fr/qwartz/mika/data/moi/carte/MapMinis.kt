@@ -1,7 +1,7 @@
 package fr.qwartz.mika.data.moi.carte
 
 /*
- * La carte miniature d'un voyage ou d'un regard de Mika (ADR 0196), sans Compose, portée de `frontendv2/src/map/cards.ts`
+ * La carte miniature d'un voyage ou d'un regard de Mika (ADR 0196), sans Compose, portée de `frontend/Web/src/map/cards.ts`
  * et `minis.ts` : ce qu'elle montre (un voyage — ses arrêts reliés —, ses lieux, le trajet qu'elle a gardé), son titre,
  * ce qu'elle est, ce qu'elle ouvre dans l'écran Carte, et les places des cartes vivantes (quatre à la fois). Rien n'y
  * demande d'itinéraire : un voyage s'y dessine en reliant ses arrêts, un regard avec le tracé résumé qu'elle a gardé.

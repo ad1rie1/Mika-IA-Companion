@@ -8,7 +8,7 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 /*
- * Carte › Événements (ADR 0259), sans Compose ni réseau, porté de `frontendv2/src/screens/carte/agenda.ts` et `fiche.ts`
+ * Carte › Événements (ADR 0259), sans Compose ni réseau, porté de `frontend/Web/src/screens/carte/agenda.ts` et `fiche.ts`
  * sans changer leurs règles : quand chercher (aujourd'hui, ce week-end, cette semaine, des dates), les événements
  * groupés par jour et leur ligne, le jour d'un voyage où un événement tombe, son prix et ses thèmes en mots, la phrase
  * qu'on prépare pour Mika, ce que la fiche d'un événement montre (et toujours qui l'a écrite). Les événements viennent

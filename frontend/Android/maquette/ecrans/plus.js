@@ -1,5 +1,5 @@
 /* Plus (la cinquième case de la barre du bas) et Paramètres : ce que tu règles pour toi (ton compte, ses boîtes,
-   tes comptes Teams, tes téléphones, tes partages, tes services — le frontendv2), puis ce que règle ce téléphone
+   tes comptes Teams, tes téléphones, tes partages, tes services — le client web), puis ce que règle ce téléphone
    (les réglages de l'app d'aujourd'hui : notifications, position, ses messages, apparence, données). */
 (function () {
   const { h, ico, av, D } = A;
@@ -25,7 +25,7 @@
       </div>`,
     notes: {
       titre: 'Plus',
-      reprend: ['La cinquième case : Mika (vers « Ce qu\'elle fait »), « Rechercher partout », puis Téléphone, Outils, Paramètres.', 'Le compte et « Se déconnecter » en bas, comme le menu du compte du frontendv2.'],
+      reprend: ['La cinquième case : Mika (vers « Ce qu\'elle fait »), « Rechercher partout », puis Téléphone, Outils, Paramètres.', 'Le compte et « Se déconnecter » en bas, comme le menu du compte du client web.'],
       trancher: ['Ces trois rubriques sous « Plus » te vont, ou faut-il en remonter une dans la barre du bas (à la place de Carte ou de Teams) ?', 'La carte de Mika en haut de « Plus » : utile, ou redondante avec son visage partout ?'],
     },
   }));
@@ -53,7 +53,7 @@
         </div>`,
       notes: {
         titre: 'Paramètres',
-        reprend: ['En haut ce qui est à toi (le frontendv2 : compte, boîtes, Teams, téléphones, partages, services MCP).', 'Puis « Ce téléphone » : les réglages de l\'app d\'aujourd\'hui, chacun sa page.', 'Une liste à la Android : une ligne, une page.'],
+        reprend: ['En haut ce qui est à toi (le client web : compte, boîtes, Teams, téléphones, partages, services MCP).', 'Puis « Ce téléphone » : les réglages de l\'app d\'aujourd\'hui, chacun sa page.', 'Une liste à la Android : une ligne, une page.'],
         trancher: ['Deux groupes dans une seule page, ou deux entrées séparées (« Ton compte et ses accès » · « Ce téléphone ») ?'],
       },
     };
@@ -70,7 +70,7 @@
         <div class="li">${ico('globe')}<span class="txt"><b>Chrome sur Linux</b><small>session du web · il y a 2 h</small></span></div>
         ${row('Partout', 'ferme toutes tes sessions et déconnecte tes téléphones', `<button class="btn danger text sm" type="button" data-snack="Maquette : rien n'est fermé">Tout fermer</button>`)}</div>
       <div style="padding:16px"><button class="btn filled block" type="button" data-back data-snack="Enregistré">Enregistrer</button></div>`,
-    { titre: 'Paramètres · Compte', reprend: ['Le compte du frontendv2 : nom, identifiant, rôle, « Lui demander » (le chat s\'ouvre, la question posée), mot de passe, les connexions.'], trancher: ['« Enregistrer » en bas de page, ou dans la barre du haut (une coche) ?'] });
+    { titre: 'Paramètres · Compte', reprend: ['Le compte du client web : nom, identifiant, rôle, « Lui demander » (le chat s\'ouvre, la question posée), mot de passe, les connexions.'], trancher: ['« Enregistrer » en bas de page, ou dans la barre du haut (une coche) ?'] });
   }
 
   function boites() {

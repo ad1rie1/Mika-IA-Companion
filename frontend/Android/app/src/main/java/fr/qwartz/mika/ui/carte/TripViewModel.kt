@@ -87,7 +87,7 @@ class TripDeps(
 }
 
 /**
- * Carte › un voyage (ADR 0195, 0235), porté de `frontendv2/src/screens/carte/trip.ts` sans changer ses règles : ses
+ * Carte › un voyage (ADR 0195, 0235), porté de `frontend/Web/src/screens/carte/trip.ts` sans changer ses règles : ses
  * gestes — déplacer un arrêt, le retirer, le noter, en ajouter, réordonner un jour, le changer — faits l'un après
  * l'autre ([GestureQueue] : chacun part du voyage que le précédent a laissé ; un refus annule ceux qui attendaient) et
  * montrés avant que le serveur les dise ([optimistic]) ; quand plus rien n'attend, le voyage relu, et son trajet un

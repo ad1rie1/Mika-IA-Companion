@@ -37,7 +37,7 @@
         </div>`,
       notes: {
         titre: 'Téléphone · Messages',
-        reprend: ['L\'écran Téléphone du frontendv2 : les conversations que l\'app a lues, leurs fils, ses propositions et leur sort.', 'Le sélecteur en titre passe d\'un téléphone à l\'autre (le Pixel 7a), « Ce téléphone » d\'abord.',
+        reprend: ['L\'écran Téléphone du client web : les conversations que l\'app a lues, leurs fils, ses propositions et leur sort.', 'Le sélecteur en titre passe d\'un téléphone à l\'autre (le Pixel 7a), « Ce téléphone » d\'abord.',
           'Ici sous « Plus » (la barre du bas n\'a que cinq cases) ; dans la variante « Tiroir », c\'est une rubrique comme les autres.'],
         trancher: ['« Téléphone » sous « Plus », ou à la place de Carte dans la barre du bas ?', 'Le nom : « Téléphone » (comme le web), ou « Ses messages » / « Messages du téléphone » sur un téléphone ?'],
       },

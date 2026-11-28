@@ -2,13 +2,13 @@
 
 Le client de tous les jours sur un téléphone (ADR 0235) : d'abord la conversation avec Mika — on lui écrit, on lui
 envoie des photos et des fichiers, elle répond, et comme dans une vraie messagerie elle peut écrire la première quand
-l'application est fermée —, puis, par le tiroir, ce que fait le client web `frontendv2/` : Projets, Mail, Teams, Agenda,
+l'application est fermée —, puis, par le tiroir, ce que fait le client web `frontend/Web/` : Projets, Mail, Teams, Agenda,
 Carte, Téléphone, Contacts, Outils et Paramètres, pour la personne connectée. On voit aussi ce qu'elle fait : sa ligne d'état sous son
 nom, son visage au bout de chaque barre du haut, et l'écran « Ce qu'elle fait ».
 
-Le serveur est `backendv2/` (`python -m mika serve`). La conversation passe par
-[`backendv2/docs/protocole-chat.md`](../../backendv2/docs/protocole-chat.md), le reste par l'API par personne
-[`backendv2/docs/protocole-moi.md`](../../backendv2/docs/protocole-moi.md) ; les décisions : ADR 0062, puis 0235, et
+Le serveur est `backend/` (`python -m mika serve`). La conversation passe par
+[`backend/docs/protocole-chat.md`](../../backend/docs/protocole-chat.md), le reste par l'API par personne
+[`backend/docs/protocole-moi.md`](../../backend/docs/protocole-moi.md) ; les décisions : ADR 0062, puis 0235, et
 0296 pour les projets, 0298 pour les contacts, 0309 pour l'agenda. La
 maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.md`) : on navigue par le tiroir.
 
@@ -74,7 +74,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
   liste entière, qui remplace la précédente ; chaque connexion repart d'une liste vide, le serveur n'envoie la liste à
   l'ouverture que si elle n'est pas vide ; une carte dit aussi `capability` et `draft`), `approval_result` (le sort),
   et côté app `approval` (`id`, `decision`, l'empreinte `digest` de la carte montrée).
-- **Rechercher** (`Route.Search`, le Ctrl K du frontendv2 devenu un écran) : la loupe du chat, ou « Rechercher
+- **Rechercher** (`Route.Search`, le Ctrl K du client web devenu un écran) : la loupe du chat, ou « Rechercher
   partout » du tiroir. Un champ en haut, des puces (Tout, Conversation — celle de la loupe —, Mail, Teams, Écrans), les
   résultats groupés : **dans la conversation**, les messages gardés sur ce téléphone (sans accents ni casse, dans tout
   leur texte, le passage trouvé surligné, le plus récent d'abord, dix au plus) ; pour une opératrice, **ses fils de
@@ -116,7 +116,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
 - **« Lui montrer mes messages »** (ADR 0120, coupé par défaut) : les messages WhatsApp, Messenger (ADR 0299) et SMS
   que le téléphone affiche partent à Mika, qui s'en souvient ; elle peut proposer une réponse, qu'une notification te demande d'autoriser. Voir
   [Ses messages](#ses-messages).
-- **Projets** (ADR 0296, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 11), une
+- **Projets** (ADR 0296, l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md) § 11), une
   rubrique du tiroir, juste après le chat, avec sa pastille (`counts.projects` : ce qui t'attend). C'est l'écran Projets
   du client web, d'après la même maquette validée, lue dans ses vues en largeur de téléphone
   (`output/chaines-de-travail/web/MAQUETTE-V2.md`, ses captures `-390-`) : une liste, puis son détail en page, avec un
@@ -291,7 +291,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     pas dessinés (leur nom, tel que le serveur le sert) ; l'éditeur écrit le Markdown lui-même (le web écrit dans la page
     mise en forme) et n'a pas de bouton « tableau » ; une demande s'ouvre en feuille ; les listes n'ont pas de vue en
     tableau.
-- **Mail** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 3), une
+- **Mail** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md) § 3), une
   rubrique du tiroir. Tes boîtes et celles qu'on te partage, à leur niveau (lire, préparer, s'en servir). Le titre est la
   vue et ouvre une feuille : toutes les réceptions (sans les boîtes qu'on ne te partage qu'en lecture, qui s'ouvrent en
   les nommant, ADR 0200), chaque boîte, les dossiers de la boîte choisie et leurs non-lus, « Ses brouillons », « Régler
@@ -357,7 +357,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     ou absent d'un serveur d'avant (404) : tes correspondants (`mail/contacts?q=`), comme avant. « Écrire » depuis une
     fiche de Contacts ouvre un mail nouveau, son adresse posée (`Route.MailCompose(to, toName)`). Code :
     `data/moi/contacts/RecipientSuggester.kt` et `proposals` (`ContactsRules.kt`), `ui/mail/RecipientSuggestions.kt`.
-- **Teams** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 4), une
+- **Teams** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md) § 4), une
   rubrique du tiroir. Tes comptes Teams et ceux qu'on te partage, à leur niveau : le compte est en sous-titre (le tien,
   qui y est connecté ; partagé, son niveau et son propriétaire), et le titre ouvre une feuille pour choisir un compte
   ou tous, « Ses brouillons », « Régler les comptes Teams ». La loupe cherche. « Ses brouillons » paraît en bandeau rose
@@ -432,13 +432,13 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     d'elle-même, son heure, la note d'un refus). Toucher une carte ouvre sa discussion ; celle qui attend ta décision
     se décide aussi d'ici ; sur un compte qu'on te partage, elle attend l'accord de son propriétaire, et la carte dit
     qui décide.
-- **Agenda** (ADR 0309, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 13 ; la maquette
+- **Agenda** (ADR 0309, l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md) § 13 ; la maquette
   validée `maquette/ecrans/agenda*.js`, ses « À trancher » réglés par les recommandations de `output/agenda/CONCEPTION.md`),
   une rubrique du tiroir après Teams, sa pastille : tes invitations qui attendent ta réponse et ce que Mika propose dont tu
   décides (`counts.agenda`). Tes agendas (celui du système, ceux que tu branches, ceux qu'on te partage) et « L'agenda de
   Mika », sa mémoire montrée comme un agenda, en lecture seule. **Rien n'y est recalculé** : un bouton n'existe que si le
   serveur l'ouvre (`can`), un refus se dit avec ses mots, les instants se lisent à l'heure du serveur (`zone`). Le web
-  (`frontendv2/src/screens/agenda/`) est la référence des règles, portées dans `data/moi/agenda/` sans les réinventer.
+  (`frontend/Web/src/screens/agenda/`) est la référence des règles, portées dans `data/moi/agenda/` sans les réinventer.
   - **La barre**, celle d'un agenda de téléphone : ☰, le mois en titre — le toucher déplie le mini-mois sous la barre (un
     point sous les jours qui ont quelque chose, on le balaie, « Agendas à afficher · 7 sur 7 », ‹ ›) —, chercher,
     « Aujourd'hui » (l'icône au numéro du jour), ⋮ et son visage. ⋮ porte les cinq vues (**Planning · Jour · 3 jours ·
@@ -540,7 +540,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     tableau de droits, le choix « À qui » d'un compte, la fréquence de relecture d'un abonnement et « Essayer » une
     adresse iCal, le fuseau, le premier jour de la semaine et le rappel de départ propres à une personne, « Envoyer sa
     réponse » ou « Ajouter » depuis le volet des notifications.
-- **Carte** (ADR 0193 à 0196, 0235, 0259 ; l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md)
+- **Carte** (ADR 0193 à 0196, 0235, 0259 ; l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md)
   § 10), une rubrique du tiroir, quatre onglets sous la barre du haut (Explorer · Événements · Itinéraire · Voyages) qui
   se remplacent sans s'empiler. La carte est celle que sert ce serveur, et lui seul (voir [La carte](#la-carte-maplibre)) ;
   sans fond prêt, hors de sa zone, ou quand elle ne se dessine pas ici, un plan dessiné de ce qu'elle montre la remplace,
@@ -685,7 +685,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     carte d'un voyage de la liste dit ses jours et ses arrêts, pas ses kilomètres (la liste n'a pas son trajet) ;
     « Sur la route » est un panneau en tête de l'éditeur plutôt qu'une feuille (ses épingles restent visibles) ; la
     date d'un voyage est un départ (le serveur ne garde que lui), pas un intervalle.
-- **Téléphone** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 5), une
+- **Téléphone** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md) § 5), une
   rubrique du tiroir, deux onglets (Messages, Position). Sous le titre, l'état de tes téléphones — « Ce téléphone ·
   samsung SM-S931B », « 2 téléphones · dont celui-ci », et s'il en est un qui ne reçoit pas les notifications — : un
   état, pas un sélecteur (ADR 0233), qui mène à Paramètres › Téléphones. Pas d'onglet Notifications tant que
@@ -722,7 +722,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     note dit pourquoi pas la carte) ; le lieu, « ±12 m · mesurée à 14:10 », les coordonnées, et si Mika l'a regardée
     (d'après ses bulles 📍 du chat). L'interrupteur « Lui dire où je suis », le même que dans Paramètres › Position, et
     « Ouvrir dans Carte ».
-- **Contacts** (ADR 0298, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 12 ; la
+- **Contacts** (ADR 0298, l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md) § 12 ; la
   maquette validée le 2026-11-22, `maquette/ecrans/contacts.js`), une rubrique du tiroir après Téléphone, sans pastille
   (rien n'y attend ta décision), et dans « Rechercher partout ». Tous ceux que Mika connaît pour toi — vus dans ton Teams,
   tes boîtes, ton téléphone, ou dont tu lui as parlé — et leurs organisations, **le dernier vu d'abord** (l'ordre du
@@ -757,7 +757,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     restent) ; pas d'« Ouvrir la console » dans la feuille d'un refus (le serveur n'en donne pas l'adresse) ; la ligne
     « Contacts » de la feuille des boîtes de Mail n'est pas ajoutée (l'app ne l'avait pas, et la maquette laisse la
     question ouverte) ; Plus (la variante barre) n'existe pas dans l'app.
-- **Outils** (ADR 0235, 0208, 0209 ; l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md)
+- **Outils** (ADR 0235, 0208, 0209 ; l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md)
   § 6 et 8), une rubrique du tiroir, trois onglets (Droits, Services, Accords) qui se remplacent sans s'empiler. Rien n'y
   est recalculé : chaque case est la décision même du moteur, pour toi. Ouvert depuis un autre écran (« Comment ça part »
   de Teams, la règle d'envoi de Paramètres), la flèche y ramène.
@@ -790,7 +790,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     grand écran (une seule se lit ici, ADR 0209). Autrement que la maquette : la Position reste parmi ses propres
     outils, là où la matrice la range (pas de groupe « Ce téléphone ») ; un compte ne liste pas les outils de sa
     famille (ADR 0209) ; le nom de code d'un outil n'est que dans sa feuille (ADR 0208).
-- **Paramètres** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) § 5, 7, 8,
+- **Paramètres** (ADR 0235, l'API par personne : [`protocole-moi.md`](../../backend/docs/protocole-moi.md) § 5, 7, 8,
   9), une rubrique du tiroir : une page racine en groupes, une ligne par page, chaque ligne disant où en est ce qu'elle
   règle (relu à chaque retour, et quand le direct dit que tes réglages, tes boîtes, tes comptes Teams ou tes téléphones
   ont changé ; les listes — boîtes, comptes Teams, téléphones, partages, services — aussi ; un formulaire ne se relit
@@ -853,7 +853,7 @@ maquette validée des écrans est dans [`maquette/`](maquette/) (son `LISEZMOI.m
     Teams attend : application fermée, rien ne pourrait la poser).
 
 Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et le monde 3D (la chambre, les déplacements :
-c'est le client Unity).
+retirés du moteur par l'ADR 0319).
 
 ## Le direct
 
@@ -861,7 +861,7 @@ Ce qui change ce que montrent les écrans (un mail qui arrive, un message Teams,
 projet, un voyage, tes réglages…) est poussé par le serveur sur la connexion du chat déjà ouverte, en une trame
 `changed` qui dit **quoi** a changé, jamais le contenu : l'écran relit la route qu'il montre (ADR 0308). Le contrat —
 les sujets, leurs clés, ce que chaque écran relit — est le § 2 bis de
-[`protocole-moi.md`](../../backendv2/docs/protocole-moi.md) ; il ne se recopie pas ici.
+[`protocole-moi.md`](../../backend/docs/protocole-moi.md) ; il ne se recopie pas ici.
 
 - **Le service** `data/moi/Live.kt` (`AppGraph.live`) : `ConnectionManager` lui donne chaque trame `changed` (lue par
   `FrameCodec`, tolérante : un sujet inconnu se tait, une clé inconnue ou une liste vide valent tout le domaine) et
@@ -938,11 +938,11 @@ Ces signaux viennent de `ui/chat/ConversationCues.kt` (`ConversationCues`, `Spee
   `vrm_mobile.py` ne lit qu'un VRM 0.x (`default.vrm`). Le modèle libre du dépôt (`mika-libre.vrm`, ADR 0252) est en
   1.0 : il n'arrive pas encore sur le téléphone.
 
-- **Les animations** sont les mouvements de l'atelier (`frontend/Unity/ArtSource/atelier/motions`, ceux qu'Unity
-  importe) et le manifeste du client web (`frontend/Web/public/animations/manifest.json`). Ils sont copiés dans
+- **Les animations** sont les mouvements de l'atelier (`frontend/Assets/atelier/motions`) et le
+  manifeste des animations (`frontend/Assets/animations/manifest.json`). Ils sont copiés dans
   l'APK à chaque construction : il n'y a qu'une seule source.
 - **Repli.** Sans le modèle préparé, l'app montre les portraits pré-rendus de l'ADR 0065
-  (`frontend/Web/assets-src/blender/portraits.py`, ignorés par git eux aussi). Sans portraits non plus, pas d'avatar,
+  (`frontend/Assets/blender/portraits.py`, ignorés par git eux aussi). Sans portraits non plus, pas d'avatar,
   et l'interrupteur « Mika en fond » (Paramètres › Apparence) n'apparaît pas.
 - **Batterie.** Elle n'est dessinée que quand l'écran est visible, à 60 images/s au plus, même sur un écran à 120 Hz.
 
@@ -984,8 +984,8 @@ première carte montrée et se relit à chaque retour d'une carte à l'écran, a
   voulu : ce fond est le même pour tous les comptes du serveur, il ne porte ni jeton ni donnée personnelle (le jeton
   part dans l'en-tête, jamais dans l'adresse gardée). La seule trace qu'il laisse est l'ensemble des zones regardées,
   qu'un autre compte du même téléphone ne verrait qu'en parcourant la carte hors ligne.
-- **Le style** ne s'écrit pas à la main : `tools/carte_style.mjs` importe `frontendv2/src/map/mapstyle.ts` lui-même (Node
-  24 lit le TypeScript) et `@protomaps/basemaps` depuis `frontendv2/node_modules`, et écrit les calques clairs et sombres
+- **Le style** ne s'écrit pas à la main : `tools/carte_style.mjs` importe `frontend/Web/src/map/mapstyle.ts` lui-même (Node
+  24 lit le TypeScript) et `@protomaps/basemaps` depuis `frontend/Web/node_modules`, et écrit les calques clairs et sombres
   — les couleurs et les noms en français de Protomaps, sans les points d'intérêt qui n'apprennent rien (`QUIET_POIS`) —
   dans `app/src/main/assets/carte/style-clair.json` et `style-sombre.json`, versionnés comme les icônes. Au moment de
   charger, `data/moi/carte/CarteStyle` y pose ce qui vient du serveur (ses tuiles, ses polices, sa planche `light` ou
@@ -995,8 +995,8 @@ première carte montrée et se relit à chaque retour d'une carte à l'écran, a
   sans polices sous un préfixe, sans planche, sans les deux, en images) dans
   `app/src/test/resources/carte/styles-web.json`, et `CarteStyleTest` vérifie que `CarteStyle` compose le même pour les
   mêmes entrées — la source, `sprite`, `glyphs`, le style raster, ce qui retire texte et icônes, toute clé racine.
-  **Lancer `--check` après chaque mise à jour de `@protomaps/basemaps` (un `npm install` dans `frontendv2/`) ou retouche
-  de `frontendv2/src/map/mapstyle.ts`** : rien ne le lance d'office (ni test ni CI). S'il échoue, réécrire, puis lancer
+  **Lancer `--check` après chaque mise à jour de `@protomaps/basemaps` (un `npm install` dans `frontend/Web/`) ou retouche
+  de `frontend/Web/src/map/mapstyle.ts`** : rien ne le lance d'office (ni test ni CI). S'il échoue, réécrire, puis lancer
   les tests JVM : un style du web qui a changé ailleurs que dans ses calques y fait échouer `CarteStyleTest` tant que
   `CarteStyle.kt` ne le suit pas.
 
@@ -1004,12 +1004,12 @@ première carte montrée et se relit à chaque retour d'une carte à l'écran, a
   node frontend/Android/tools/carte_style.mjs           # réécrit les deux styles et leurs références
   node frontend/Android/tools/carte_style.mjs --check   # échoue si l'un d'eux a vieilli
   ```
-- **Ce qu'elle montre** (`ui/map/SceneMap`, porté de `frontendv2/src/map/`) : une scène — des épingles numérotées,
+- **Ce qu'elle montre** (`ui/map/SceneMap`, porté de `frontend/Web/src/map/`) : une scène — des épingles numérotées,
   roses pour ce que Mika a fait, des secondaires plus petites (dessinées en images : leurs numéros n'ont pas besoin des
   polices du serveur), des tracés (polylines à six décimales, `decodePolyline6`), ta position et le cercle de sa
   précision —, cadrée sur ce qu'elle montre (jusqu'au zoom 17, ce que la recherche et la feuille couvrent évité). Le
   nord reste en haut : ni rotation ni inclinaison. Le thème clair ou sombre suit l'app.
-- **Les miniatures** (`ui/map/MiniMaps`, porté de `frontendv2/src/map/minis.ts`) : la liste des voyages et le fil du
+- **Les miniatures** (`ui/map/MiniMaps`, porté de `frontend/Web/src/map/minis.ts`) : la liste des voyages et le fil du
   chat (`ui/carte/CarteMinis.MapNoteCard`) montrent d'abord le plan de ce qu'elles portent ; ce qu'elles
   montrent se lit une fois pour la session (un voyage changé dans la Carte se relit quand sa miniature reparaît, et une
   liste qui le dit changé depuis la fait relire), puis une vraie carte non interactive (une vue de texture, le doigt
@@ -1045,7 +1045,7 @@ L'adresse du serveur se saisit à l'écran de connexion (`http://` est ajouté s
 | Téléphone en USB | `python -m mika serve` puis `adb reverse tcp:8001 tcp:8001` | `http://localhost:8001` |
 | Téléphone sur le Wi-Fi de la maison | `python -m mika serve --host 0.0.0.0` | `http://192.168.x.y:8001` |
 | Tailscale | `--host 0.0.0.0` (ou l'adresse Tailscale) | `http://machine.xxx.ts.net:8001` |
-| Hors de chez toi | un mandataire TLS devant (voir `backendv2/deploy/README.md`) | `https://mika.example.org` |
+| Hors de chez toi | un mandataire TLS devant (voir `backend/deploy/README.md`) | `https://mika.example.org` |
 
 En `http://` hors de Tailscale, l'écran de connexion prévient : le mot de passe et les messages passent en clair
 sur le réseau. Préfère `https://` dès que tu sors de chez toi. Derrière un mandataire, il doit laisser passer les
@@ -1069,7 +1069,7 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
   L'app le déchiffre et l'affiche dans la notification de conversation habituelle. Il faut, une fois : un projet
   Firebase où l'application est déclarée, son `google-services.json` dans `app/` à la construction, et la clé d'un
   compte de service **côté serveur** — `firebase-service-account.json` dans son dossier de données, ou collée dans
-  sa console ; jamais dans l'app (pas à pas : `backendv2/deploy/README.md`, « Notifications du téléphone »). L'app le redit au serveur à chaque ouverture chez toi (au plus tous les quarts d'heure). Paramètres ›
+  sa console ; jamais dans l'app (pas à pas : `backend/deploy/README.md`, « Notifications du téléphone »). L'app le redit au serveur à chaque ouverture chez toi (au plus tous les quarts d'heure). Paramètres ›
   Notifications › « Application fermée » dit où elle en est (active, en attente, serveur sans clé, version sans
   Firebase) avec « Réessayer ».
 - **Hors de chez toi**, la notification arrive (elle passe par Google) mais l'app ne joint pas le serveur : le

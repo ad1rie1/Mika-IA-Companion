@@ -1,7 +1,7 @@
 package fr.qwartz.mika.data.moi.agenda
 
 /*
- * Créer et modifier un événement, pur (porté de `frontendv2/src/screens/agenda/form.ts` et `model.ts`, la forme de la
+ * Créer et modifier un événement, pur (porté de `frontend/Web/src/screens/agenda/form.ts` et `model.ts`, la forme de la
  * maquette validée `agenda-edition.js`) : les valeurs de départ du formulaire (un événement nouveau, à un créneau
  * touché ; une modification ; une copie ; ce que Mika propose), la répétition (RFC 5545 : chaque jour, semaine, mois,
  * année, « Personnalisée »), les rappels du fournisseur, l'heure dans une liste de demi-heures, et ce qui part : tout

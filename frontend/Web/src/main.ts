@@ -1,467 +1,178 @@
-import * as THREE from "three";
-import { SceneManager } from "./scene/SceneManager";
-import { Environment } from "./scene/Environment";
-import { CameraController } from "./scene/CameraController";
-import { MODEL_URLS, VTuberModel } from "./vtuber/VTuberModel";
-import { EmotionController } from "./vtuber/EmotionController";
-import { AnimationSystem } from "./vtuber/animation/AnimationSystem";
-import { AnimationDebugger } from "./vtuber/animation/AnimationDebugger";
-import { LipSyncController, msPerCharForRate } from "./audio/LipSyncController";
-import { TTSService } from "./audio/TTSService";
+/**
+ * Le démarrage : le thème, ses portraits, `whoami()` → la connexion ou l'application. L'application, c'est le
+ * cadre (shell/), Mika (mika/) et les écrans (screens/), sur une connexion `/ws` du compte. Une fermeture en
+ * 4401 (session révoquée, déconnexion, droits changés) ramène à la connexion, comme le veut le protocole :
+ * `whoami` d'abord, et seulement si la session ne vaut plus, l'écran de connexion. Le direct (`live/`, ADR 0308) se
+ * branche sur chaque client de cette connexion : ce qui change est poussé aux écrans, rien ne se relit à intervalles.
+ */
+import "./styles/base.css";
+import "./styles/chat.css";
+import "./styles/ecrans/projets.css";
+import "./styles/ecrans/outils.css";
+import "./styles/ecrans/mail.css";
+import "./styles/ecrans/teams.css";
+import "./styles/ecrans/telephone.css";
+import "./styles/ecrans/contacts.css";
+import "./styles/ecrans/carte.css";
+import "./styles/ecrans/parametres.css";
+import "./styles/ecrans/agenda.css";
+import "./styles/app.css";
+
+import { API_BASE, logout, whoami, WS_URL, type AuthState } from "./network/api";
 import { WebSocketClient } from "./network/WebSocketClient";
-import { IdentityService } from "./network/IdentityService";
-import { ChatOverlay } from "./ui/ChatOverlay";
-import { EmotionDisplay } from "./ui/EmotionDisplay";
-import { InnerLifePanel } from "./ui/InnerLifePanel";
-import { LoginOverlay } from "./ui/LoginOverlay";
-import { SpeechPresenter } from "./ui/SpeechPresenter";
-import { API_BASE, WS_URL } from "./network/api";
-import { WorldSession, worldUrl } from "./world/WorldSession";
-import { MIKA, WorldStage } from "./world/WorldStage";
-import { WorldHud } from "./world/WorldHud";
-import { affordanceClip, DESK_PROPS, GESTURE_CLIPS, takesProp, TOUCH_REACTIONS } from "./world/roomBindings";
-import { extractPart } from "./world/RoomHinges";
-import { articulationFor } from "./vtuber/animation/affect";
-import type { EmotionBlend, EmotionName } from "./types";
+import { consoleHref } from "./ui/chatSync";
+import { live } from "./live/live";
+import { ensureSession } from "./login/login";
+import { setManifest } from "./mika/face";
+import { loadManifest } from "./mika/portraits";
+import { MikaStore } from "./mika/store";
+import { startVrmWhenShown } from "./mika/view";
+import { followChanges } from "./shared/store";
+import { agendaScreen } from "./screens/agenda";
+import { carteScreen } from "./screens/carte";
+import { ChatScreen } from "./screens/chat/chat";
+import { contactsScreen } from "./screens/contacts";
+import { mailScreen } from "./screens/mail";
+import { outilsScreen } from "./screens/outils";
+import { parametresScreen } from "./screens/parametres";
+import { projetsScreen } from "./screens/projets";
+import { teamsScreen } from "./screens/teams";
+import { telephoneScreen } from "./screens/telephone";
+import { startCounts } from "./shell/counts";
+import { keepInitialsOnBrokenPhotos, MOBILE_QUERY } from "./shell/dom";
+import { injectSprite } from "./shell/icons";
+import { Shell, type Account } from "./shell/shell";
+import { applyTheme, currentChoice, followSystem } from "./shell/theme";
 
-function wireIdentityBar(identity: IdentityService, ws: WebSocketClient) {
-  const nameInput = document.getElementById("identity-name") as HTMLInputElement;
-  const resetBtn = document.getElementById("identity-reset") as HTMLButtonElement;
-  if (!nameInput || !resetBtn) return;
+/** Au-delà de tant de reconnexions refusées d'affilée, on cesse de croire `whoami` et on redemande le compte. */
+const MAX_QUICK_RETRIES = 3;
+/** Une connexion restée ouverte si longtemps n'était pas un refus en boucle. */
+const STABLE_MS = 10_000;
 
-  if (identity.displayName) {
-    nameInput.value = identity.displayName;
-  }
-
-  const commitName = () => {
-    const value = nameInput.value.trim();
-    if (value !== (identity.displayName ?? "")) {
-      identity.setDisplayName(value);
-      ws.setIdentity(identity.personId, identity.displayName);
-      // Re-send identify so the backend picks up the new display name.
-      ws.send({
-        type: "identify",
-        person_id: identity.personId,
-        display_name: identity.displayName,
-      });
-    }
+function accountOf(state: AuthState): Account {
+  const username = state.username ?? "";
+  return {
+    username,
+    displayName: state.display_name || username || "Invité",
+    operator: state.operator === true,
+    personId: state.person_id ?? "",
   };
-  nameInput.addEventListener("blur", commitName);
-  nameInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      nameInput.blur();
-    }
-  });
-
-  resetBtn.addEventListener("click", () => {
-    if (!confirm("Réinitialiser ton identité ? Mika ne te reconnaîtra plus.")) return;
-    identity.reset();
-    ws.setIdentity(identity.personId, null);
-    nameInput.value = "";
-    // A reload is the cleanest way to restart the greeting flow with the new ID.
-    window.location.reload();
-  });
 }
 
-// Connection badge: green "Connectée" that fades out after a few seconds,
-// amber spinner while a reconnect attempt is in flight, red with the retry
-// countdown otherwise.
-function wireConnectionBadge(ws: WebSocketClient, connectionStatus: HTMLElement) {
-  let settleTimer: number | null = null;
-  ws.on("connection", (data) => {
-    if (settleTimer !== null) {
-      window.clearTimeout(settleTimer);
-      settleTimer = null;
+async function boot(): Promise<void> {
+  injectSprite();
+  keepInitialsOnBrokenPhotos();
+  applyTheme(currentChoice(), false);
+  followSystem();
+  const loginRoot = document.getElementById("login")!;
+  const appRoot = document.getElementById("app")!;
+  setManifest(await loadManifest());
+  const state = await ensureSession(loginRoot);
+  startApp(state, loginRoot, appRoot);
+}
+
+function startApp(state: AuthState, loginRoot: HTMLElement, appRoot: HTMLElement): void {
+  const account = accountOf(state);
+  loginRoot.hidden = true;
+  loginRoot.innerHTML = "";
+  // les copies partagées suivent le direct avant que les écrans ne s'y abonnent : ce qu'ils relisent repart du serveur
+  followChanges(live);
+  const store = new MikaStore();
+  let leaving = false;
+  const page = consoleHref("/admin/");
+  const shell = new Shell(appRoot, store, account, {
+    console: page ? `${API_BASE}${page}` : undefined,
+    logout: async () => {
+      leaving = true;
+      chat.forget();
+      try {
+        await logout();
+      } catch {
+        // le serveur ne répond pas : la session tombera d'elle-même ; on repart quand même de la connexion
+      }
+      history.replaceState(null, "", location.pathname + location.search);
+      location.reload();
+    },
+  });
+  const chat = new ChatScreen(shell, store, account);
+  shell.register(chat.screen());
+  // dans l'ordre de la barre du haut, celui de la maquette
+  for (const make of [projetsScreen, outilsScreen, mailScreen, teamsScreen]) {
+    shell.register(make(shell));
+  }
+  // le téléphone, les contacts et la carte : « Lui en parler dans le chat », « Lui présenter quelqu'un », « Demander à
+  // Mika » ouvrent le chat avec une phrase préremplie
+  const ask = (text: string) => chat.prefill(text);
+  shell.register(telephoneScreen(shell, { ask }));
+  shell.register(agendaScreen(shell, { ask }));
+  shell.register(contactsScreen(shell, { ask }));
+  shell.register(carteScreen(shell, { ask }));
+  shell.register(parametresScreen(shell));
+  shell.start();
+  // les pastilles, et le nom du compte relu avec elles : renommé ailleurs (un autre appareil, la console), le menu suit
+  startCounts(
+    () => shell.updateCounts(),
+    (me) => {
+      if (me.name && me.name !== shell.user.displayName) shell.setAccount({ ...shell.user, displayName: me.name });
+    },
+  );
+
+  // Les reconnexions refusées d'affilée : une connexion restée ouverte un moment remet le compte à zéro, pas
+  // une ouverture suivie d'un refus aussitôt (sinon un serveur qui accepte puis refuse ferait tourner en rond).
+  let quickRetries = 0;
+  let openedAt = 0;
+  const connect = () => {
+    const ws = new WebSocketClient(WS_URL);
+    ws.on("emotion_update", (d) => store.mood(d));
+    ws.on("inner_state_update", (d) => store.innerState(d.inner_state));
+    ws.on("connection", (d) => {
+      if (d.status === "connected") openedAt = Date.now();
+      if (d.status === "unauthorized" && !leaving) void unauthorized();
+    });
+    chat.bind(ws);
+    // le direct (ADR 0308) : `changed`, et chaque ouverture, la première comprise, fait tout relire
+    live.bind(ws);
+    ws.connect();
+  };
+
+  /** Fermée en 4401 : la session vaut-elle encore ? Oui, on se reconnecte ; non, on redemande le compte. */
+  const unauthorized = async () => {
+    if (openedAt && Date.now() - openedAt > STABLE_MS) quickRetries = 0;
+    let still: AuthState | null = null;
+    try {
+      still = await whoami();
+    } catch {
+      still = null;
     }
-    if (data.status === "unauthorized") {
-      // Terminal: the client stopped retrying on purpose. Say what to do
-      // instead of leaving a spinner turning forever.
-      connectionStatus.className = "disconnected";
-      connectionStatus.textContent = "Session expirée — reconnecte-toi";
-      connectionStatus.onclick = () => window.location.reload();
-      connectionStatus.style.cursor = "pointer";
-      connectionStatus.title = "Cliquer pour se reconnecter";
+    if (still?.authenticated && still.person_id === account.personId && quickRetries < MAX_QUICK_RETRIES) {
+      quickRetries += 1;
+      connect();
       return;
     }
-    if (data.status === "connected") {
-      connectionStatus.className = "connected";
-      connectionStatus.textContent = "Connectée";
-      settleTimer = window.setTimeout(() => {
-        connectionStatus.classList.add("settled");
-      }, 3000);
-    } else if (data.status === "reconnecting") {
-      connectionStatus.className = "reconnecting";
-      connectionStatus.textContent = "Reconnexion…";
-    } else {
-      connectionStatus.className = "disconnected";
-      const retry = typeof data.retryInMs === "number"
-        ? ` (réessai dans ${Math.round(data.retryInMs / 1000)}s)`
-        : "";
-      connectionStatus.textContent = `Déconnectée${retry}`;
+    appRoot.hidden = true;
+    const again = await ensureSession(loginRoot, "Ta session a expiré : reconnecte-toi.");
+    if (again.person_id !== account.personId) {
+      // quelqu'un d'autre : rien de la personne d'avant ne reste dans la page
+      location.reload();
+      return;
     }
-  });
-}
-
-async function init() {
-  const container = document.getElementById("app")!;
-  const connectionStatus = document.getElementById("connection-status")!;
-
-  // Scene setup
-  const sceneManager = new SceneManager(container);
-  const environment = new Environment(sceneManager.scene);
-  // The desk chair is hers to pull out: once the room is in (GLB or the
-  // procedural fallback, both name it), the locomotion moves it.
-  void environment.ready.then(() =>
-    animationSystem.setPlaceProp("desk", environment.group.getObjectByName("DeskChair") ?? null)
-  );
-  const cameraController = new CameraController(
-    sceneManager.camera,
-    sceneManager.renderer.domElement
-  );
-
-  // VTuber model + the whole body-animation stack (clips, state machine,
-  // overlays, hands, gaze, blink) behind one facade.
-  const vtuberModel = new VTuberModel(sceneManager.scene);
-  const emotionController = new EmotionController();
-  const animationSystem = new AnimationSystem();
-  const lipSyncController = new LipSyncController();
-
-  // Le monde (mika.world/1, ADR 0050), en spectatrice comme le prévoit le
-  // protocole pour un écran web : l'état des meubles (porte, fenêtre,
-  // armoire), ce qu'elle tient, les gestes, ses demandes, ce qu'on peut faire
-  // des objets. Son corps, lui, suit déjà inner_state par la conversation.
-  // Déclarés avant tout `await` : le modèle et la pièce s'y relient dès
-  // qu'ils sont chargés. La session ne part qu'après la connexion.
-  const world = new WorldSession({ url: worldUrl(API_BASE) });
-  const stage = new WorldStage(sceneManager.scene, {
-    mikaMoving: () => animationSystem.place.moving,
-    onGesture: (g) => {
-      if (g.actor === MIKA) {
-        const own = GESTURE_CLIPS[g.gesture];
-        if (own) animationSystem.playWorldGesture(own);
-        return;
-      }
-      if (g.to_actor !== MIKA) return;
-      // La personne de ce poste lui fait signe : elle la regarde, comme quand
-      // elle lui écrit ; ce qu'elle en ressent revient par la dérive d'humeur.
-      if (g.actor === world.actor) presenter.noteUserTyping();
-      const reaction = TOUCH_REACTIONS[g.gesture];
-      if (reaction) animationSystem.playWorldGesture(reaction);
-    },
-    onMikaAct: (_step, affordance) => {
-      const clip = affordanceClip(affordance?.animation);
-      if (clip) animationSystem.playWorldGesture(clip);
-    },
-  });
-  stage.bindSession(world);
-  void environment.ready.then(() => {
-    const room = environment.group.getObjectByName("RoomModel") ?? environment.group;
-    stage.bindRoom(room);
-    // Her mug, her pen and her mouse, out of the desk's joined props: her
-    // hands take them in the Unity workshop's desk clips (desk/DeskStage.ts).
-    const prop = (name: "mug" | "pen" | "mouse") => {
-      const spec = DESK_PROPS.find((p) => p.name === name)!;
-      return extractPart(room, name, [spec.node], (part) => takesProp(spec, part))?.group ?? null;
-    };
-    animationSystem.setDeskProps({ mug: prop("mug"), pen: prop("pen"), mouse: prop("mouse") });
-  });
-  const emotionDisplay = new EmotionDisplay();
-  const innerLifePanel = new InnerLifePanel();
-
-  // Persistent identity — loaded from localStorage, survives reloads +
-  // WebSocket reconnects. This is what makes the theory-of-mind layer
-  // (PersonProfile / Commitment / per-person emotional memory) actually
-  // work across sessions on the web.
-  const identity = new IdentityService();
-
-  // Try loading VRM model — deliberately NOT awaited, for the same reason
-  // the Mixamo clips aren't: it's the heaviest asset of the two (tens of
-  // MB to download AND parse), and nothing downstream of it depends on it.
-  // Awaiting here kept the page blank — no login form, no chat, no socket,
-  // so no history catch-up either — for the whole download. Every consumer
-  // already handles "not loaded yet", so the avatar simply shows up when
-  // it's ready.
-  void vtuberModel
-    .loadFirst(MODEL_URLS)
-    .then((vrm) => {
-      emotionController.setVRM(vrm);
-      lipSyncController.setVRM(vrm);
-      const root = vtuberModel.getRoot();
-      // The pivot rides her head (eye level), wherever she walks, sits or
-      // lies; the camera is carried along at the angle the user chose.
-      const head = vrm.humanoid?.getRawBoneNode("head");
-      if (head) cameraController.setFollowTarget(head, new THREE.Vector3(0, 0.05, 0));
-      else if (root) cameraController.setFollowTarget(root);
-      // Ce qu'elle tient va dans sa main ; on la vise entre ses hanches et sa tête.
-      const bone = (name: Parameters<NonNullable<typeof vrm.humanoid>["getRawBoneNode"]>[0]) =>
-        vrm.humanoid?.getRawBoneNode(name) ?? null;
-      const tip = new THREE.Vector3();
-      stage.bindMika({
-        palm: (side, out) => {
-          const hand = bone(side === "left" ? "leftHand" : "rightHand");
-          if (!hand) return null;
-          hand.getWorldPosition(out);
-          const middle = bone(side === "left" ? "leftMiddleProximal" : "rightMiddleProximal");
-          return middle ? out.lerp(middle.getWorldPosition(tip), 0.7) : out;
-        },
-        hips: (out) => bone("hips")?.getWorldPosition(out) ?? null,
-        head: (out) => bone("head")?.getWorldPosition(out) ?? null,
-      });
-      // Starts animating synchronously on the rest pose, then streams the
-      // Mixamo clips in — not awaited so the app boots without waiting for
-      // FBX downloads.
-      // The camera is the viewer: her eyes and head keep contact with it,
-      // with the gaze aversions of a real conversation (see attention.ts).
-      void animationSystem
-        .init(vrm, { root, camera: sceneManager.camera })
-        .catch((e) => console.warn("AnimationSystem init failed:", e));
-      console.log("VTuber model ready");
-    })
-    .catch(() => {
-      console.warn(
-        `No VRM model found at ${MODEL_URLS.join(" nor ")} - running without model.`,
-        "Place a .vrm file in frontend/Web/public/models/default.vrm"
-      );
-      createPlaceholder(sceneManager);
-    });
-
-  // What the voice says, the face shows — at the moment it sounds. The
-  // presenter holds every bit of voice/drift/sleep state (see
-  // SpeechPresenter.ts); main.ts only wires frames and events into it.
-  // `presenter` is read inside callbacks the TTS fires later, so declaring
-  // it after the TTS it depends on is fine.
-  const tts = new TTSService({
-    onSpeakStart: () => presenter.handleSpeakStart(),
-    onSpeakEnd: () => {
-      lipSyncController.stop();
-      presenter.handleSpeakEnd();
-    },
-    // [SIGH]/[LAUGH] tokens fire a body beat in sync with their audio.
-    onProsodicCue: (cue) => {
-      animationSystem.playCue(cue);
-    },
-    // Le plan de lip-sync doit suivre l'énoncé qui commence réellement à
-    // jouer, pas celui qu'on vient de mettre en file : deux répliques
-    // rapprochées faisaient sinon articuler la bouche sur le texte suivant
-    // pendant que l'audio du précédent tournait encore.
-    onUtteranceStart: (text, rate) => {
-      const msPerChar = msPerCharForRate(rate);
-      lipSyncController.startFromPlan(tts.lipSyncPlan(text), msPerChar);
-      // The head and brows punctuate the same text, fired as the lip-sync
-      // cursor reaches each beat (see animation/speechBeats.ts).
-      animationSystem.beginUtterance(text, msPerChar);
-    },
-    // L'énoncé est clos, qu'il ait sonné ou non (mute pendant la latence de
-    // synthèse, synthèse refusée…) : `onSpeakEnd` ne vient que si la voix a
-    // démarré, et la bouche articulait sinon la phrase en silence. Arrêter
-    // le plan éteint aussi les battements de parole (curseur à −1).
-    onUtteranceEnd: () => {
-      lipSyncController.stop();
-    },
-    // La synthèse dit où en est la voix (début réel, puis chaque mot là où
-    // le navigateur le donne) : la bouche s'y recale au lieu de courir sur
-    // une estimation qui finissait avant ou après l'audio.
-    onSpeechProgress: (charIndex) => {
-      lipSyncController.seekToChar(charIndex);
-    },
-  });
-  // The face port also sets how wide the mouth articulates: it follows the
-  // reply's emotion at the moment the voice starts, like the expression.
-  let fatigue = 0;
-  const face = {
-    setEmotion: (emotion: EmotionName, intensity: number, blend?: EmotionBlend) => {
-      emotionController.setEmotion(emotion, intensity, blend);
-      lipSyncController.setArticulation(articulationFor(emotion, intensity, fatigue));
-    },
-    setEnergy: (energy: number) => {
-      fatigue = Math.max(0, Math.min(1, (0.55 - energy) / 0.4));
-      emotionController.setEnergy(energy);
-      // The same tiredness slows and lowers the voice a little.
-      tts.setFatigue(fatigue);
-    },
+    loginRoot.hidden = true;
+    loginRoot.innerHTML = "";
+    appRoot.hidden = false;
+    quickRetries = 0;
+    connect();
   };
-  const presenter = new SpeechPresenter({
-    voice: tts,
-    face,
-    body: animationSystem,
-    stage: environment,
-    readouts: {
-      setEmotion: (emotion, intensity) => emotionDisplay.setEmotion(emotion, intensity),
-      setEmotionBlend: (blend, intensity) => innerLifePanel.setEmotionBlend(blend, intensity),
-      applyInnerState: (state) => innerLifePanel.applyInnerState(state),
-    },
-  });
-  // The InnerLifePanel extracts the phase from every inner_state payload
-  // and fans it out here (animation + environment + wake-up stamp).
-  innerLifePanel.onSleepPhaseChange((phase) => presenter.setSleepPhase(phase));
 
-  // Auth: the WebSocket authenticates via the server's session cookie.
-  //
-  // The gate is driven by the *backend* (`auth_required` in /auth/whoami)
-  // rather than a build-time flag, so the frontend can't be configured into
-  // disagreeing with the server about whether a session is needed — that
-  // combination produced a login-free UI whose WebSocket was then refused.
-  // When no account exists yet the overlay switches to creating the first one.
-  const auth = await new LoginOverlay().ensureAuthenticated();
+  connect();
 
-  // WebSocket connection with identity handshake
-  // Voice mute toggle — persisted so a muted session stays muted on reload.
-  const muteBtn = document.getElementById("tts-mute");
-  if (muteBtn) {
-    const applyMuteUI = () => {
-      muteBtn.textContent = tts.isMuted ? "🔇" : "🔊";
-      muteBtn.classList.toggle("muted", tts.isMuted);
-    };
-    tts.setMuted(localStorage.getItem("vtuber_tts_muted") === "1");
-    applyMuteUI();
-    muteBtn.addEventListener("click", () => {
-      tts.setMuted(!tts.isMuted);
-      localStorage.setItem("vtuber_tts_muted", tts.isMuted ? "1" : "0");
-      applyMuteUI();
-    });
-  }
-
-  const ws = new WebSocketClient(WS_URL);
-  // The server-issued id wins when authenticated: the consumer binds the
-  // connection to user_{pk} and ignores any client claim, so sending the
-  // locally generated web_* one would just describe an identity that the
-  // backend already overrode.
-  const effectivePersonId = auth.authenticated
-    ? auth.person_id ?? identity.personId
-    : identity.personId;
-  ws.setIdentity(
-    effectivePersonId,
-    auth.authenticated
-      ? auth.display_name ?? auth.username ?? identity.displayName
-      : identity.displayName
-  );
-  // The cached thread is scoped to that id. Without it, resetting the
-  // identity — or a second account on the same browser — kept the previous
-  // person's conversation on screen under a new name.
-  const chatOverlay = new ChatOverlay(ws, effectivePersonId);
-  // En mode pro, le travail prend tout l'écran et la vie intérieure se replie
-  // (elle revient comme elle était en sortant du mode).
-  chatOverlay.onProModeChange((on) => {
-    document.getElementById("app")?.classList.toggle("pro-mode", on);
-    innerLifePanel.setProMode(on);
-  });
-  // Approving a project action needs an operator account (the server answers
-  // 403 otherwise). With auth disabled server-side nothing is gated.
-  innerLifePanel.setCanApprove(!auth.authenticated || auth.operator === true);
-  // Une opératrice lit sous chaque parole où elle s'explique (la console, qui
-  // garde sa propre porte) ; un compte ordinaire ne voit rien de plus.
-  chatOverlay.setOperator(auth.operator === true);
-  // The identity bar lets an anonymous visitor pick a name. Authenticated
-  // users have one already, and letting them edit it here would suggest they
-  // can change who Mika thinks they are — which is exactly what the session
-  // is there to settle.
-  if (!auth.authenticated) {
-    wireIdentityBar(identity, ws);
-  } else {
-    document.getElementById("identity-bar")?.style.setProperty("display", "none");
-  }
-
-  wireConnectionBadge(ws, connectionStatus);
-
-  ws.on("speech", (data) => presenter.handleSpeech(data));
-  ws.on("inner_state_update", (data) => presenter.handleInnerStateUpdate(data));
-  ws.on("emotion_update", (data) => presenter.handleEmotionUpdate(data));
-  ws.on("ack", (data) => presenter.handleAck(data));
-  // Les cartes d'accord (backendv2, ADR 0064) : un appel à un service
-  // extérieur attend la décision de la personne. La liste entière à chaque
-  // changement, puis le sort de chaque décision ; seuls les boutons décident.
-  ws.on("approvals", (data) => chatOverlay.setApprovals(data.items));
-  ws.on("approval_result", (data) => chatOverlay.showApprovalResult(data));
-  // Pas de trame `project_report` : le serveur v2 n'en émet pas. Ce qu'elle
-  // raconte d'un projet arrive comme une parole (`speech`), dans le fil.
-
-  ws.connect();
-
-  new WorldHud({
-    session: world,
-    stage,
-    canvas: sceneManager.renderer.domElement,
-    camera: sceneManager.camera,
-    parent: container,
-  });
-  world.start();
-
-  // Manual QA hooks: Alt+M cycles every loaded clip on the live model
-  // (the only reliable retarget check on this rig), Alt+K skeleton,
-  // Alt+S/E/T/G force sleep/emotions/talking/gestures, Alt+D panel.
-  new AnimationDebugger({
-    system: animationSystem,
-    scene: sceneManager.scene,
-    // Read when the skeleton helper is toggled, not here: the VRM loads in
-    // the background and is usually still missing at this point.
-    get avatarScene() {
-      return vtuberModel.vrm?.scene ?? null;
-    },
-    applySleepPhase: (phase) => presenter.setSleepPhase(phase),
-    applyEmotion: (emotion, intensity) => presenter.showEmotion(emotion, intensity),
-  });
-
-  // Typing anywhere (outside another field) focuses the chat input, so you
-  // can just start writing without clicking the box first.
-  const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
-  // Someone typing to her is someone to listen to: eyes on them — and, on
-  // the server, the reply to their previous message waits for the rest.
-  chatInput?.addEventListener("input", () => {
-    presenter.noteUserTyping();
-    ws.noteComposing(chatInput.value);
-  });
-  document.addEventListener("keydown", (e) => {
-    if (!chatInput) return;
-    const target = e.target as HTMLElement;
-    const inField =
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
-      target.isContentEditable;
-    if (inField || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key.length === 1 || e.key === "Enter") {
-      chatInput.focus();
-    }
-  });
-
-  // Update loop
-  sceneManager.onUpdate((delta) => {
-    cameraController.update(delta);
-    emotionController.update(delta);
-    // The voice's position in the reply (one frame old — nothing reads it
-    // at that precision) drives the speech beats.
-    animationSystem.setSpeechCursor(lipSyncController.currentCharOffset);
-    // Owns every bone writer, in order: resetNormalizedPose → state
-    // machine → clip mixer → additive overlays → hands → gaze → blink.
-    animationSystem.update(delta);
-    lipSyncController.update(delta);
-    environment.update(delta);
-    // vrm.update() applies expression weights and copies normalized bones to
-    // raw ones — it must run AFTER every controller has written this frame's
-    // pose. Calling it first made every expression and rotation land one
-    // frame late, which is a ~25% timing error on a 4-frame blink at 30fps.
-    vtuberModel.update(delta);
-    // Après le corps : ce qu'elle tient suit sa main telle qu'elle est dessinée.
-    animationSystem.lateUpdate(delta);
-    stage.update(delta);
+  // Sa VRM, à part : three et three-vrm ne retardent pas l'écran ; ?vrm=0 la coupe (portrait seul). Sur un téléphone,
+  // son coin est masqué (son portrait seul) : ni three ni le modèle (~100 Mo) ne se chargent, sauf si la fenêtre
+  // s'élargit.
+  startVrmWhenShown(location.search, matchMedia(MOBILE_QUERY), () => {
+    import("./mika/vrm")
+      .then((m) => m.startVrm(shell.corner, store))
+      .catch((err) => console.warn("VRM indisponible, le portrait reste :", err));
   });
 }
 
-function createPlaceholder(sceneManager: SceneManager) {
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.2, 0.6, 8, 16),
-    new THREE.MeshStandardMaterial({ color: 0x6366f1 })
-  );
-  body.position.set(0, 0.9, -0.5);
-  body.castShadow = true;
-  sceneManager.scene.add(body);
-
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.18, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0xffd5b4 })
-  );
-  head.position.set(0, 1.5, -0.5);
-  head.castShadow = true;
-  sceneManager.scene.add(head);
-}
-
-init().catch(console.error);
+void boot();

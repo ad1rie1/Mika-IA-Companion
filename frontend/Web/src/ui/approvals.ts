@@ -1,6 +1,6 @@
 /**
  * Les cartes d'accord — ce qui attend la décision de la personne à qui Mika
- * parle (backendv2, ADR 0064 ; `docs/protocole-chat.md` §3 et §4).
+ * parle (backend, ADR 0064 ; `docs/protocole-chat.md` §3 et §4).
  *
  * Elle a demandé à appeler un outil d'un service extérieur, et l'appel attend
  * l'accord de la personne. Seul le bouton compte : un « oui » tapé dans le
@@ -9,8 +9,8 @@
  *
  * Fonctions pures, à part du DOM comme `chatSync.ts` : la validation d'une
  * trame venue du serveur, la trame de décision, les libellés français, et
- * l'état de la bande (cartes, décisions parties, connexion) que ChatOverlay
- * ne fait que peindre.
+ * l'état de la bande (cartes, décisions parties, connexion) que l'écran du
+ * chat ne fait que peindre.
  */
 
 import type {

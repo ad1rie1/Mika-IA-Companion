@@ -16,10 +16,10 @@ keystore.properties
 # Le .gitignore racine ignore tout dossier « data/ » (les données d'exécution) :
 # ici, c'est un paquet Kotlin, à garder.
 !app/src/**/data/
-# Les portraits de Mika (frontend/Web/assets-src/blender/portraits.py) : rendus d'un modèle sous licence de
+# Les portraits de Mika (frontend/Assets/blender/portraits.py) : rendus d'un modèle sous licence de
 # l'acheteur, jamais versionnés. Sans eux, l'app n'affiche simplement pas d'avatar.
 app/src/main/assets/avatar/
-# Les clips du labo de l'avatar (frontend/Web/assets-src/blender/portrait_loops.py), même licence.
+# Les clips du labo de l'avatar (frontend/Assets/blender/portrait_loops.py), même licence.
 avatar-lab/out/
 # Le VRM de Mika préparé pour l'app (frontend/Android/tools/vrm_mobile.py), même licence.
 app/src/main/assets/avatar3d/

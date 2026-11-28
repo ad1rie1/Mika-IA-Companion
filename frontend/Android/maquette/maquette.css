@@ -1,13 +1,13 @@
 /* Maquette de l'app Android : Material 3, aux couleurs de l'app d'aujourd'hui (le repli sans couleurs dynamiques,
-   ui/theme/Theme.kt) et au sens du frontendv2 : l'indigo pour ce que tu fais, le rose de Mika pour ce qu'elle fait
+   ui/theme/Theme.kt) et au sens du client web : l'indigo pour ce que tu fais, le rose de Mika pour ce qu'elle fait
    (ce qu'elle a lu, ce qu'elle propose, ce qu'elle a rédigé). Les tailles sont en dp : 1 px ici = 1 dp. */
 
 @font-face { font-family: "Inter"; font-weight: 400; font-display: swap;
-  src: local("Inter Regular"), url("../../../backendv2/src/mika/inspector/static/fonts/Inter-Regular.woff2") format("woff2"); }
+  src: local("Inter Regular"), url("../../../backend/src/mika/inspector/static/fonts/Inter-Regular.woff2") format("woff2"); }
 @font-face { font-family: "Inter"; font-weight: 500; font-display: swap;
-  src: local("Inter Medium"), url("../../../backendv2/src/mika/inspector/static/fonts/Inter-Medium.woff2") format("woff2"); }
+  src: local("Inter Medium"), url("../../../backend/src/mika/inspector/static/fonts/Inter-Medium.woff2") format("woff2"); }
 @font-face { font-family: "Inter"; font-weight: 600 700; font-display: swap;
-  src: local("Inter SemiBold"), url("../../../backendv2/src/mika/inspector/static/fonts/Inter-SemiBold.woff2") format("woff2"); }
+  src: local("Inter SemiBold"), url("../../../backend/src/mika/inspector/static/fonts/Inter-SemiBold.woff2") format("woff2"); }
 
 :root {
   --surface: #fdfcff;

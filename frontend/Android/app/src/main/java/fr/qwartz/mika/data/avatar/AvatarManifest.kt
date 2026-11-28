@@ -5,7 +5,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
 
 /**
- * Ses portraits, tels que `frontend/Web/assets-src/blender/portraits.py` les écrit dans les assets
+ * Ses portraits, tels que `frontend/Assets/blender/portraits.py` les écrit dans les assets
  * (`avatar/manifest.json`) : un par émotion, plus « coucou », « fatiguée » et « endormie ».
  *
  * Les images viennent d'un modèle sous licence et ne sont pas versionnées : une app construite sans

@@ -1,7 +1,7 @@
 package fr.qwartz.mika.avatar3d
 
 /**
- * Ce que chaque émotion fait au CORPS — `frontend/Web/src/vtuber/animation/gestures.ts`, recopié à l'identique.
+ * Ce que chaque émotion fait au CORPS — `vtuber/animation/gestures.ts` de l'ancien client 3D (tag `avant-menage`), recopié à l'identique.
  * Le visage, le regard et le port de tête réagissent toujours ; un geste n'est qu'un plus, jamais nécessaire.
  *  - oneshot : un geste joué une fois, puis retour à l'attente ;
  *  - idleVariant : l'attente est remplacée par une posture (épaules tombantes, regard qui fuit…) tant qu'elle dure ;

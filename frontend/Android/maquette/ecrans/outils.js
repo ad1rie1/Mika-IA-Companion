@@ -1,6 +1,6 @@
 /* Outils : le reflet de ses droits pour toi (ADR 0208, 0209) — ressource par ressource, chaque outil nommé pour
    elle, ce qu'elle en fait quand tu lui parles et d'elle-même, par le canal choisi ; les services qui lui sont ouverts.
-   Sur un téléphone, on lit un canal à la fois (comme le frontendv2) : l'app Android d'abord. */
+   Sur un téléphone, on lit un canal à la fois (comme le client web) : l'app Android d'abord. */
 (function () {
   const { h, ico } = A;
   const CANAUX = [['mobile', 'App Android'], ['web', 'Chat web · en privé'], ['salon', 'Chat web · en salon'], ['teams', 'Teams'], ['courrier', 'Courrier']];
@@ -54,7 +54,7 @@
         <div class="body"><div style="display:grid;gap:8px;padding:0 16px 16px">${cartes}</div></div>`,
       notes: {
         titre: 'Outils · Droits',
-        reprend: ['La matrice du frontendv2, lue un canal à la fois (le choix en haut, l\'app Android d\'abord) : pour chaque outil, ce qu\'elle fait quand tu lui parles, et d\'elle-même.', 'Une ressource par carte, repliable, avec son résumé ; toucher un outil dit pourquoi (la ligne qui décide).'],
+        reprend: ['La matrice du client web, lue un canal à la fois (le choix en haut, l\'app Android d\'abord) : pour chaque outil, ce qu\'elle fait quand tu lui parles, et d\'elle-même.', 'Une ressource par carte, repliable, avec son résumé ; toucher un outil dit pourquoi (la ligne qui décide).'],
         trancher: ['Deux pastilles par outil (tu lui parles · d\'elle-même) : lisible à cette taille ?', 'Outils mérite-t-il une place dans l\'app, ou seulement sur le web ?'],
       },
     };
@@ -76,7 +76,7 @@
       html: `${A.top({ racine: true, back: A.v.nav === 'barre', title: 'Outils', small: true })}${A.tabs([['#outils', 'Droits'], ['#outils/services', 'Services'], ['#outils/accords', 'Accords']], '#outils/accords')}
         <div class="body"><div class="cards"><div class="card"><h3>Ses accords se décident dans le chat</h3><p class="muted" style="margin:6px 0 12px">Une carte au-dessus du champ, avec exactement ce qui partira. L'historique des décisions viendra ici quand une route le rendra.</p>
         <button class="btn tonal" type="button" data-go="#chat">${ico('chat')}Ouvrir le chat</button></div></div></div>`,
-      notes: { titre: 'Outils · Accords', reprend: ['Comme le frontendv2 : l\'onglet attend une route qui rende ses cartes.'], trancher: ['Garder l\'onglet vide, ou le retirer tant qu\'il n\'a rien ?'] },
+      notes: { titre: 'Outils · Accords', reprend: ['Comme le client web : l\'onglet attend une route qui rende ses cartes.'], trancher: ['Garder l\'onglet vide, ou le retirer tant qu\'il n\'a rien ?'] },
     };
   }
   A.ecran('outils', (args) => (args[0] === 'services' ? vueServices() : args[0] === 'accords' ? vueAccords() : vueDroits()));

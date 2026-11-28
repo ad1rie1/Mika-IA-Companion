@@ -28,7 +28,7 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 
 /**
- * « Corriger » (ADR 0307, porté de `frontendv2/src/screens/mail/compose.ts`) : ce que dit le message selon `changes`
+ * « Corriger » (ADR 0307, porté de `frontend/Web/src/screens/mail/compose.ts`) : ce que dit le message selon `changes`
  * et `refused` — les vrais mots de `strings.xml` —, ce que décide la réponse (le champ changé pendant l'appel),
  * « Annuler », `correct` lu dans `GET /api/moi` (absent d'un serveur d'avant : éteint), et l'appel
  * `POST /api/moi/correct` — son chemin, son corps, sans clé d'envoi, sa réponse (`refused` absent d'un serveur

@@ -83,7 +83,7 @@ internal data class MapInsets(val left: Int = 0, val top: Int = 0, val right: In
  * Une carte MapLibre et ce que l'app pose dessus (ADR 0193, 0194), tenue hors de Compose : le style du fond (un autre
  * thème, un autre fond servi : reposé, et la scène avec), la scène — épingles en images, tracés, la position et le
  * cercle de sa précision —, ses cadrages, les touchers, et ses échecs (des tuiles en échec de suite, un style qui ne se
- * lit pas) qui rendent la main au plan. Porté de `frontendv2/src/map/view.ts` et `base.ts`. Le nord reste en haut : ni
+ * lit pas) qui rendent la main au plan. Porté de `frontend/Web/src/map/view.ts` et `base.ts`. Le nord reste en haut : ni
  * rotation ni inclinaison, aucune boussole pour y revenir.
  */
 internal class LiveMapHolder(val view: MapView, private val interactive: Boolean, private val density: Float) {

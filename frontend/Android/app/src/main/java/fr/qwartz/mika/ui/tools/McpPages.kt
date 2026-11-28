@@ -103,7 +103,7 @@ import kotlinx.coroutines.launch
 /*
  * Paramètres › Services MCP (ADR 0192) : tes services — distants, par une adresse https, à toi seule —, leur état et
  * leurs outils (coupé, il lit, il agit : ADR 0129 ; un outil nouveau ou changé attend son choix), les brancher, les
- * tester, les régler, les retirer ; ceux qu'on te partage, en lecture. Porté de `frontendv2/src/screens/outils/settings.ts`.
+ * tester, les régler, les retirer ; ceux qu'on te partage, en lecture. Porté de `frontend/Web/src/screens/outils/settings.ts`.
  */
 
 // ── La liste ────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ package fr.qwartz.mika.data.moi.projects
 import java.text.Normalizer
 
 /*
- * Les règles pures de l'onglet Documentation (ADR 0296), portées du client web (`frontendv2/src/screens/projets/` :
+ * Les règles pures de l'onglet Documentation (ADR 0296), portées du client web (`frontend/Web/src/screens/projets/` :
  * `docparts.ts`, `docmd.ts`) : ses volets, l'arborescence des pages, le chemin d'une page nouvelle, ce qu'une page
  * montre (son Markdown, et ses images — celles de l'espace seulement), **le brouillon d'une page** (ce qui est tapé, la
  * version lue, l'enregistrement et son conflit : un refus ne fait jamais perdre ce qui a été écrit), ses gestes, l'ordre

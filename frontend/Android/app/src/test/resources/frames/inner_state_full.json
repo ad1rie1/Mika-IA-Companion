@@ -1,5 +1,5 @@
 {"type": "inner_state_update", "inner_state": {
-  "sleep_phase": "awake", "energy": 0.734, "place": "desk",
+  "sleep_phase": "awake", "energy": 0.734,
   "circadian": {"phase": "evening", "hour": 21, "energy": 0.734, "bias_emotion": "dreamy"},
   "ruminations": [{"summary": "Ce qu'il m'a dit hier", "intensity": 0.55, "emotion": "thinking"}],
   "person_scope": true,

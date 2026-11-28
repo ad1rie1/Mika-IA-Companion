@@ -1,7 +1,7 @@
 package fr.qwartz.mika.avatar3d
 
 /**
- * L'humeur dans le corps — `frontend/Web/src/vtuber/animation/affect.ts`, à l'identique : la valence et l'arousal de
+ * L'humeur dans le corps — `vtuber/animation/affect.ts` de l'ancien client 3D (tag `avant-menage`), à l'identique : la valence et l'arousal de
  * chaque émotion (les P et A des ancres PAD du serveur), qui pèsent le choix d'une attente selon l'humeur qu'un clip
  * déclare, règlent son tempo et la durée où elle est tenue.
  */

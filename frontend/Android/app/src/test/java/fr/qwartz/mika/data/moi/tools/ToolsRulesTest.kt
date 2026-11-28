@@ -12,7 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Les règles d'Outils, portées de `frontendv2/src/screens/outils/matrix.ts` : les mots d'une case, le canal lu sur ce
+ * Les règles d'Outils, portées de `frontend/Web/src/screens/outils/matrix.ts` : les mots d'une case, le canal lu sur ce
  * téléphone et ses moments, le nom d'un outil pour toi, les ressources et leurs groupes, le résumé d'une carte, ce qui
  * décide d'une case, ce qu'une opératrice voit de plus, les lignes de « Services ».
  */

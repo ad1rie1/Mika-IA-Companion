@@ -71,7 +71,7 @@ internal class ReaderHtml(
 )
 
 /**
- * Le corps d'un mail HTML, comme le client web (`frontendv2`, `readerMail`) : le bandeau de ses images distantes
+ * Le corps d'un mail HTML, comme le client web (`frontend/Web`, `readerMail`) : le bandeau de ses images distantes
  * masquées (les afficher cette fois ; toujours pour cet expéditeur, seulement une propriétaire qui écrit dans la
  * boîte), puis sa mise en page dans son cadre. Un cadre qui ne se charge pas rend son texte, s'il en a un.
  */

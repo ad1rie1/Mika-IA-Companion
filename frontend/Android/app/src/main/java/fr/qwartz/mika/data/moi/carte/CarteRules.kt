@@ -178,7 +178,7 @@ fun liveWanted(fond: MapFond?, scene: Scene, refused: Boolean, needsHere: Boolea
 }
 
 /**
- * Une miniature devient-elle une vraie carte (`frontendv2/src/map/minis.ts::live`) ? Plus exigeant qu'un écran : elle a
+ * Une miniature devient-elle une vraie carte (`frontend/Web/src/map/minis.ts::live`) ? Plus exigeant qu'un écran : elle a
  * des épingles, le fond est prêt, elle ne s'est pas refusée ([refused]), et il couvre **tous** ses points — ses épingles,
  * le début et la fin de ses tracés ; un voyage qui sort de la zone garde son plan plutôt qu'une carte à moitié vide.
  */

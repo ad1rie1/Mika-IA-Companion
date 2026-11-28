@@ -18,7 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Les règles de Mail, portées du client web (`frontendv2/src/screens/mail/format.ts`, `markup.ts`) : ce qu'un niveau
+ * Les règles de Mail, portées du client web (`frontend/Web/src/screens/mail/format.ts`, `markup.ts`) : ce qu'un niveau
  * ouvre, les vues et leurs paramètres (ADR 0200), à qui répondre, ce qui peut partir, ce qu'on peut joindre, les
  * passages à compléter, ses brouillons, la clé d'envoi d'un geste.
  */

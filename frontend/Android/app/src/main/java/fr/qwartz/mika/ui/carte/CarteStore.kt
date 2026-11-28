@@ -53,7 +53,7 @@ sealed interface AddOutcome {
 
 /**
  * Ce que les onglets de la Carte, un voyage ouvert et les miniatures (la liste des voyages ; demain le chat) partagent
- * pour la session — le cadre de `frontendv2/src/screens/carte/index.ts` : ce qui est branché sur le serveur, ta dernière
+ * pour la session — le cadre de `frontend/Web/src/screens/carte/index.ts` : ce qui est branché sur le serveur, ta dernière
  * position, les adresses déjà trouvées, ce que Mika a cherché ou montré (ses regards), la liste de tes voyages, chaque
  * voyage lu, et ce que montrent les miniatures. Chaque lecture se garde un moment (les rythmes du web) ; une relecture
  * qui échoue garde ce qu'on savait, sauf un 404 (oublié, supprimé : ce qu'on en avait lu ne se montre plus).

@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "jumeau": {
-      "type": "stdio",
-      "command": ".venv/bin/python",
-      "args": ["-m", "twin.mcp", "--ecriture"]
-    }
-  }
-}

@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /*
- * Les règles du Téléphone, pures (portées de `frontendv2/src/screens/telephone/view.ts` sans les réinventer, plus ce que
+ * Les règles du Téléphone, pures (portées de `frontend/Web/src/screens/telephone/view.ts` sans les réinventer, plus ce que
  * le téléphone sait de lui-même) : le sort d'une proposition de Mika et ce qui s'en décide d'ici, l'appli d'une
  * conversation, le fil et ses jours, l'état de tes téléphones dans la barre de titre (ADR 0233) — « ce téléphone »
  * parmi eux —, la position, son plan et le regard de Mika, ce que dit un Téléphone d'où rien ne vient. Tout se teste

@@ -1,11 +1,11 @@
 /* Le chat : la conversation d'aujourd'hui (Mika en fond, ses bulles dans la bande du bas, ses cartes d'accord
-   au-dessus du champ), avec ce que le frontendv2 y a ajouté : ses notes qui mènent à Mail, Teams, Téléphone et Carte,
+   au-dessus du champ), avec ce que le client web y a ajouté : ses notes qui mènent à Mail, Teams, Téléphone et Carte,
    les brouillons à relire repliés sur une ligne, la recherche, les fichiers échangés. Le mode pro et ses fils.
    « Ce qu'elle fait » est ici aussi : c'est son visage qui l'ouvre, partout. */
 (function () {
   const { h, ico, av, D } = A;
 
-  // ── La conversation (celle de la maquette du frontendv2, routes d'Android) ──
+  // ── La conversation (celle de la maquette du client web, routes d'Android) ──
   const conversation = [
     { jour: 'Hier' },
     { de: 'moi', t: '21:38', lu: true, txt: 'qu\'il recommence pas' },
@@ -158,13 +158,13 @@
         reprend: ['La pastille « Pro » du champ allume le mode pro : Mika quitte le fond, ses réponses prennent toute la largeur (comme aujourd\'hui).',
           'La barre du fil sous la barre du haut : toucher le titre le règle, « Fils » ouvre la liste, « Nouveau » un fil neuf (ADR 0164).',
           'Ses outils en direct, repliables ; sa réponse en Markdown (tableaux) ; un lien vers son brouillon dans Mail.',
-          'Plusieurs accords : « Tout accepter » au-dessus des cartes (opératrice, ADR 0170, comme le frontendv2).'],
+          'Plusieurs accords : « Tout accepter » au-dessus des cartes (opératrice, ADR 0170, comme le client web).'],
         trancher: ['La barre du bas reste-t-elle en mode pro, ou le mode pro prend-il tout l\'écran (on en sort par la pastille) ?',
           '« Fils » et « Nouveau » sous la barre du haut (comme aujourd\'hui), ou dans le menu ⋮ pour gagner une ligne ?'],
       } : {
         titre: 'Chat',
         reprend: ['L\'écran d\'aujourd\'hui : Mika en fond (sa 3D), ses bulles dans la bande du bas, la barre de saisie, ses cartes d\'accord au-dessus.',
-          'Du frontendv2 : ses notes (« Mika a lu… », 📍, sa recherche) mènent à l\'écran qui va ; le lien vers son brouillon ; sa carte de voyage en miniature.',
+          'Du client web : ses notes (« Mika a lu… », 📍, sa recherche) mènent à l\'écran qui va ; le lien vers son brouillon ; sa carte de voyage en miniature.',
           'Au-dessus du champ, une seule ligne rose : « 1 accord · 2 brouillons à relire », le compte à rebours de l\'accord dessus. Touchée, elle déplie la carte d\'accord (exactement ce qui partira) et les liens vers ses brouillons, qui se décident dans Mail et Teams.',
           'En haut à droite : la recherche (messages, puis partout) et ⋮ (Ce qu\'elle fait, Fichiers échangés, Paramètres).'],
         trancher: ['La barre du bas sous le champ prend 64 dp à Mika. Elle reste là, ou le chat passe en plein écran (variante « Tiroir » du panneau) ?',
@@ -212,7 +212,7 @@
         </div>`,
       notes: {
         titre: depuisChat ? 'Rechercher dans la conversation' : 'Rechercher partout',
-        reprend: ['Le Ctrl K du frontendv2 : un écran, un fil de travail, un mot dans les messages, un mail, une discussion.', 'Les puces disent où chercher ; depuis la loupe du chat, la conversation d\'abord.', 'Toucher un résultat ouvre son écran (un message : son fil, surligné).'],
+        reprend: ['Le Ctrl K du client web : un écran, un fil de travail, un mot dans les messages, un mail, une discussion.', 'Les puces disent où chercher ; depuis la loupe du chat, la conversation d\'abord.', 'Toucher un résultat ouvre son écran (un message : son fil, surligné).'],
         trancher: ['Une seule recherche à puces, ou une loupe propre à chaque écran (Mail, Teams…) en plus ?'],
       },
     };
@@ -231,7 +231,7 @@
           <div class="list-head">Documents · 4</div>
           ${docs.map(([n, s, mk]) => `<div class="li"><span class="lead box"${mk ? ' style="color:var(--mika)"' : ''}>${ico('file')}</span><span class="txt"><b>${h(n)}</b><small>${h(s)}</small></span>${A.act('more', 'Actions', 'data-menu="fichier"')}</div>`).join('')}
           <p class="note">Tes pièces se gardent tant que le serveur les garde ; « Enregistrer » les met dans Téléchargements/Mika. Bord rose : ce qu'elle t'a envoyé.</p></div>`,
-      notes: { titre: 'Fichiers échangés', reprend: ['La liste du frontendv2 : les siens et les tiens, « Enregistrer » sur les deux (ADR 0215).', 'Les images en grille, les documents en liste ; ⋮ : Enregistrer, Ouvrir avec…, Voir dans la conversation.'], trancher: ['Ici depuis le ⋮ du chat : assez visible ?'] },
+      notes: { titre: 'Fichiers échangés', reprend: ['La liste du client web : les siens et les tiens, « Enregistrer » sur les deux (ADR 0215).', 'Les images en grille, les documents en liste ; ⋮ : Enregistrer, Ouvrir avec…, Voir dans la conversation.'], trancher: ['Ici depuis le ⋮ du chat : assez visible ?'] },
     };
   });
   A.menus.fichier = () => [{ ico: 'download', l: 'Enregistrer', snack: 'Enregistré dans Téléchargements/Mika' }, { ico: 'external', l: 'Ouvrir avec…', snack: 'Maquette : ouvrir avec…' }, { ico: 'chat', l: 'Voir dans la conversation', go: '#chat' }];
@@ -256,7 +256,7 @@
           <div class="card"><div class="over">Besoins</div><div class="row wrap" style="margin-top:6px">${m.besoins.map((b) => `<span class="tag pc">${h(b)}</span>`).join('')}</div></div>
           <div class="card"><div class="over">Projets en cours</div>${m.projets.map(([l, e]) => `<div class="row" style="margin:6px 0">${ico('code', 'sm')}<span class="grow">${h(l)}</span><span class="tag">${h(e)}</span></div>`).join('')}</div>
         </div></div>`,
-      notes: { titre: 'Ce qu\'elle fait', reprend: ['L\'écran d\'aujourd\'hui (MindScreen), inchangé : on l\'ouvre en touchant son visage, sur n\'importe quel écran.', 'Ses promesses et ce à quoi elle repense remontent en haut, comme la colonne du chat du frontendv2.'], trancher: ['L\'ordre des cartes te va ?'] },
+      notes: { titre: 'Ce qu\'elle fait', reprend: ['L\'écran d\'aujourd\'hui (MindScreen), inchangé : on l\'ouvre en touchant son visage, sur n\'importe quel écran.', 'Ses promesses et ce à quoi elle repense remontent en haut, comme la colonne du chat du client web.'], trancher: ['L\'ordre des cartes te va ?'] },
     };
   });
 

@@ -1,5 +1,5 @@
 /* Agenda (proposé le 2026-11-23, pas encore validé ; ecrans/agenda*.js). Les couleurs des agendas sont celles du web
-   (frontendv2/maquette/ecrans/agenda.css) ; le rose n'est pas dans la palette : il est à Mika. 1 px ici = 1 dp. */
+   (frontend/Web/maquette/ecrans/agenda.css) ; le rose n'est pas dans la palette : il est à Mika. 1 px ici = 1 dp. */
 :root {
   --ag-indigo: #4f46e5; --ag-bleu: #1f6fd0; --ag-sarcelle: #0f8b80; --ag-vert: #1e9a4b; --ag-ambre: #c08406;
   --ag-orange: #e26a1b; --ag-violet: #8b5cf6; --ag-ardoise: #66748a; --ag-rose: var(--mika-fill);

@@ -36,18 +36,16 @@ class MindCardsTest {
         assertEquals(MindCard.Mood("Contente", 60), weak.single())
     }
 
-    @Test fun `le corps - sommeil, énergie, lieu, moment`() {
+    @Test fun `le corps - sommeil, énergie, moment`() {
         val body = build(
             MindState(
                 sleepPhase = "rem",
-                place = "bed",
                 circadian = Circadian("night", 2.0, 0.2, ""),
             ),
         ).single() as MindCard.Body
         assertEquals("sommeil paradoxal (elle rêve)", body.sleep)
         assertTrue(body.asleep)
         assertEquals(20, body.energyPct) // repli sur l'énergie du rythme
-        assertEquals("sur son lit", body.place)
         assertEquals("Nuit · 2 h", body.moment)
     }
 

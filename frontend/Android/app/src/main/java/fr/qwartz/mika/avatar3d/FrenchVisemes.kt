@@ -6,7 +6,7 @@ import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * Texte français → visèmes, pour une bouche qui articule — port de `frontend/Web/src/audio/frenchVisemes.ts`, règle
+ * Texte français → visèmes, pour une bouche qui articule — port de `audio/frenchVisemes.ts` de l'ancien client 3D (tag `avant-menage`), règle
  * pour règle.
  *
  * Une lecture lettre à lettre fait trois bouches pour « eau », prononce le « s » muet de « les », en fait deux pour

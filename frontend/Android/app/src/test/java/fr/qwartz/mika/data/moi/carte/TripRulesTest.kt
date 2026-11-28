@@ -10,7 +10,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * Les règles d'un voyage, portées de `frontendv2/src/screens/carte/format.ts`, `view.ts` et `map/cards.ts` (leurs tests :
+ * Les règles d'un voyage, portées de `frontend/Web/src/screens/carte/format.ts`, `view.ts` et `map/cards.ts` (leurs tests :
  * `carte.test.ts`, mêmes cas) : l'ordre des arrêts et où un geste les met, ce dont son trajet dépend, « Sur la route »,
  * ce que la fenêtre d'un voyage envoie, ses miniatures.
  */

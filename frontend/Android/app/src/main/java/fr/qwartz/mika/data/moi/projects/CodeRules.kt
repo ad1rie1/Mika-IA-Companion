@@ -7,7 +7,7 @@ import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /*
- * L'onglet Code d'une fiche : ce qui se calcule sans écran, porté du client web (`frontendv2/src/screens/projets/
+ * L'onglet Code d'une fiche : ce qui se calcule sans écran, porté du client web (`frontend/Web/src/screens/projets/
  * codeparts.ts`, et ce que ses vues `views/code.ts`, `views/codehost.ts` composent en mots). Les volets et leurs
  * adresses, la coloration simple d'une ligne (des jetons de texte, jamais une mise en forme lue dans le fichier), la
  * mise en lignes d'un diff unifié, l'arborescence un dossier à la fois, et les requêtes d'une pull request : la

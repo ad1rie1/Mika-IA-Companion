@@ -1,6 +1,6 @@
 // Backend HTTP API base + session-auth helpers.
 //
-// Le serveur visé est Mika v2 (`backendv2/`, `python -m mika serve`, port
+// Le serveur visé est Mika v2 (`backend/`, `python -m mika serve`, port
 // 8001 par défaut). Le WebSocket s'authentifie par le cookie de session : le
 // frontend se connecte d'abord en HTTP (`/auth/login`), le cookie obtenu
 // authentifie ensuite la poignée de main du WebSocket.
@@ -122,7 +122,7 @@ export class BackendUnreachableError extends Error {
   constructor(reason?: unknown) {
     super(
       `Le serveur de Mika ne répond pas sur ${API_BASE}. Vérifie qu'il tourne ` +
-        `(dans backendv2/ : python -m mika serve), et qu'il admet cette page : ` +
+        `(dans backend/ : python -m mika serve), et qu'il admet cette page : ` +
         `${serveCommand(location.origin)}. Un autre serveur se vise par ` +
         `VITE_BACKEND_ORIGIN (frontend/Web/.env.example).`
     );

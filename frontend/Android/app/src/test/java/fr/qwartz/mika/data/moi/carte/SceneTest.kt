@@ -11,7 +11,7 @@ import kotlin.math.abs
 
 /**
  * Ce qu'une carte montre et comment une vue la cadre (`map/scene.ts`, `map/mapgeo.ts`, `hereFocus` et `pinRank` de
- * `map/view.ts`), portés du web : leurs cas viennent de `frontendv2/src/map/map.test.ts`.
+ * `map/view.ts`), portés du web : leurs cas viennent de `frontend/Web/src/map/map.test.ts`.
  */
 class SceneTest {
     private val lille = MapFond(

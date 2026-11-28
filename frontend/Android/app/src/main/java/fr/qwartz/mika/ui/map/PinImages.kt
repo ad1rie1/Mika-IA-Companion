@@ -24,7 +24,7 @@ internal fun <C> pinInk(pin: ScenePin, onAccent: C, onMika: C): C = if (pin.mika
 /**
  * Les épingles de la carte, dessinées en images que MapLibre pose dans un calque de symboles (sans police : les numéros
  * se dessinent ici, la carte n'a pas besoin des glyphes du serveur pour eux). Leurs mesures sont celles du web
- * (`frontendv2/src/styles/ecrans/carte.css`, `.cm-pin-el`) : 22 dp numérotée, 14 dp sans numéro, 30 et 20 dp choisie
+ * (`frontend/Web/src/styles/ecrans/carte.css`, `.cm-pin-el`) : 22 dp numérotée, 14 dp sans numéro, 30 et 20 dp choisie
  * (cerclée d'encre), 12 et 16 dp secondaire (un anneau indigo sur le fond).
  */
 internal object PinImages {

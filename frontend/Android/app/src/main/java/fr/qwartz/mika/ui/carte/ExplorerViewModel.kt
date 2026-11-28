@@ -51,7 +51,7 @@ import kotlin.math.max
 enum class ExplorerHint { NONE, NO_POSITION, CHOOSE_WHERE }
 
 /**
- * Carte › Explorer (ADR 0194, 0235), porté de `frontendv2/src/screens/carte/explorer.ts` sans changer ses règles :
+ * Carte › Explorer (ADR 0194, 0235), porté de `frontend/Web/src/screens/carte/explorer.ts` sans changer ses règles :
  * chercher dans l'index des lieux du serveur (un nom, une catégorie, autour de ta dernière position ou dans la zone de
  * la carte, recherchée de nouveau quand on la déplace) et une adresse (Géoplateforme, relayée : seul le texte part ;
  * seulement si le texte en a l'air, après une pause de frappe, une fois par texte) ; le lieu choisi. Un modèle par

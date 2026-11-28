@@ -22,7 +22,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Les règles que les pages de Paramètres partagent, portées du client web (`frontendv2/src/shared/sharing.ts`,
+ * Les règles que les pages de Paramètres partagent, portées du client web (`frontend/Web/src/shared/sharing.ts`,
  * `shared/settings.ts`, `shared/sendrules.ts`, `screens/parametres/account.ts`) : les niveaux d'un partage, les refus
  * par champ, ton compte, la règle d'envoi et sa version, les lignes de la page racine. Celles d'un domaine se testent
  * dans son paquet (`MailSettingsRulesTest`, `TeamsSettingsRulesTest`, `ToolsSettingsRulesTest`,

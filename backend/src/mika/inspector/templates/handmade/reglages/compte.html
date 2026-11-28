@@ -1,0 +1,118 @@
+{# Un compte (pages/accounts.py), dans le vocabulaire des pages dessinées (ADR 0121) : ajouter un utilisateur ou un
+   opérateur ; la page d'un compte, vue d'un objet (ADR 0176) — son nom, ses étiquettes et ses faits sont dans l'en-tête
+   de la page (``page_heading``, ``head_badges``, ``facts``) ; ici, le formulaire (qui c'est, ses droits, son mot de
+   passe), ses connexions web (« Fermer ses sessions »), ses applications connectées (« Nouveau jeton », « révoquer »)
+   et, une seule fois, le jeton qu'on vient de créer (« Copier le jeton », ``data-copy``). Sur la liste, les deux boutons d'ajout sont dans la barre de titre
+   (``page_links``, ADR 0176) : rien ici. Champs, noms et boutons : ceux de la console. #}
+{% from "_navigation.html" import pager %}
+{% if mode == "create" %}
+<form method="post" action="{{ action }}" class="form now-card hm-form record-form">
+  <h2 class="hm-form-title">{{ 'Un opérateur' if operator_role else 'Un utilisateur' }}</h2>
+  <p class="help">{% if operator_role %}Parle avec elle, et ouvre aussi la console : tout ce qu'elle vit, sa configuration, les approbations et les apps. Un opérateur compte parmi ses propriétaires.{% else %}Se connecte au chat (le web, le téléphone) et parle avec elle, sans ouvrir la console.{% endif %}
+    Le compte est une personne qu'elle connaît dès sa création, sous son nom affiché. <a href="{{ switch }}">{{ "Ajouter plutôt un utilisateur" if operator_role else "Ajouter plutôt un opérateur" }}</a></p>
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="create">
+  <input type="hidden" name="role" value="{{ role }}">
+  <fieldset class="group hm-group">
+    <legend>Le compte</legend>
+    <div class="field"><label for="acc-username">Identifiant</label>
+      <input id="acc-username" name="username" value="{{ values.username or '' }}" required autocomplete="off" maxlength="60">
+      <span class="help">Ce qu'on tape pour se connecter. Il ne change plus ensuite.</span></div>
+    <div class="field"><label for="acc-full-name">Nom affiché</label>
+      <input id="acc-full-name" name="full_name" value="{{ values.full_name or '' }}" maxlength="80">
+      <span class="help">Le nom sous lequel elle connaîtra cette personne (vide : l'identifiant).</span></div>
+    <div class="field"><label for="acc-password">Mot de passe</label>
+      <input id="acc-password" name="password" type="password" autocomplete="new-password" required>
+      <span class="help">8 caractères au moins, pas seulement des chiffres, sans l'identifiant dedans. À lui transmettre : il ne se réaffiche jamais.</span></div>
+  </fieldset>
+  <div class="form-actions"><button class="btn">{{ "Ajouter l'opérateur" if operator_role else "Ajouter l'utilisateur" }}</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
+</form>
+{% elif mode == "edit" %}
+<div class="now">
+{% if shown %}
+<section class="now-card account-token" aria-labelledby="acc-token-title">
+  <header class="now-card-head"><h2 id="acc-token-title">{{ shown.title }}</h2><p>Montré une seule fois : copie-le maintenant. La console n'en garde que l'empreinte.</p></header>
+  <pre class="hm-code" id="acc-token-value">{{ shown.token }}</pre>
+  {# « Copier » : console.js le montre et le fait marcher (``data-copy``) ; sans script, le jeton se sélectionne. Une
+     rangée neutre (``hm-copy``), pas ``form-actions`` : celle-là est la barre d'enregistrement, collée en bas #}
+  <div class="form-actions-inline hm-copy"><button type="button" class="btn small" data-copy="acc-token-value" aria-live="polite" hidden>Copier le jeton</button></div>
+  <p class="now-sub">{{ shown.use }}</p>
+</section>
+{% endif %}
+<form method="post" action="{{ action }}" class="form now-card hm-form record-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="update">
+  <input type="hidden" name="account" value="{{ account.id }}">
+  <fieldset class="group hm-group">
+    <legend>Qui c'est</legend>
+    <div class="field"><label for="acc-edit-full-name">Nom affiché (prénom, nom)</label>
+      <input id="acc-edit-full-name" name="full_name" value="{{ account.full_name }}" maxlength="80">
+      <span class="help">Le nom sous lequel elle connaît cette personne, partout dans la console et dans ce qu'elle dit (vide : l'identifiant, « {{ account.username }} »).</span></div>
+  </fieldset>
+  <fieldset class="group hm-group">
+    <legend>Droits</legend>
+    <div class="field"><label class="check"><input type="checkbox" name="operator"{{ ' checked' if account.operator }}> Opérateur</label>
+      <span class="help">Ouvre la console et décide de ce qui sort de la machine.{% if account.operator and operators <= 1 %} C'est le dernier opérateur actif : il ne peut pas perdre ce droit.{% endif %}</span></div>
+    <div class="field"><label class="check"><input type="checkbox" name="active"{{ ' checked' if account.active }}> Actif</label>
+      <span class="help">Décoché : le compte ne peut plus se connecter et ses sessions sont fermées. Ce qu'elle sait de la personne reste.</span></div>
+  </fieldset>
+  <fieldset class="group hm-group">
+    <legend>Mot de passe</legend>
+    <div class="field"><label for="acc-new-password">Nouveau mot de passe</label>
+      <input id="acc-new-password" name="password" type="password" autocomplete="new-password" placeholder="vide : inchangé">
+      <span class="help">Le changer ferme les sessions ouvertes de ce compte.</span></div>
+  </fieldset>
+  <div class="form-actions"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
+</form>
+<section class="now-card person-list" aria-labelledby="acc-sessions-title">
+  <header class="now-card-head"><h2 id="acc-sessions-title">Connexions web</h2><span class="person-count now-num" title="sessions ouvertes">{{ sessions.count }}</span>
+    <p>Chaque navigateur où ce compte s'est connecté garde sa session {{ sessions.days }} jours. Les fermer déconnecte ses pages ouvertes ; ses applications connectées, plus bas, restent.</p></header>
+  {% if sessions.count %}
+  <p class="now-sub">{{ sessions.count }} session{{ 's' if sessions.count > 1 }} ouverte{{ 's' if sessions.count > 1 }} : la dernière le {{ sessions.last }}{% if sessions.count > 1 %}, la dernière à expirer le {{ sessions.until }}{% else %}, jusqu'au {{ sessions.until }}{% endif %}.</p>
+  <form method="post" action="{{ action }}" class="inline" data-confirm="{{ 'Fermer toutes tes sessions web ? Toi aussi, tu devras te reconnecter.' if sessions.mine else 'Fermer les sessions web de ' ~ account.display_name ~ ' ? Ses pages ouvertes se déconnectent.' }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="close_sessions">
+    <input type="hidden" name="account" value="{{ account.id }}">
+    <button class="btn quiet small danger">Fermer ses sessions</button>
+  </form>
+  {% else %}<p class="now-empty">aucune session web ouverte.</p>{% endif %}
+</section>
+<section class="now-card person-list" aria-labelledby="acc-apps-title">
+  <header class="now-card-head"><h2 id="acc-apps-title">Applications connectées</h2><span class="person-count now-num" title="{{ apps_total }} au total">{{ apps_total }}</span>
+    <p>Le téléphone et les moteurs de jeu se connectent par un jeton de ce compte. Révoquer ferme ses connexions ; un téléphone révoqué ne reçoit plus rien, et elle ne peut plus écrire à cette personne quand elle est absente. Changer le mot de passe révoque les jetons obtenus par connexion ; ceux qu'un opérateur a donnés restent.</p></header>
+  {% if account.active %}
+  <details class="hm-subfold">
+    <summary>Nouveau jeton</summary>
+    <form method="post" action="{{ action }}" class="form hm-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="create_token">
+      <input type="hidden" name="account" value="{{ account.id }}">
+      <div class="field"><label for="acc-token-label">Nom</label>
+        <input id="acc-token-label" name="label" maxlength="{{ label_max }}" required placeholder="écran du salon">
+        <span class="help">Ce qu'on reconnaîtra dans cette liste.</span></div>
+      <div class="field"><label for="acc-token-client">Ce qu'il ouvre</label>
+        <select id="acc-token-client" name="client">{% for key, label in clients %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
+        <span class="help">Un écran ou un moteur n'y lit que si la personne est là ; le téléphone reçoit aussi quand elle est absente. Le jeton se montre une seule fois, ici.</span></div>
+      <div class="form-actions"><button class="btn">Créer le jeton</button></div>
+    </form>
+  </details>
+  {% endif %}
+  <ul class="person-entries dense" aria-label="Applications connectées">
+    {% for app in apps %}
+    <li class="{{ 't-muted' if app.revoked }}">
+      <div class="person-entry-top"><div class="person-entry-name"><p class="person-entry-title">{{ app.label }}</p><p class="person-entry-tags">{% if app.revoked %}<span class="now-tag">révoqué</span>{% else %}<span class="now-tag ok">actif</span>{% endif %}</p></div><span class="person-entry-time">dernier usage {{ app.last_used }}</span></div>
+      <div class="person-entry-foot">
+        <p class="person-entry-facts"><span><span class="k">sorte</span> {{ app.kind }}</span><span><span class="k">obtenu par</span> {{ app.source }}</span><span><span class="k">créé</span> {{ app.created }}</span></p>
+        {% if not app.revoked %}<div class="person-entry-more">
+          <form method="post" action="{{ action }}" class="inline" data-confirm="Révoquer « {{ app.label }} » ? Ses connexions se ferment.">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="revoke_token">
+            <input type="hidden" name="account" value="{{ account.id }}"><input type="hidden" name="token" value="{{ app.id }}">
+            <button class="btn quiet small danger">révoquer</button>
+          </form></div>{% endif %}
+      </div>
+    </li>
+    {% else %}
+    <li><p class="now-empty">Aucune application connectée. Le téléphone en ajoute une à sa première connexion ; « Nouveau jeton » en donne une à un écran ou à un moteur.</p></li>
+    {% endfor %}
+  </ul>
+  {% set pp = apps_pager or {} %}
+  {% if pp.prev or pp.next or pp.older or pp.newer %}{{ pager(apps_pager) }}{% endif %}
+</section>
+</div>
+{% endif %}

@@ -107,7 +107,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * Paramètres › Comptes Teams (ADR 0186, 0187) : tes comptes et ceux qu'on te partage ; un compte (comment Mika y écrit à
  * ta place, comment part ce qu'elle y prépare — ADR 0207 —, la clé de son extension — montrée une seule fois à sa
  * création, retirée d'un toucher —, le partager, le retirer) ; en ajouter un. Porté de
- * `frontendv2/src/screens/teams/settings.ts`.
+ * `frontend/Web/src/screens/teams/settings.ts`.
  */
 
 // ── La liste ────────────────────────────────────────────────────────────

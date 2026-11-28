@@ -4,7 +4,7 @@
    Qui × Par où × Quand en tête de carte, puis ses quatre colonnes en lignes — Lire ; Ajouter, modifier, supprimer (non ·
    avec ton accord · seule) ; Répondre aux invitations (non · avec ton accord) ; Ce qu'elle en garde. Lues de haut en bas.
    Le propriétaire d'un agenda règle son tableau ici (une feuille par valeur) ; un agenda qu'on partage avec toi montre
-   celui de son propriétaire. C'est la page web (frontendv2/maquette/ecrans/agenda-droits.js) en cartes.
+   celui de son propriétaire. C'est la page web (frontend/Web/maquette/ecrans/agenda-droits.js) en cartes.
    Route : #outils/droits/<agenda>. */
 (function () {
   const { h, ico, av } = A;

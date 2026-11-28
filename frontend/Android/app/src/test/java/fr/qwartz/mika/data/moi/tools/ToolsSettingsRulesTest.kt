@@ -10,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Les règles de Paramètres › Services MCP, portées du client web (`frontendv2/src/screens/outils/words.ts`, ses tests
+ * Les règles de Paramètres › Services MCP, portées du client web (`frontend/Web/src/screens/outils/words.ts`, ses tests
  * `settings.test.ts`) : l'état d'un service et de ses outils, les choix qui partent, ce qu'un service réglé envoie, son
  * nom et son adresse, ses lignes d'accès, les en-têtes redemandés quand l'adresse mène ailleurs.
  */

@@ -7,7 +7,7 @@ import fr.qwartz.mika.data.moi.ofName
 import fr.qwartz.mika.data.net.Topics
 
 /*
- * Ce que l'Agenda montre, pur (porté de `frontendv2/src/screens/agenda/model.ts` et de la maquette validée
+ * Ce que l'Agenda montre, pur (porté de `frontend/Web/src/screens/agenda/model.ts` et de la maquette validée
  * `frontend/Android/maquette/ecrans/agenda.js`, sans rien réinventer) : les occurrences d'une période (les événements
  * de ses agendas, les dates de « L'agenda de Mika », ce que Mika propose d'ajouter), leur sorte, leur couleur, leur
  * place dans une grille (les chevauchements en colonnes, les journées en bandes), le Planning jour par jour, les cases

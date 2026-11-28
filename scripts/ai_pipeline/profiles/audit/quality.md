@@ -38,15 +38,14 @@ Trois ressources sont rares ici, et aucune n'est le CPU : **les tokens** (chaque
 - Une vue non paginée sur une collection qui grandit ; une action sans garde ni audit ; un libellé qui n'est pas déclaré dans `app/console.py` (ADR 0042).
 
 ### 6. Clients
-- Web : travail refait à chaque frame qui pourrait être mis en cache ou déclenché par un événement ; chargement d'assets non parallélisé ou sans dégradation si un fichier manque ; type dupliqué au lieu d'être importé de `src/types/`.
+- Web : travail refait à chaque image (la VRM du coin) ou à chaque dessin d'écran qui pourrait être gardé ou suivre une trame `changed` ; relecture à intervalles là où le direct pousse déjà (ADR 0308) ; asset chargé sans dégradation si le fichier manque (VRM, portraits, polices) ; type dupliqué au lieu d'être importé de `src/types/` ou de `src/api/`.
 - Android : recompositions inutiles (état instable passé à un composable), requêtes Room sans index sur une table qui grandit, interrogation périodique là où le WebSocket pousse déjà, cache de fichiers sans borne.
-- Unity : allocation ou `GetComponent` / `Find*` à chaque `Update`, travail par image qui pourrait suivre un événement, couche `Model` qui dépend d'Unity alors qu'elle est faite pour s'en passer.
 
 ## Règles
 
 - Ne signale que les problèmes SIGNIFICATIFS avec un impact réel sur la maintenance, le coût ou la performance.
 - Pas de remarques cosmétiques (nommage, style, formatage). Pas de suggestions de docstrings, de type hints ni de commentaires.
-- **Relis d'abord les règles de backendv2 dans le contexte projet.** Une couche, un contrat d'import ou un choix couvert par un ADR n'est pas une dette.
+- **Relis d'abord les règles de backend dans le contexte projet.** Une couche, un contrat d'import ou un choix couvert par un ADR n'est pas une dette.
 - Chiffre l'impact quand tu peux : « un événement par personne connue toutes les 30 s, soit N lignes par jour ». Sans ordre de grandeur, une issue de perf n'est pas actionnable.
 - Ne signale PAS les micro-optimisations, ni du code qui fonctionne au motif qu'il pourrait s'écrire autrement.
 - En cas de doute : NE SIGNALE PAS. Mieux vaut 3 vraies issues que 10 issues dont 7 sont du bruit.

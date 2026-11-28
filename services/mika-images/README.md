@@ -2,7 +2,7 @@
 
 Un serveur d'images autonome pour Mika : **Qwen-Image 2.1** (7B, GGUF) servi par
 **stable-diffusion.cpp** (`sd-server`), sur `127.0.0.1` seulement. Mika s'y branche comme fournisseur d'images
-(ADR 0061 de backendv2) par le type *stable-diffusion.cpp* (`sdcpp`, l'API native), le type recommandé ; le type
+(ADR 0061 de backend) par le type *stable-diffusion.cpp* (`sdcpp`, l'API native), le type recommandé ; le type
 *Compatible OpenAI* marche aussi, avec moins de réglages (voir « Brancher Mika »).
 
 - **Aucune compilation, ni CUDA ni torch** : la construction Vulkan de stable-diffusion.cpp pour Linux, épinglée et
@@ -76,7 +76,7 @@ Dans la console (Réglages › Modèles d’image › Fournisseurs d'images, typ
 ligne de commande :
 
 ```bash
-cd backendv2
+cd backend
 .venv/bin/python -m mika --data data/v2 images backend maison --kind sdcpp \
     --model sd-cpp-local --base-url http://127.0.0.1:8190 --adult
 .venv/bin/python -m mika --data data/v2 images essai "un chat roux" --out essai.png --quality draft

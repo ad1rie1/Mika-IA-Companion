@@ -8,7 +8,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-/** Les mots d'une carte : les mêmes cas que `frontendv2/src/map/words.test.ts`. */
+/** Les mots d'une carte : les mêmes cas que `frontend/Web/src/map/words.test.ts`. */
 class MapWordsTest {
     private val zone = ZoneId.of("Europe/Paris")
     private val now = ZonedDateTime.of(2026, 11, 5, 14, 0, 0, 0, zone).toInstant().toEpochMilli()

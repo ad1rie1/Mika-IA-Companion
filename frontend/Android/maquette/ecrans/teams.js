@@ -92,7 +92,7 @@
       html: `${A.top({ title: 'Ses brouillons', sub: 'Teams · Lumen Conseil', small: true, back: true })}
         <div class="body"><div class="cards">${items.map(([id, t, txt, e, src]) => `<button class="card mk" type="button" data-go="#teams/d/${id}" style="text-align:left;width:100%"><div class="row"><b class="grow" style="font-weight:500">${h(t)}</b><span class="muted label-s">${h(src)}</span></div>
           <p style="margin:6px 0 8px;font-size:15px">« ${h(txt)} »</p><span class="tag ${e[0]}">${h(e[1])}</span></button>`).join('')}</div></div>`,
-      notes: { titre: 'Teams · ses brouillons', reprend: ['Une carte par réponse (comme le frontendv2 sur un téléphone) ; toucher une carte ouvre sa discussion.'], trancher: [] },
+      notes: { titre: 'Teams · ses brouillons', reprend: ['Une carte par réponse (comme le client web sur un téléphone) ; toucher une carte ouvre sa discussion.'], trancher: [] },
     };
   }
 

@@ -5,8 +5,8 @@
 # Point d'entrée unique. Parse les arguments et dispatch vers le bon mode.
 #
 # Usage:
-#   ./orchestrator.sh --audit --profile security --modules backendv2/src/mika/faculties/memory
-#   ./orchestrator.sh --profile bugs --modules backendv2/src/mika/kernel
+#   ./orchestrator.sh --audit --profile security --modules backend/src/mika/faculties/memory
+#   ./orchestrator.sh --profile bugs --modules backend/src/mika/kernel
 #   ./orchestrator.sh --axe protocoles     # audit de cohérence transverse
 #   ./orchestrator.sh --worker
 #   ./orchestrator.sh --issue 42
@@ -117,7 +117,7 @@ jamais dans la copie de travail du dépôt.
 
 EXEMPLES:
   $(basename "$0") --audit --profile security
-  $(basename "$0") --profile bugs --modules backendv2/src/mika/kernel
+  $(basename "$0") --profile bugs --modules backend/src/mika/kernel
   $(basename "$0") --axe protocoles
   $(basename "$0") --worker
   $(basename "$0") --issue 42

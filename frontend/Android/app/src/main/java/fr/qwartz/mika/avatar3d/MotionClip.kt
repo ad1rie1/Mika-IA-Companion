@@ -49,7 +49,7 @@ class Pose(val bones: Array<String>) {
 }
 
 /**
- * Un mouvement de l'atelier (`frontend/Unity/ArtSource/atelier/motions/<nom>.json.gz`, ce qu'Unity importe aussi) :
+ * Un mouvement de l'atelier (`frontend/Assets/atelier/motions/<nom>.json.gz`) :
  * pour chaque image, la position des hanches et l'orientation monde de chaque os humanoïde, en repère Blender
  * (Z en haut, le personnage regarde −Y), quaternions écrits (w, x, y, z).
  *

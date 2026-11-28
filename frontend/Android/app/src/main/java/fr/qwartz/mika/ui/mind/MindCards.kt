@@ -22,12 +22,11 @@ sealed interface MindCard {
         val secondaryPct: Int? = null,
     ) : MindCard
 
-    /** Son corps : sommeil, énergie, où elle est dans sa chambre, le moment de sa journée. */
+    /** Son corps : sommeil, énergie, le moment de sa journée. */
     data class Body(
         val sleep: String,
         val asleep: Boolean,
         val energyPct: Int?,
-        val place: String?,
         val moment: String?,
     ) : MindCard
 
@@ -88,7 +87,7 @@ sealed interface MindCard {
 }
 
 /**
- * Choisir et mettre en mots les cartes de « Ce qu'elle fait » — d'après `InnerLifePanel.ts`. Pur : le
+ * Choisir et mettre en mots les cartes de « Ce qu'elle fait » — d'après `InnerLifePanel.ts` de l'ancien client 3D (tag `avant-menage`). Pur : le
  * fuseau est passé, l'état aussi. Une carte sans données n'existe pas (on ne montre pas « — »).
  */
 object MindCards {
@@ -169,14 +168,12 @@ object MindCards {
      */
     private fun body(state: MindState): MindCard.Body? {
         val energy = state.energy ?: state.circadian?.energy
-        val place = MindLabels.place(state.place)
         val moment = state.circadian?.let { MindLabels.momentOfDay(it.phase, it.hour) }
-        if (energy == null && place == null && moment == null && !state.asleep) return null
+        if (energy == null && moment == null && !state.asleep) return null
         return MindCard.Body(
             sleep = MindLabels.sleepPhase(state.sleepPhase),
             asleep = state.sleepPhase != SleepPhases.AWAKE,
             energyPct = energy?.let(::pct),
-            place = place,
             moment = moment,
         )
     }

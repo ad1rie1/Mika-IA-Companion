@@ -9,7 +9,7 @@ import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneId
 
-/** Ses notes de carte (ADR 0196), lues comme `frontendv2/src/map/notes.ts` et posées sous ses bulles. */
+/** Ses notes de carte (ADR 0196), lues comme `frontend/Web/src/map/notes.ts` et posées sous ses bulles. */
 class MapNotesTest {
     private val raw = listOf(
         MessageNote("location", "rue Nationale, Lille", 1_790_601_490_000),

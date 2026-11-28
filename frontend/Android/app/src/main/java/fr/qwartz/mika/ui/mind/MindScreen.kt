@@ -121,7 +121,6 @@ private fun MindCardView(card: MindCard) {
         is MindCard.Body -> TitledCard(stringResource(R.string.mind_body)) {
             Text(card.sleep.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleSmall)
             card.energyPct?.let { Meter(it, stringResource(R.string.mind_energy)) }
-            card.place?.let { Text(it.replaceFirstChar { c -> c.uppercase() }) }
             card.moment?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         is MindCard.Esteem -> TitledCard(stringResource(R.string.mind_esteem)) {

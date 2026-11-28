@@ -5,7 +5,7 @@
    ce que Mika en fait, vers Outils › Droits), et « Brancher un agenda » par sorte : le système ; Google (ouvrir Google
    dans le navigateur, puis coller l'adresse de la page qui n'a pas pu s'ouvrir) ; Outlook.com / Microsoft 365 (le code
    d'appareil) ; CalDAV (DavMail, iCloud, Nextcloud, Fastmail) ; l'abonnement iCal. C'est la page web
-   (frontendv2/maquette/ecrans/agenda-parametres.js) en pages de téléphone.
+   (frontend/Web/maquette/ecrans/agenda-parametres.js) en pages de téléphone.
    Routes : #parametres/agendas, /<compte>, /<compte>/<agenda>, /brancher, /brancher/<sorte>[/<étape>]. */
 (function () {
   const { h, ico, av, D } = A;

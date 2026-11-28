@@ -1,8 +1,9 @@
 node_modules/
 dist/
-frontend/Web/public/models/*.vrm
+# La VRM achetée (licence de l'acheteur) ne se versionne pas.
+frontend/Assets/models/*.vrm
 # Le modèle libre, celui qu'on prend quand on n'a pas mis le sien (ADR 0252).
-!frontend/Web/public/models/mika-libre.vrm
+!frontend/Assets/models/mika-libre.vrm
 PerulaVRM_*.zip
 .env
 __pycache__/

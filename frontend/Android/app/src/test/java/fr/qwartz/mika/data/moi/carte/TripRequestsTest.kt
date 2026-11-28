@@ -17,7 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Ménager ce qui sort du serveur, porté de `frontendv2/src/screens/carte/requests.ts` (ses tests : `requests.test.ts`,
+ * Ménager ce qui sort du serveur, porté de `frontend/Web/src/screens/carte/requests.ts` (ses tests : `requests.test.ts`,
  * mêmes cas) : le trajet d'un voyage, celui de ses arrêts, relu une fois qu'ils ne bougent plus ; les gestes l'un après
  * l'autre ; ce qu'un refus fait de la clé ; quand « Sur la route » se recherche.
  */

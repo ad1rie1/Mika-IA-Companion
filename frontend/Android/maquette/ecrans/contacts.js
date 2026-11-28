@@ -1,12 +1,12 @@
 /* Contacts (proposé le 2026-11-22, pas encore validé ; ADR 0298) : tous ceux que Mika connaît pour toi — vus dans ton
    Teams, tes boîtes, ton téléphone, ou dont tu lui as parlé —, et leurs organisations. C'est l'écran Contacts du web
-   (`frontendv2/maquette/ecrans/contacts.js`, validé le 2026-11-22) sur un téléphone : la liste, puis la fiche en page.
+   (`frontend/Web/maquette/ecrans/contacts.js`, validé le 2026-11-22) sur un téléphone : la liste, puis la fiche en page.
    Et, dans Écrire, les destinataires proposés depuis tous tes contacts, plus seulement tes correspondants du courrier.
 
    Les écrans validés ne se retouchent pas : ce fichier ajoute l'écran `contacts` et se pose par-dessus le tiroir, Plus,
    la feuille des boîtes de Mail et l'écriture d'un mail (`ecrans/mail.js`) sans les modifier. Les mots des refus et des
-   confirmations sont ceux du serveur et du web (`backendv2/src/mika/app/me/contacts.py`,
-   `frontendv2/src/screens/contacts/view.ts`). Routes : `#contacts`, `#contacts/tiroir` (le tiroir ouvert),
+   confirmations sont ceux du serveur et du web (`backend/src/mika/app/me/contacts.py`,
+   `frontend/Web/src/screens/contacts/view.ts`). Routes : `#contacts`, `#contacts/tiroir` (le tiroir ouvert),
    `#contacts/<id>`, `#contacts/<id>/oublier`, `#contacts/<id>/fait/<n>` (les feuilles ouvertes), `#mail/ecrire/a/<adresse>`,
    `#mail/ecrire/suggestions`. */
 (function () {

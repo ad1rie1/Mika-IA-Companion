@@ -15,7 +15,7 @@ import org.junit.Test
 
 class InnerStateReducerTest {
     private val full = InnerState(
-        sleepPhase = "awake", energy = 0.8, place = "desk",
+        sleepPhase = "awake", energy = 0.8,
         circadian = Circadian("evening", 21.0, 0.8, "dreamy"), estime = 0.6, personScope = true,
         ruminations = listOf(Rumination("hier", 0.5, "thinking")),
         todayJournal = Journal(narrative = "Calme."), selfNarrative = SelfNarrative("Je suis…"),
@@ -27,7 +27,6 @@ class InnerStateReducerTest {
         val next = InnerStateReducer.apply(known, InnerState(sleepPhase = "rem", personScope = true), 2)
         assertEquals("rem", next.sleepPhase)
         assertEquals(0.8, next.energy!!, 0.0)
-        assertEquals("desk", next.place)
         assertEquals(2L, next.updatedAtMs)
     }
 

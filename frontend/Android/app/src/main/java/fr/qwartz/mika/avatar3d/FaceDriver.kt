@@ -9,7 +9,7 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Le visage de Mika, image par image — port pur des quatre couches du client web (`frontend/Web/src/vtuber/`), qui
+ * Le visage de Mika, image par image — port pur des quatre couches de l'ancien client web 3D (`src/vtuber/`, tag `avant-menage`), qui
  * composent sans arbitrage parce qu'elles écrivent des groupes disjoints :
  *
  *  - l'émotion (`EmotionController.ts`) : les groupes du modèle (`Smile1`, `Sad1`…) dans leur copie « propre »

@@ -1,0 +1,141 @@
+"""Ce que les besoins montrent à un opérateur : leur tension, leur courbe,
+l'envie dominante dans la barre de vitaux.
+
+Lecture seule : la lecture est celle du fait (même instant) ; les courbes
+viennent des séries mesurées toutes les dix minutes (``needs.social``,
+``needs.expression``, ``needs.curiosite``).
+"""
+
+from __future__ import annotations
+
+from mika.contracts import needs as c
+from mika.faculties.needs.faculty import NEEDS, PRESSING, NeedsState, busy, describe, tau_hours
+from mika.faculties.needs.params import NeedsParams, params
+from mika.kernel.clock import DAY, HOUR
+from mika.kernel.frame import Frame
+from mika.kernel.inspect import (
+    Block,
+    Chart,
+    Column,
+    Fields,
+    InspectContext,
+    Meter,
+    Note,
+    Param,
+    Ref,
+    Series,
+    Table,
+    Text,
+    Vital,
+    When,
+    num_fr,
+    pct_fr,
+    relative_fr,
+)
+
+#: son nom en français, et ce qui le comble
+NAMES = {c.SOCIAL: "compagnie", c.EXPRESSION: "s'exprimer", c.CURIOSITY: "apprendre"}
+RELIEF = {
+    c.SOCIAL: "un message qu'on lui adresse, parler à quelqu'un — pleinement avec une amie, peu avec une inconnue",
+    c.EXPRESSION: "répondre, et plus encore prendre la parole d'elle-même ; travailler, un peu",
+    c.CURIOSITY: "un message, une croyance nouvelle, un pas d'exploration",
+}
+#: le vide ressenti, en mots
+FELT_FR = {c.LONELY: "de la solitude", c.BORED: "de l'ennui"}
+#: la clé de la série de chaque besoin
+SERIES = {c.SOCIAL: "social", c.EXPRESSION: "expression", c.CURIOSITY: "curiosite"}
+
+PERIODS = (("24h", "24 h"), ("7j", "7 jours"))
+_SPANS = {"24h": DAY, "7j": 7 * DAY}
+PERIOD = Param("periode", "Période", kind="select", choices=PERIODS, default="24h")
+
+
+def _p(frame: Frame) -> NeedsParams:
+    return params(frame.env.params_of("needs", frame.root))
+
+
+def _values(r: c.NeedsReading) -> dict[str, float]:
+    return {c.SOCIAL: r.social, c.EXPRESSION: r.expression, c.CURIOSITY: r.curiosity}
+
+
+def _tone(value: float) -> str:
+    return "warn" if value >= PRESSING else ""
+
+
+def _now(s: NeedsState, now: int) -> str:
+    """Ce qui l'occupe en ce moment, s'il y a quelque chose."""
+    return "elle travaille (pas de vide)" if busy(s, now) else "—"
+
+
+# ── La barre de vitaux, les séries ────────────────────────────────────────
+
+
+@NEEDS.vital("envie", label="Envie", order=40)
+def _vital(s: NeedsState, frame: Frame) -> Vital:
+    r = frame.get(c.NEEDS)
+    kind = r.dominant
+    value = _values(r)[kind]
+    return Vital(NAMES[kind], tone=_tone(value), ratio=value,
+                 hint=" ".join(describe(r)) or f"rien de pressant (tension {round(value * 100)} %)",
+                 href=Ref.view("needs", "needs", "Besoins"))
+
+
+@NEEDS.series("social", label="Compagnie", unit="%", lo=0.0, hi=1.0)
+def _social(s: NeedsState, frame: Frame) -> float:
+    return frame.get(c.NEEDS).social
+
+
+@NEEDS.series("expression", label="S'exprimer", unit="%", lo=0.0, hi=1.0)
+def _expression(s: NeedsState, frame: Frame) -> float:
+    return frame.get(c.NEEDS).expression
+
+
+@NEEDS.series("curiosite", label="Apprendre", unit="%", lo=0.0, hi=1.0)
+def _curiosity(s: NeedsState, frame: Frame) -> float:
+    return frame.get(c.NEEDS).curiosity
+
+
+# ── La vue ────────────────────────────────────────────────────────────────
+
+
+@NEEDS.inspect("needs", title="Besoins", section="vie", order=30, params=[PERIOD],
+               description="Ses besoins de compagnie, de s'exprimer et d'apprendre : leur tension et leur courbe.")
+def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    p = _p(frame)
+    r = frame.get(c.NEEDS)
+    values = _values(r)
+    span = _SPANS.get(str(ctx.value(PERIOD.name) or ""), DAY)
+    since = frame.now - span
+    rows = tuple((
+        NAMES[k],
+        Meter(values[k], pct_fr(values[k]), tone=_tone(values[k])),
+        f"{num_fr(tau_hours(k, p))} h",
+        RELIEF[k],
+        When(s.levels[k].at) if k in s.levels and s.levels[k].at else Text("—", kind="muted"),
+    ) for k in c.KINDS)
+    return [
+        Table((Column("besoin", role="title"), Column("tension", hint="monte vers 100 % avec le temps, retombe quand il est comblé"),
+               Column("horizon", "num", hint="le temps caractéristique de sa remontée"), Column("ce qui le comble", role="body"),
+               Column("dernier relevé", "fit")), rows, title="Ses besoins", layout="cards"),
+        Note(" ".join(describe(r)) or "Rien de pressant : aucun besoin ne se dit dans le prompt.",
+             title="ce qu'elle en dit"),
+        Chart(tuple(Series(NAMES[k], tuple(ctx.series(f"needs.{SERIES[k]}", since, frame.now)), slot=i + 1)
+                    for i, k in enumerate(c.KINDS)),
+              kind="line", title="Ses besoins dans le temps", unit="%", y=(0.0, 1.0), since=since, until=frame.now,
+              empty="pas encore de mesure (une toutes les dix minutes) : la courbe se remplira"),
+        Fields((
+            ("rien ne s'est passé depuis", When(s.idle_since) if s.idle_since else "—"),
+            ("on lui a parlé pour la dernière fois", When(s.heard_at) if s.heard_at else "—"),
+            ("dernier vide ressenti", (f"{FELT_FR.get(s.felt, s.felt)} ({pct_fr(s.felt_level)}), "
+                                       if s.felt else "") + relative_fr(s.felt_at, frame.now) if s.felt_at else "—"),
+            ("retrouver une amie après le vide", f"lui fait du bien : {num_fr(p.reunited_gain)} × ce que le vide "
+                                                 "pesait" if p.reunited_gain else "ne lui fait rien"),
+            ("le vide se ressent après", f"{num_fr(p.idle_before_empty_us / HOUR)} h sans rien"),
+            ("le vide se creuse", f"de {num_fr(p.empty_intensity)} à {num_fr(p.empty_max)}, {num_fr(p.empty_growth_per_h, signed=True)} par "
+                                   "heure"),
+            ("en ce moment", _now(s, frame.now)),
+            ("solitude plutôt qu'ennui", f"quand la compagnie dépasse {pct_fr(p.lonely_from)}"),
+            ("pousse à parler (compagnie)", f"au-delà de {pct_fr(p.social_floor)}"),
+            ("pousse à parler (s'exprimer)", f"au-delà de {pct_fr(p.expression_floor)}"),
+        ), title="En détail", columns=2),
+    ]

@@ -5,7 +5,7 @@ import kotlin.math.roundToLong
 /*
  * Le tracé d'un itinéraire, tel que le serveur le rend (`shape`) : l'algorithme des polylines, à six décimales — le
  * même que `backendv2/src/mika/ports/maps.py` (`decode_polyline6`, `encode_polyline6`) et que
- * `frontendv2/src/map/polyline.ts`. Des entiers longs jusqu'au bout (une longitude de 180° y tient, ses écarts aussi),
+ * `frontend/Web/src/map/polyline.ts`. Des entiers longs jusqu'au bout (une longitude de 180° y tient, ses écarts aussi),
  * puis divisés par 10⁶.
  */
 

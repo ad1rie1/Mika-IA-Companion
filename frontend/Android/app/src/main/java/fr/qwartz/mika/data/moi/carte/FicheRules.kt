@@ -13,7 +13,7 @@ import kotlin.math.roundToLong
 /*
  * Ce que disent les sources d'un lieu, et comment on les cite (ADR 0259 ; `protocole-moi.md` § 10, « Ce qu'un client
  * montre avec » ; le contrat : `output/carte-avis/SUIVI.md`), sans Compose ni réseau, portés de
- * `frontendv2/src/screens/carte/sources.ts`, `fiche.ts`, `view.ts` et `format.ts` sans changer leurs règles : un lien
+ * `frontend/Web/src/screens/carte/sources.ts`, `fiche.ts`, `view.ts` et `format.ts` sans changer leurs règles : un lien
  * vers le dehors (http ou https seulement), un numéro à appeler, une note et le nombre d'avis, une date de lecture en
  * mots, la ligne de couverture d'une liste, une photo et son crédit, ce que chaque bloc d'une fiche montre (Google Maps,
  * OpenStreetMap, l'office de tourisme), les filtres d'une liste et la ligne d'un lieu. Les attributions ne manquent

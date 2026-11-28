@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 /*
  * Le code d'un projet dans l'API par personne (`backendv2/docs/protocole-moi.md` § 11, « Le code d'un projet » ; ADR
  * 0288) : ses fichiers, ses commits et leur diff, ses branches, ses pull requests, ses issues, sa CI. Le modèle est le
- * client web (`frontendv2/src/api/projectCode.ts`).
+ * client web (`frontend/Web/src/api/projectCode.ts`).
  *
  * Rien n'est recalculé ici : les mots sont ceux du serveur (`…_label`, `why`, `files_why`, `cut_label`), ce qu'on peut
  * faire aussi (`rights`, `merge.can`). **Tout texte de l'hôte** arrive marqué — un [OutsideText], ou `null` — : le titre

@@ -11,7 +11,7 @@ import kotlinx.coroutines.async
 
 /**
  * Les voyages lus pour la session (la Carte les partage : la liste, un voyage ouvert, ses gestes), portés de
- * `frontendv2/src/shared/kit.ts::Cached` : un voyage se relit s'il a plus de [ttl] ms ; deux demandes pendant une lecture
+ * `frontend/Web/src/shared/kit.ts::Cached` : un voyage se relit s'il a plus de [ttl] ms ; deux demandes pendant une lecture
  * n'en font qu'une ; **une relecture forcée demandée pendant une lecture en cours la suit** — elle a pu partir avant ce
  * qu'on vient d'écrire — par une seule relecture de plus, pour toutes les demandes forcées d'ici là. Une relecture qui
  * échoue garde ce qu'on avait lu (et le dit, [Read.error]), sauf un 404 : supprimé, pas à toi, il ne se montre plus.

@@ -141,7 +141,7 @@ import kotlinx.coroutines.launch
 /*
  * Paramètres › Boîtes mail (ADR 0185, 0187) : tes boîtes et celles qu'on te partage ; une boîte (ses réglages —
  * la boîte, la connexion de lecture, l'envoi, ce que Mika en fait —, la tester, la connecter à Microsoft, comment part
- * ce que Mika y prépare, la partager, la retirer) ; en ajouter une. Porté de `frontendv2/src/screens/mail/settings.ts`
+ * ce que Mika y prépare, la partager, la retirer) ; en ajouter une. Porté de `frontend/Web/src/screens/mail/settings.ts`
  * sans changer ses règles : un secret ne repart jamais (laissé vide, il reste), une connexion qui change le redemande.
  */
 

@@ -5,7 +5,7 @@ import java.time.ZoneId
 import java.util.Locale
 
 /*
- * Les règles d'Itinéraire, sans Compose ni réseau, portées de `frontendv2/src/screens/carte/format.ts`, `view.ts` et
+ * Les règles d'Itinéraire, sans Compose ni réseau, portées de `frontend/Web/src/screens/carte/format.ts`, `view.ts` et
  * `itinerary.ts` sans changer leurs règles : ses points (choisis ou seulement tapés), ce qui fait un itinéraire (un point
  * retapé rend le trajet montré passé), tes choix face à ceux d'un trajet de Mika (son mode et ses cases se montrent sans
  * devenir les tiens), ce qu'on en dit, son GPX fait sur le téléphone et le nom de son fichier.

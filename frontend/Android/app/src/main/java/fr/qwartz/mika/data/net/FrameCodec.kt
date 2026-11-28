@@ -399,9 +399,6 @@ object FrameCodec {
         return InnerState(
             sleepPhase = section(K_SLEEP_PHASE, String.serializer()),
             energy = section(K_ENERGY, Double.serializer()),
-            place = section(K_PLACE, String.serializer()),
-            activity = section(K_ACTIVITY, Doing.serializer()),
-            hasActivity = K_ACTIVITY in obj,
             circadian = section(K_CIRCADIAN, Circadian.serializer()),
             drives = section(K_DRIVES, MapSerializer(String.serializer(), Drive.serializer())),
             estime = section(K_ESTIME, Double.serializer()),
@@ -509,8 +506,6 @@ object FrameCodec {
 
     const val K_SLEEP_PHASE = "sleep_phase"
     const val K_ENERGY = "energy"
-    const val K_PLACE = "place"
-    const val K_ACTIVITY = "activity"
     const val K_CIRCADIAN = "circadian"
     const val K_DRIVES = "drives"
     const val K_ESTIME = "estime"

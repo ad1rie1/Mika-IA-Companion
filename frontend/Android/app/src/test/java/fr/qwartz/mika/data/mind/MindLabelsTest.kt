@@ -2,7 +2,6 @@ package fr.qwartz.mika.data.mind
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -39,12 +38,9 @@ class MindLabelsTest {
         assertEquals("pleine d'espoir", MindLabels.emotionLower("hopeful"))
     }
 
-    @Test fun `sommeil, lieux, moments, rêves et besoins`() {
+    @Test fun `sommeil, moments, rêves et besoins`() {
         assertEquals("éveillée", MindLabels.sleepPhase("awake"))
         assertEquals("sommeil paradoxal (elle rêve)", MindLabels.sleepPhase("rem"))
-        assertEquals("à son bureau", MindLabels.place("desk"))
-        assertNull(MindLabels.place("cuisine"))
-        assertEquals(6, MindLabels.PLACES.size)
         assertEquals("Soir · 21 h", MindLabels.momentOfDay("evening", 21.0))
         assertEquals("rêve mélancolique", MindLabels.dreamType("melancholic"))
         assertEquals(5, MindLabels.DREAM_TYPES.size)

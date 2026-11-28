@@ -7,7 +7,7 @@
  *
  * Fonctions pures, à part du DOM comme `toolActivity.ts` : la validation de
  * `notes` (une liste illisible ne fait jamais perdre le message) et le texte
- * de la bulle. ChatOverlay ne fait que peindre, en `textContent`.
+ * de la bulle. L'écran du chat ne fait que peindre, en `textContent`.
  */
 
 import type { MessageNote } from "../types";

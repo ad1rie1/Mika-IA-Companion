@@ -10,7 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /*
- * Ménager ce qui sort du serveur, et ne rien faire deux fois — porté de `frontendv2/src/screens/carte/requests.ts` sans
+ * Ménager ce qui sort du serveur, et ne rien faire deux fois — porté de `frontend/Web/src/screens/carte/requests.ts` sans
  * changer ses règles. Un trajet compte dans les bornes du serveur (`protocole-moi.md` § 10 : 20 par minute et par
  * compte, 429 au-delà ; le serveur d'itinéraires public ne répond qu'une fois par seconde, pour tous). Ici : le trajet
  * d'un voyage gardé pour ses arrêts et relu un moment après le dernier geste ([TripRoutes]), les gestes sur un voyage

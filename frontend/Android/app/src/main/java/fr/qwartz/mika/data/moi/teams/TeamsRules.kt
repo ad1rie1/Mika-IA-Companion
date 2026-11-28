@@ -17,7 +17,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /*
- * Les règles de Teams, pures (portées de `frontendv2/src/screens/teams/format.ts` et `markup.ts`, sans les réinventer) :
+ * Les règles de Teams, pures (portées de `frontend/Web/src/screens/teams/format.ts` et `markup.ts`, sans les réinventer) :
  * qui a écrit — « Toi » sur un compte à toi seulement —, l'état de ses réponses et de tes messages en attente, les
  * repères de jour du fil, une mention de toi, ce qui reste du champ une fois parti, ce qui empêche d'écrire ou de
  * préremplir ; et la citation (ADR 0305, calquée sur « Citer » de Teams mobile, pas encore dans le web) : ce qui se

@@ -10,7 +10,7 @@ import java.time.format.DateTimeParseException
 import kotlin.math.abs
 
 /*
- * Les dates de l'Agenda, pures (portées de `frontendv2/src/screens/agenda/dates.ts`, avec les vues du téléphone de la
+ * Les dates de l'Agenda, pures (portées de `frontend/Web/src/screens/agenda/dates.ts`, avec les vues du téléphone de la
  * maquette validée `frontend/Android/maquette/ecrans/agenda.js`) : des jours `AAAA-MM-JJ` comptés sans heure d'été, des
  * instants lus à l'heure d'un fuseau — celui du serveur : une période et ce qu'on écrit s'y lisent (`protocole-moi.md`
  * § 13) —, les mots d'un jour, d'une heure, d'une période, et les bornes des cinq vues. La semaine commence le lundi.

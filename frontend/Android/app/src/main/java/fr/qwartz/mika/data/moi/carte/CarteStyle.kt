@@ -15,7 +15,7 @@ import kotlinx.serialization.json.putJsonObject
 
 /**
  * Le style d'une carte (ADR 0193, 0194), sans MapLibre : la carte de ce serveur seulement — ses tuiles, ses polices,
- * ses icônes —, claire ou sombre. C'est la moitié de `frontendv2/src/map/mapstyle.ts` qui dépend de la carte servie ;
+ * ses icônes —, claire ou sombre. C'est la moitié de `frontend/Web/src/map/mapstyle.ts` qui dépend de la carte servie ;
  * l'autre — les calques de Protomaps, leurs couleurs, leurs noms en français, sans les points d'intérêt qui n'apprennent
  * rien — est tirée du web par `frontend/Android/tools/carte_style.mjs` dans les assets (`carte/style-clair.json`,
  * `carte/style-sombre.json`), jamais écrite à la main.

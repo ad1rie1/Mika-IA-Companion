@@ -41,7 +41,7 @@ data class TrayView(
 
 /**
  * La ligne repliée au-dessus du champ et ce qu'elle déplie, sans Compose : quelles cartes se décident ici, lesquelles
- * sont des brouillons à relire ailleurs (`frontendv2/src/screens/chat/markup.ts::elsewhere`, ADR 0191), combien de
+ * sont des brouillons à relire ailleurs (`frontend/Web/src/screens/chat/markup.ts::elsewhere`, ADR 0191), combien de
  * brouillons attendent (les pastilles de `GET /api/moi` et ses brouillons lus, sans compter deux fois le même), le
  * compte à rebours, et ce que « Tout accepter » prend (ADR 0170 : seulement ce que « Accepter » permettrait, une à une,
  * jamais un brouillon).

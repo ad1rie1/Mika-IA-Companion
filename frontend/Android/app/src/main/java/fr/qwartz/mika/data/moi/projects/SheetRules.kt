@@ -19,7 +19,7 @@ import kotlin.math.roundToInt
 
 /*
  * Les règles pures des onglets Activité, Dépendances et Listes, de « Modifier le projet » et du diagramme « Dans le
- * temps » (ADR 0296), portées du client web (`frontendv2/src/screens/projets/` : `views/activity.ts`, `views/more.ts`,
+ * temps » (ADR 0296), portées du client web (`frontend/Web/src/screens/projets/` : `views/activity.ts`, `views/more.ts`,
  * `gestures.ts`, `diagram.ts`, `tones.ts`, `time.ts`). Aucune règle du serveur n'est refaite : ce fichier dit où mène
  * une ligne, quelle couleur porte un état, quelle route et quel corps un bouton envoie, et où se pose une barre.
  */

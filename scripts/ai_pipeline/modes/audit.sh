@@ -11,7 +11,7 @@ audit_scope_section() {
         cat <<SCOPE
 ## Périmètre d'analyse
 
-Ce passage est TRANSVERSE : il ne porte pas sur un module mais sur l'axe « ${AUDIT_AXIS} » ($(coherence_axis_description "$AUDIT_AXIS")), à travers tout le dépôt vivant décrit plus haut. Lis les deux côtés de chaque couture. Le code généré (Protocol/Generated) se compare à son schéma et à son générateur ; il ne s'audite pas pour lui-même. Les autres axes de cohérence ont leurs propres passages : ne t'y disperse pas.
+Ce passage est TRANSVERSE : il ne porte pas sur un module mais sur l'axe « ${AUDIT_AXIS} » ($(coherence_axis_description "$AUDIT_AXIS")), à travers tout le dépôt vivant décrit plus haut. Lis les deux côtés de chaque couture. Le code généré (les icônes et le style de carte d'Android, tirés de la maquette et du web par \`frontend/Android/tools/\`) se compare à sa source et à son générateur ; il ne s'audite pas pour lui-même. Les autres axes de cohérence ont leurs propres passages : ne t'y disperse pas.
 SCOPE
         return
     fi
@@ -31,7 +31,7 @@ SCOPE
 # groupe, la consigne de traiter le groupe comme un tout.
 audit_scope_note() {
     if [[ -n "${AUDIT_GROUP:-}" ]]; then
-        echo "Ces modules forment le groupe « ${AUDIT_GROUP} » (${MODULE_GROUP_DESCRIPTIONS[$AUDIT_GROUP]:-}). Analyse-les ensemble, dans un seul passage : l'intérêt est de suivre ce qui circule entre eux, pas de les survoler un par un. Le code généré (Protocol/Generated) ne s'audite pas."
+        echo "Ces modules forment le groupe « ${AUDIT_GROUP} » (${MODULE_GROUP_DESCRIPTIONS[$AUDIT_GROUP]:-}). Analyse-les ensemble, dans un seul passage : l'intérêt est de suivre ce qui circule entre eux, pas de les survoler un par un. Le code généré (les icônes et le style de carte d'Android, tirés par \`frontend/Android/tools/\`) ne s'audite pas."
     else
         module_scope_note "$1"
     fi
@@ -136,7 +136,7 @@ Pour chaque ${objet}, utilise EXACTEMENT ce format (un bloc par ${objet}, marque
 ISSUE_START
 title: Titre court et clair en français
 ${severity_line}
-files: chemins depuis la racine du dépôt (ex. backendv2/src/mika/kernel/events.py)${arbitrage_line}
+files: chemins depuis la racine du dépôt (ex. backend/src/mika/kernel/events.py)${arbitrage_line}
 description:
 Description détaillée en français.
 Inclure :

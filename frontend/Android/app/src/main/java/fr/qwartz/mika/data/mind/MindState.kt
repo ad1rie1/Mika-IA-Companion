@@ -2,7 +2,6 @@ package fr.qwartz.mika.data.mind
 
 import fr.qwartz.mika.data.net.BlendPart
 import fr.qwartz.mika.data.net.Circadian
-import fr.qwartz.mika.data.net.Doing
 import fr.qwartz.mika.data.net.Drive
 import fr.qwartz.mika.data.net.Dream
 import fr.qwartz.mika.data.net.FrameCodec
@@ -38,9 +37,6 @@ data class Mood(
 data class MindState(
     val sleepPhase: String = SleepPhases.AWAKE,
     val energy: Double? = null,
-    val place: String? = null,
-    /** Ce qu'elle y fait (dessiner, regarder dehors) ; `null` : rien, ou on ne le sait pas. */
-    val activity: Doing? = null,
     val circadian: Circadian? = null,
     val drives: Map<String, Drive> = emptyMap(),
     val estime: Double? = null,
@@ -71,7 +67,7 @@ object SleepPhases {
 }
 
 /**
- * Plier une trame `inner_state` dans l'état connu (InnerLifePanel.ts:261-283).
+ * Plier une trame `inner_state` dans l'état connu (`InnerLifePanel.ts:261-283` de l'ancien client 3D, tag `avant-menage`).
  *
  * Les clés de base (sommeil, énergie, lieu, rythme, besoins, estime) remplacent quand elles sont
  * présentes ; son occupation aussi, et un `null` explicite y dit qu'elle ne fait plus rien (une trame
@@ -93,8 +89,6 @@ object InnerStateReducer {
                 SleepPhases.resolve(s.sleepPhase)
             },
             energy = base(FrameCodec.K_ENERGY, s.energy, prev.energy),
-            place = base(FrameCodec.K_PLACE, s.place, prev.place),
-            activity = if (FrameCodec.K_ACTIVITY in bad || !s.hasActivity) prev.activity else s.activity,
             circadian = base(FrameCodec.K_CIRCADIAN, s.circadian, prev.circadian),
             drives = base(FrameCodec.K_DRIVES, s.drives, prev.drives),
             estime = base(FrameCodec.K_ESTIME, s.estime, prev.estime),

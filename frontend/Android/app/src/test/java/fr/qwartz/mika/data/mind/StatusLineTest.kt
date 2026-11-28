@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class StatusLineTest {
-    private val awake = MindState(place = "desk", mood = Mood("curious", 0.6))
+    private val awake = MindState(mood = Mood("curious", 0.6))
 
     @Test fun `un problème de lien passe avant tout`() {
         assertEquals("hors ligne · nouvel essai dans 4 s", StatusLine.of(LinkState.Offline(10_000), true, awake, 6_200))
@@ -26,10 +26,10 @@ class StatusLineTest {
         assertEquals("dort profondément", StatusLine.of(LinkState.Online, false, awake.copy(sleepPhase = "deep_sleep"), 0))
     }
 
-    @Test fun `puis ce qu'elle fait, l'émotion seulement quand elle est marquée`() {
-        assertEquals("éveillée · à son bureau · curieuse", StatusLine.of(LinkState.Online, false, awake, 0))
-        assertEquals("éveillée · à son bureau", StatusLine.of(LinkState.Online, false, awake.copy(mood = Mood("curious", 0.2)), 0))
-        assertEquals("éveillée · à son bureau", StatusLine.of(LinkState.Online, false, awake.copy(mood = Mood("neutral", 0.9)), 0))
+    @Test fun `puis l'émotion, seulement quand elle est marquée`() {
+        assertEquals("éveillée · curieuse", StatusLine.of(LinkState.Online, false, awake, 0))
+        assertEquals("éveillée", StatusLine.of(LinkState.Online, false, awake.copy(mood = Mood("curious", 0.2)), 0))
+        assertEquals("éveillée", StatusLine.of(LinkState.Online, false, awake.copy(mood = Mood("neutral", 0.9)), 0))
         assertEquals("éveillée", StatusLine.of(LinkState.Online, false, MindState(), 0))
         assertEquals("en ligne", StatusLine.of(LinkState.Online, false, null, 0))
     }

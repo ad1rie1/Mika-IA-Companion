@@ -1,5 +1,5 @@
 /* Agenda (proposé le 2026-11-23, pas encore validé ; output/agenda/CONCEPTION.md). L'écran Agenda du web
-   (frontendv2/maquette/ecrans/agenda.js) dit avec les codes d'un agenda de téléphone, comme Google Agenda ou Samsung
+   (frontend/Web/maquette/ecrans/agenda.js) dit avec les codes d'un agenda de téléphone, comme Google Agenda ou Samsung
    Calendar : le mois en titre, qui déplie le mini-mois sous la barre ; chercher, « Aujourd'hui » (l'icône au numéro du
    jour), ⋮ (les cinq vues, les agendas à afficher, les invitations) ; Planning · Jour · 3 jours · Semaine · Mois, qu'on
    balaie pour changer de période ; la ligne de l'heure ; le bouton + ; « À décider » en tête (la proposition de Mika,
@@ -8,7 +8,7 @@
    Le rose est à Mika : ce qu'elle a ajouté, ce qu'elle propose (hachuré, en attente de ton accord), et son agenda à elle,
    tiré de sa mémoire, en lecture seule. L'indigo est à toi (aujourd'hui, maintenant, tes boutons).
 
-   Les données sont celles de la maquette web (`frontendv2/maquette/ecrans/agenda-donnees.js`), lues là où elles sont.
+   Les données sont celles de la maquette web (`frontend/Web/maquette/ecrans/agenda-donnees.js`), lues là où elles sont.
    Les écrans validés ne se retouchent pas : ce fichier ajoute l'écran `agenda`, et se pose sur le tiroir (« Agenda »
    après Teams) et sur Plus (variante barre). Le formulaire est dans agenda-edition.js ; Paramètres, Outils et le chat
    dans agenda-parametres.js, agenda-droits.js, agenda-chat.js. A.agenda leur prête ses pièces.

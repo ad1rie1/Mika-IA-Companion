@@ -78,7 +78,7 @@ import java.time.ZoneOffset
 import kotlin.math.max
 
 /*
- * Les fenêtres d'un voyage (`frontendv2/src/screens/carte/modals.ts`, la maquette : « nouveau-voyage », les feuilles
+ * Les fenêtres d'un voyage (`frontend/Web/src/screens/carte/modals.ts`, la maquette : « nouveau-voyage », les feuilles
  * « ajouter-voyage » et « ajouter-arret ») : « Nouveau voyage » (depuis Voyages, ou « Ajouter au voyage » d'Explorer avec
  * son premier arrêt) et « Le voyage » (ce qu'on en change) — le même formulaire ; « Ajouter au voyage » (tes voyages, leurs
  * dates en court) ; « Ajouter un arrêt » à un jour (un lieu de l'index, une adresse, ta position). Chaque écriture porte

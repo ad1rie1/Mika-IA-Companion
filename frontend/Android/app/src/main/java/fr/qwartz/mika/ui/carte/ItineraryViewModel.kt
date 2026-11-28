@@ -108,7 +108,7 @@ internal class ShownOrders<T> {
 }
 
 /**
- * Carte › Itinéraire (ADR 0194, 0235), porté de `frontendv2/src/screens/carte/itinerary.ts` sans changer ses règles :
+ * Carte › Itinéraire (ADR 0194, 0235), porté de `frontend/Web/src/screens/carte/itinerary.ts` sans changer ses règles :
  * ses points et leurs propositions (ta position, les lieux de l'index, les adresses), le calcul du trajet (seulement
  * quand tous ses points sont choisis, et pas deux fois le même), le regard de Mika (ce qu'elle a calculé, posé tel
  * qu'elle l'a gardé, sans rien recalculer avant ton premier changement), tes choix (`own` : le mode, ce qu'il évite,

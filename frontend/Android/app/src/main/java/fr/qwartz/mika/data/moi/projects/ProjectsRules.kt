@@ -15,7 +15,7 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 /*
- * Les règles pures de l'écran Projets, portées du client web sans les réinventer (`frontendv2/src/screens/projets/` :
+ * Les règles pures de l'écran Projets, portées du client web sans les réinventer (`frontend/Web/src/screens/projets/` :
  * `gestures.ts`, `tones.ts`, `state.ts`, `routes.ts`, `diagram.ts`, `time.ts`). Aucune règle du moteur n'est refaite
  * ici : ce qu'on peut faire vient du serveur (`can`, `why`, `rights`), et lui seul dit si ce qui est saisi suffit. Ce
  * fichier dit quelle route et quel corps un bouton envoie, quelle couleur porte un état (les mots, eux, sont ceux du

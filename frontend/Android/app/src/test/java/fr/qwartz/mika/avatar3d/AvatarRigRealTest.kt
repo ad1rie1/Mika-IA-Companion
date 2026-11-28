@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 /** Sur les vrais fichiers, quand ils sont là (le VRM n'est pas versionné) : la pose d'un mouvement tient debout. */
 class AvatarRigRealTest {
     private val glb = File("src/main/assets/avatar3d/mika.glb")
-    private val motion = File("../../Unity/ArtSource/atelier/motions/idle_breathing.json.gz")
+    private val motion = File("../../Assets/atelier/motions/idle_breathing.json.gz")
 
     @Test fun `l'attente de l'atelier la garde debout, la tête à sa hauteur`() {
         assumeTrue(glb.exists() && motion.exists())

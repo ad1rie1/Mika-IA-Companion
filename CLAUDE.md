@@ -1,21 +1,20 @@
 # CLAUDE.md
 
 Ce fichier guide Claude Code dans ce dépôt : comment y travailler, et où trouver le reste. Mika est une compagne IA.
-Le dépôt contient son moteur psychologique (`backendv2/`, paquet Python `mika`) et ses clients : le web en 3D, Unity,
-Android et une extension Teams.
+Le dépôt contient son moteur psychologique (`backend/`, paquet Python `mika`) et ses clients : le web, Android et
+une extension Teams.
 
 **Les références** — elles font foi, pas ce fichier :
 
-- `backendv2/ARCHITECTURE.md` : l'architecture du moteur, chaque faculté et chaque plugin, le démarrage, le dossier de
+- `backend/ARCHITECTURE.md` : l'architecture du moteur, chaque faculté et chaque plugin, le démarrage, le dossier de
   données et l'environnement, comment écrire une faculté, toutes les commandes ;
-- `backendv2/docs/decisions.md` : les décisions et leur pourquoi (les « ADR » que le code cite par numéro) ;
-- `backendv2/README.md` pour démarrer en local ; `backendv2/deploy/README.md` pour la mise en service ;
-- dans `backendv2/docs/` : `protocole-chat.md` (`/ws`), `protocole-monde.md` (`mika.world/1`), `protocole-moi.md`
-  (`/api/moi`, l'API par personne), `console-carte.md` (la console) ;
+- `backend/docs/decisions.md` : les décisions et leur pourquoi (les « ADR » que le code cite par numéro) ;
+- `backend/README.md` pour démarrer en local ; `backend/deploy/README.md` pour la mise en service ;
+- dans `backend/docs/` : `protocole-chat.md` (`/ws`), `protocole-moi.md` (`/api/moi`, l'API par personne),
+  `console-carte.md` (la console) ;
 - `.claude/rules/console.md` : les règles du thème et de la disposition de la console (ADR 0176), chargées dès qu'on
   touche un de ses fichiers ;
-- `frontend/Web/README.md`, `frontendv2/README.md`, `frontend/Android/README.md`, `frontend/Extension/README.md`,
-  `INJECTION/CLAUDE.md`.
+- `frontend/Web/README.md`, `frontend/Android/README.md`, `frontend/ExtensionChromeTeams/README.md`, `frontend/Assets/README.md`.
 
 En cas de désaccord entre une doc et le code, le code fait foi : corriger la doc.
 
@@ -23,15 +22,13 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
 
 | Chemin | Ce que c'est |
 |---|---|
-| `backendv2/` | Le moteur : paquet `mika`, Python ≥ 3.12. Il contient `src/mika/`, `tests/`, `persona/` (`mika.yaml`, `voix.yaml`), `deploy/` (unités systemd), `docs/` (décisions et protocoles), `tools/` (bancs de mesure du vrai modèle) et `examples/` (une app forgée, un monde). |
+| `backend/` | Le moteur : paquet `mika`, Python ≥ 3.12. Il contient `src/mika/`, `tests/`, `persona/` (`mika.yaml`, `voix.yaml`), `deploy/` (unités systemd), `docs/` (décisions et protocoles), `tools/` (bancs de mesure du vrai modèle) et `examples/` (une app forgée). |
 | `services/mika-images/` | Serveur d'images local : stable-diffusion.cpp `sd-server` (Vulkan) avec Qwen-Image 2.1, démarré à la demande par des unités systemd utilisateur. Les poids et le binaire sont dans `/mnt/games/mika-images`. Mika s'y branche comme fournisseur d'images (ADR 0061). |
-| `frontend/Web/` | Client web : Vite, Three.js, VRM, TypeScript. Contient `src/`, `public/`, `assets-src/` (sources Blender et scripts, partagés avec Unity) et `studio.html`. |
-| `frontendv2/` | Le client web de tous les jours (Vite, TypeScript, ADR 0187) : chat et mode pro, Outils, Mail, Teams, Téléphone, Paramètres, pour chaque personne qui a un compte, sur l'API par personne (`/api/moi`, `backendv2/docs/protocole-moi.md`). Il réutilise sans copie les modules purs de `frontend/Web/src` ; `maquette/` est la maquette validée. Commencer par son `README.md`. |
-| `frontend/Unity/` | Client Unity : `Mika/` (le projet), `ArtSource/` (mocap, atelier), `tools/gen_world_protocol.py`. |
-| `frontend/Android/` | L'app Android (Kotlin, Compose, paquet `fr.qwartz.mika`) : le chat, puis par un tiroir ce que fait `frontendv2/` (ADR 0235), sur la même API par personne. Commencer par son `README.md` ; `maquette/` est la maquette validée. Côté serveur, voir les ADR 0062, 0067, 0077 et 0235. |
-| `frontend/Extension/` | Extension Chrome MV3 « Mika · Teams » (JS sans build). Elle lit ce que Teams web reçoit déjà et pose dans Teams ce que Mika a écrit (ADR 0069). Tests : `npm test`. |
-| `INJECTION/` | Jumeau numérique (paquet `twin`, CLI `jumeau`). Des archives personnelles sont lues par Claude Code puis revécues en accéléré par le vrai noyau. `brut/`, `travail/` et `sortie/` contiennent des données privées et ne sont jamais commités. Il a son propre `CLAUDE.md`. |
-| `scripts/ai_pipeline/` | Des agents auditent le dépôt, ouvrent des issues et les corrigent en PR, sur `backendv2/` et les trois clients. |
+| `frontend/Web/` | Le client web de tous les jours (Vite, TypeScript, ADR 0187) : chat et mode pro, Projets, Mail, Teams, Agenda, Contacts, Carte, Téléphone, Outils, Paramètres, pour chaque personne qui a un compte, sur l'API par personne (`/api/moi`, `backend/docs/protocole-moi.md`). `maquette/` est la maquette validée. Commencer par son `README.md`. |
+| `frontend/Android/` | L'app Android (Kotlin, Compose, paquet `fr.qwartz.mika`) : le chat, puis par un tiroir ce que fait le client web (ADR 0235), sur la même API par personne. Commencer par son `README.md` ; `maquette/` est la maquette validée. Côté serveur, voir les ADR 0062, 0067, 0077 et 0235. |
+| `frontend/ExtensionChromeTeams/` | Extension Chrome MV3 « Mika · Teams » (JS sans build). Elle lit ce que Teams web reçoit déjà et pose dans Teams ce que Mika a écrit (ADR 0069). Tests : `npm test`. |
+| `frontend/Assets/` | L'art des clients (ADR 0319) : les modèles VRM (`models/`, la VRM achetée n'est jamais versionnée), l'atelier d'animation et ses mouvements, la mocap, les scripts Blender des portraits. Commencer par son `README.md`. |
+| `scripts/ai_pipeline/` | Des agents auditent le dépôt, ouvrent des issues et les corrigent en PR, sur `backend/` et les clients. |
 | `scripts/borne.sh` | La borne mémoire des commandes lourdes (voir plus bas). |
 | `output/` | Captures de travail (aperçus de la console). Non versionné. |
 
@@ -49,7 +46,7 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
 
 **La cohérence**
 
-- **Une source par sujet.** Le moteur se décrit dans `backendv2/ARCHITECTURE.md`, ses protocoles dans `docs/`, chaque
+- **Une source par sujet.** Le moteur se décrit dans `backend/ARCHITECTURE.md`, ses protocoles dans `docs/`, chaque
   client dans son `README.md`. Ne pas recopier ailleurs ce qu'ils disent : y renvoyer.
 - **La doc suit le code, dans le même lot.** Un changement qui modifie ce qu'une doc décrit la met à jour en même
   temps. `tests/architecture/test_docs_agree.py` confronte la doc au code (trames du chat, sous-commandes de la CLI,
@@ -58,9 +55,9 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
   numéro suivant, sous la forme des autres entrées (et « Révisée par » sur celles qu'elle change). Pas de décision
   prise seulement dans le code.
 
-**Les tests de `backendv2`**
+**Les tests de `backend`**
 
-- **L'interpréteur.** Les tests passent par `backendv2/.venv/bin/python -m pytest`, lancé depuis `backendv2/`. Le Python
+- **L'interpréteur.** Les tests passent par `backend/.venv/bin/python -m pytest`, lancé depuis `backend/`. Le Python
   du système n'a pas le paquet.
 - **Ordre de lancement.** D'abord les fichiers touchés, puis la suite par défaut, qui écarte les tests longs.
 - **Les tests longs.** `--slow` les ajoute ; `-m slow` ne lance qu'eux ; nommer un fichier lance aussi les siens.
@@ -81,7 +78,7 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
 
 **La mémoire de la machine (30 Go)**
 
-- Toute suite complète, tout simulateur et toute sonde passent par `scripts/borne.sh` (depuis `backendv2/` :
+- Toute suite complète, tout simulateur et toute sonde passent par `scripts/borne.sh` (depuis `backend/` :
   `../scripts/borne.sh .venv/bin/python -m pytest -q`).
 - Ce wrapper (`systemd-run --user --scope`) fixe un plafond de 3 Go sans swap et une durée de 25 min ; seule la
   commande est tuée au-delà (code 137 ou 124). Les deux se règlent par `BORNE_MEM` et `BORNE_TEMPS`.
@@ -111,7 +108,7 @@ En cas de désaccord entre une doc et le code, le code fait foi : corriger la do
 ## Commandes
 
 ```bash
-cd backendv2
+cd backend
 python3 -m venv .venv && .venv/bin/pip install -e ".[llm,memory,dev]"   # + documents (PDF), mariadb (PyMySQL)
 .venv/bin/python -m mika serve                       # http://127.0.0.1:8001 ; données dans ./data/v2
 .venv/bin/python -m pytest -q                        # --slow, -m slow, --mariadb
@@ -121,8 +118,8 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[llm,memory,dev]"   # + docu
 .venv/bin/python -m mika --help
 ```
 
-Toutes les sous-commandes, leurs options et les codes de sortie : `backendv2/ARCHITECTURE.md`, « Commandes ». Le client
-web : `frontend/Web/README.md` (`npm run dev` sur le port 3000 ; `npm run build` passe par `tsc`, la vraie barrière).
+Toutes les sous-commandes, leurs options et les codes de sortie : `backend/ARCHITECTURE.md`, « Commandes ». Le client
+web : `frontend/Web/README.md` (`npm run dev` sur le port 4173 ; `npm run build` passe par `tsc`, la vraie barrière).
 
 ## Le moteur en bref
 
@@ -202,7 +199,7 @@ parts) : « Écrire un domaine ».
     `--sec` fait tout tourner sans modèle ni réseau. Une mesure réelle coûte de 60 à 160 appels Opus par scénario :
     la demander d'abord.
   - `tools/banc_profil` (ADR 0156) applique une matrice de personnalité (un profil, ou un YAML) au vrai noyau et lui fait vivre
-    la semaine de `DEMO/` (tout en Opus, effort moyen, par la CLI). Chaque message est jugé dès qu'il part contre son
+    la semaine de ses étalons, `tools/banc_profil/etalons/` (tout en Opus, effort moyen, par la CLI). Chaque message est jugé dès qu'il part contre son
     caractère et l'étalon écrit à la main ; un écart est diagnostiqué depuis la trace de l'appel qui l'a écrit
     (`call_id`), passage cité. `--sec` sans modèle ; une vie réelle coûte quelques centaines d'appels : la demander
     d'abord.
@@ -222,7 +219,7 @@ parts) : « Écrire un domaine ».
   échouent.
 - **Claude Code.** Une boucle d'outils ne reprend pas après un redémarrage. Le plafond de quota vaut pour les appels de
   fond.
-- **En service** : code dans `/opt/mika/backendv2`, données dans `/var/lib/mika`, environnement dans
+- **En service** : code dans `/opt/mika/backend`, données dans `/var/lib/mika`, environnement dans
   `/etc/mika/mika.env`, unités `mika.service`, `mika-backup.timer` et `mika-cartes.timer` (les cartes, toutes les deux
   semaines, ADR 0295). Une commande lancée à la main
   (`sudo -u mika … python -m mika`) ne lit pas `mika.env` : passer par la fonction `mika` de `deploy/README.md`, sinon,
@@ -231,14 +228,9 @@ parts) : « Écrire un domaine ».
 
 ## Les clients
 
-- **Web** (`frontend/Web/`) : son architecture (voix et corps, animation, visage, locomotion, pièce, monde) est dans
-  son `README.md`. Après une retouche de la pièce, relancer `run_final.py` (Blender), sinon le web et Unity divergent.
-- **Unity** (`frontend/Unity/Mika/`) : client du monde (`mika.world/1`). Ses types C# du protocole sont générés depuis
-  le schéma du noyau par `backendv2/.venv/bin/python frontend/Unity/tools/gen_world_protocol.py` ; avec `--check`, la
-  commande échoue si le fichier a vieilli : régénérer après tout changement du protocole côté noyau (de même pour
-  `frontend/Web/tools/gen_world_protocol.py`).
+- **Web** (`frontend/Web/`) : lire son `README.md`. `npm test` (vitest) et `npm run build` (`tsc`, puis Vite).
 - **Android** (`frontend/Android/`) : la conversation (fichiers dans les deux sens, Mika en 3D native avec Filament,
   portraits pré-rendus en repli), puis par le tiroir Projets (ADR 0296), Mail, Teams, Carte (MapLibre), Téléphone,
   Outils et Paramètres (ADR 0235). Lire son `README.md` ; les icônes et le style de la carte se tirent de la maquette et
   du web par `frontend/Android/tools/icones.py` et `frontend/Android/tools/carte_style.mjs` (`--check`).
-- **Extension** (`frontend/Extension/`) : lire son `README.md`.
+- **Extension** (`frontend/ExtensionChromeTeams/`) : lire son `README.md`.

@@ -9,7 +9,7 @@ Une bonne proposition ici part de ce que tu as **lu dans le code**, pas d'une li
 
 ## Ce que le projet cherche à être
 
-Mika n'est pas un chatbot avec un avatar. C'est une présence continue et **humaine** : elle a une humeur, une mémoire qui se consolide la nuit, des liens qui se font et se défont dans la durée, une idée de qui elle devient et de qui elle a en face, des projets, un monde où elle vit. Ses garde-fous sont gradués comme ceux d'une personne, pas des interdits.
+Mika n'est pas un chatbot avec un avatar. C'est une présence continue et **humaine** : elle a une humeur, une mémoire qui se consolide la nuit, des liens qui se font et se défont dans la durée, une idée de qui elle devient et de qui elle a en face, des projets. Ses garde-fous sont gradués comme ceux d'une personne, pas des interdits.
 
 Les propositions qui valent sont celles qui **la rendent plus humaine** ou qui **rendent visible ce qui existe déjà sans se voir** — pas celles qui ajoutent une fonction de plus.
 
@@ -27,13 +27,13 @@ Qu'est-ce qu'il calcule, publie, décide ? Qui le consomme ? Quelque chose est-i
 - Un état qui augmente et n'a pas de chemin de retour.
 - Une écriture sans lecture, une lecture sans affichage.
 - Une décision automatique dont personne ne voit jamais la raison.
-- Une chose vraie pour un client (le web) et pas pour un autre (Android, le monde Unity), sans raison de fond.
+- Une chose vraie pour un client (le web) et pas pour un autre (Android), sans raison de fond.
 
 ### 3. Cherche le presque-fait
 Un `TODO`, un paramètre accepté et ignoré, un champ rempli et jamais lu, un « restes connus » dans un ADR. Finir coûte toujours moins cher que commencer.
 
 ### 4. Confronte à l'architecture et à ce qui existe
-Lis `backendv2/ARCHITECTURE.md` (le tableau des facultés) et la liste des ADR **avant** de proposer : beaucoup est déjà fait. Pour chaque idée : quelle faculté la porte ? Quels événements, quels faits, quelle section ? Faut-il un *upcaster* ? Est-ce que ça oblige une faculté à en importer une autre (interdit) ou le runtime à nommer une faculté (interdit) ? Si oui, l'idée est mal posée.
+Lis `backend/ARCHITECTURE.md` (le tableau des facultés) et la liste des ADR **avant** de proposer : beaucoup est déjà fait. Pour chaque idée : quelle faculté la porte ? Quels événements, quels faits, quelle section ? Faut-il un *upcaster* ? Est-ce que ça oblige une faculté à en importer une autre (interdit) ou le runtime à nommer une faculté (interdit) ? Si oui, l'idée est mal posée.
 
 ### 5. Arbitre
 Garde **au plus 3 propositions** pour ce module, les meilleures. Une proposition solide vaut mieux que cinq vagues. Si le module n'appelle honnêtement aucune idée, n'en invente pas : dis qu'il n'y a rien et arrête-toi.

@@ -8,7 +8,7 @@ import java.util.Locale
 
 /*
  * Ce que les domaines de l'API par personne écrivent d'un instant et d'une personne : en français, comme le client web
- * (`frontendv2/src/screens/chat/markup.ts`, `shell/dom.ts`), pur et testé sur la JVM.
+ * (`frontend/Web/src/screens/chat/markup.ts`, `shell/dom.ts`), pur et testé sur la JVM.
  */
 
 object MoiDates {

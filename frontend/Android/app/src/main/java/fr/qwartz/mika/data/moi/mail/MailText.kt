@@ -2,7 +2,7 @@ package fr.qwartz.mika.data.moi.mail
 
 /*
  * Ce que Mail écrit d'une taille, d'une pièce et d'un texte : en français, comme le client web
- * (`frontendv2/src/screens/mail/`), pur et testé sur la JVM. Les instants et les personnes : `data/moi/MoiText.kt`.
+ * (`frontend/Web/src/screens/mail/`), pur et testé sur la JVM. Les instants et les personnes : `data/moi/MoiText.kt`.
  */
 
 /** « 512 o », « 212 Ko », « 1,8 Mo ». */

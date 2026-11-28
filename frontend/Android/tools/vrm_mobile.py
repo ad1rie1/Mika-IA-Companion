@@ -2,7 +2,7 @@
 """
 Préparer le VRM de Mika pour l'application Android (rendu natif Filament).
 
-Le modèle du client web (`frontend/Web/public/models/default.vrm`, ~100 Mo) ne passe pas tel quel sur un téléphone :
+Le modèle du client web (`frontend/Assets/models/default.vrm`, ~100 Mo) ne passe pas tel quel sur un téléphone :
 son maillage du visage porte 342 morphoses par primitive (Filament en accepte 256 au plus), stockées pleines, avec
 leurs normales, et ses textures sont en 2048 px avec des normal maps et des masques qu'un rendu toon n'utilise pas.
 Ce script écrit un GLB allégé qui garde le VRM intact pour tout le reste (squelette, humanoïde, groupes d'expressions,
@@ -18,7 +18,7 @@ regard, ressorts, matériaux MToon) :
 
 Le modèle est sous licence de l'acheteur : la sortie n'est pas versionnée (assets de l'app, ignorés par git).
 
-    python3 frontend/Android/tools/vrm_mobile.py [--src frontend/Web/public/models/default.vrm] \
+    python3 frontend/Android/tools/vrm_mobile.py [--src frontend/Assets/models/default.vrm] \
         [--out frontend/Android/app/src/main/assets/avatar3d/mika.glb] [--texture 0]
 """
 import argparse
@@ -31,7 +31,7 @@ import numpy as np
 from PIL import Image
 
 REPO = Path(__file__).resolve().parents[3]
-SRC = REPO / "frontend/Web/public/models/default.vrm"
+SRC = REPO / "frontend/Assets/models/default.vrm"
 OUT = REPO / "frontend/Android/app/src/main/assets/avatar3d/mika.glb"
 
 # Les morphoses que le visage lit sans passer par un groupe du modèle (FacePhysiology, LipSyncController).

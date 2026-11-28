@@ -7,7 +7,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * La bouche articule le français qu'elle dit — port du cœur de `frontend/Web/src/audio/LipSyncController.ts` (et de
+ * La bouche articule le français qu'elle dit — port du cœur de `audio/LipSyncController.ts` de l'ancien client 3D, tag `avant-menage` (et de
  * `cadence.ts`, du découpage des jetons de prosodie de `TTSService.lipSyncPlan`, de `affect.articulationFor`).
  *
  * Le texte devient des trames de visèmes ([FrenchVisemes]) ; ce fichier fait le rendu : coarticulation, poursuite

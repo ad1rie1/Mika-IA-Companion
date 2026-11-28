@@ -31,7 +31,7 @@ data class ExchangedFile(
 }
 
 /**
- * La liste des fichiers échangés, portée de `frontendv2/src/screens/chat/markup.ts::filesTable` : les siens et les
+ * La liste des fichiers échangés, portée de `frontend/Web/src/screens/chat/markup.ts::filesTable` : les siens et les
  * tiens, du plus récent au plus ancien, tant que le serveur les garde ; les images en grille, les documents en liste.
  * Pur : les messages, l'instant et le fuseau sont passés.
  */

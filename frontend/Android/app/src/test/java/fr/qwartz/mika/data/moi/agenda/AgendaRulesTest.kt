@@ -12,7 +12,7 @@ import org.junit.Test
 import java.time.OffsetDateTime
 
 /**
- * Les règles de l'Agenda (portées de `frontendv2/src/screens/agenda/agenda.test.ts`, et celles du téléphone : les cinq
+ * Les règles de l'Agenda (portées de `frontend/Web/src/screens/agenda/agenda.test.ts`, et celles du téléphone : les cinq
  * vues, le titre de la barre, le Planning et sa ligne de l'heure, les cases du mois, « À décider », ce que notifie le
  * canal « Agenda », la carte d'un ajout dans le chat, l'état d'un compte, le tableau de droits d'un agenda).
  */

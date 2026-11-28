@@ -130,7 +130,7 @@ _run_ai_agent_once() {
     case "$AI_AGENT" in
         claude)
             # --strict-mcp-config sans --mcp-config : aucun serveur MCP. Sans lui,
-            # chaque appel démarrait ceux de l'utilisateur (Blender, Unity,
+            # chaque appel démarrait ceux de l'utilisateur (Blender,
             # navigateur…) — lent, et des outils qu'aucune tâche n'a à toucher.
             # --no-session-persistence : des centaines de tâches automatiques ne
             # viennent plus remplir l'historique de sessions de l'utilisateur.
@@ -276,32 +276,35 @@ ai_project_context() {
 
 Mika : un personnage d'IA compagne, présent en continu, avec un avatar 3D.
 
-- `backendv2/` — le moteur VIVANT (paquet Python `mika`). Une
+- `backend/` — le moteur VIVANT (paquet Python `mika`). Une
   psyché à **journal d'événements** : tout ce qui lui arrive s'ajoute au
   journal, l'état de chaque faculté s'en déduit par des réducteurs purs. Couches
   (`kernel` → `vocab` → `ports` → `contracts` → `faculties`/`plugins`/`adapters`
   → `runtime` → `inspector`/`sim` → `app`), facultés (`memory`, `affect`,
-  `identity`, `social`, `others`, `goals`, `projects`, `world`…), plugins
+  `identity`, `social`, `others`, `goals`, `projects`…), plugins
   (`email`, `forge`, `rss`, `camera`), console d'opérateur (`inspector`).
-- Trois clients, chacun avec un compte :
-  - `frontend/Web/` — Vite + TypeScript + Three.js + VRM : rendu 3D, animation,
-    TTS navigateur, lip-sync. Protocole : `backendv2/src/mika/adapters/web/protocol.py`.
-  - `frontend/Android/` — Kotlin, Jetpack Compose, Room : une messagerie avec
-    Mika, ses fichiers, « ce qu'elle fait », des notifications quand l'appli
-    est fermée (ADR 0062, protocole `backendv2/docs/protocole-chat.md`). Lis
-    `frontend/Android/README.md`.
-  - `frontend/Unity/Mika/` — Unity 6, C# : le monde 3D et son corps dedans
-    (protocole `mika.world/1`, `backendv2/docs/protocole-monde.md`, ADR 0050–0051).
-    Couches en assemblies (`Protocol` généré → `Model` sans Unity → `Net` →
-    `Chat`, `World`, `Avatar`, `Player`, `UI` → `App`).
+- Trois clients :
+  - `frontend/Web/` — Vite + TypeScript, avec un compte : le client de tous
+    les jours (chat et mode pro, Projets, Mail, Teams, Agenda, Contacts, Carte
+    avec MapLibre, Téléphone, Outils, Paramètres) et une petite VRM de Mika
+    dans un coin (three.js, `@pixiv/three-vrm`). Protocoles :
+    `backend/docs/protocole-chat.md` (`/ws`) et
+    `backend/docs/protocole-moi.md` (`/api/moi`). Lis `frontend/Web/README.md`.
+  - `frontend/Android/` — Kotlin, Jetpack Compose, Room, avec un compte : une
+    messagerie avec Mika, ses fichiers, « ce qu'elle fait », des notifications
+    quand l'appli est fermée (ADR 0062, protocole
+    `backend/docs/protocole-chat.md`). Lis `frontend/Android/README.md`.
+  - `frontend/ExtensionChromeTeams/` — extension Chrome « Mika · Teams » (JS sans build) :
+    elle lit ce que Teams web reçoit et pose dans Teams ce que Mika a écrit
+    (ADR 0069). Lis `frontend/ExtensionChromeTeams/README.md`.
 - Langues : identifiants de code en anglais ; prompts, interface, commentaires
   et documentation en français.
 
-**Lis AVANT toute analyse : `backendv2/ARCHITECTURE.md`**, puis les ADR de
-`backendv2/docs/decisions.md` qui touchent ton périmètre. Le `CLAUDE.md` à la racine
+**Lis AVANT toute analyse : `backend/ARCHITECTURE.md`**, puis les ADR de
+`backend/docs/decisions.md` qui touchent ton périmètre. Le `CLAUDE.md` à la racine
 en donne un résumé ; en cas de désaccord, le code et les ADR font foi.
 
-## Ce qui fait foi dans backendv2 — ne le « corrige » jamais
+## Ce qui fait foi dans backend — ne le « corrige » jamais
 
 Un choix couvert par un ADR n'est pas un défaut. Les règles suivantes sont
 vérifiées par `lint-imports` et `ruff` ; les contourner est une régression :
@@ -377,13 +380,12 @@ seulement ce que tu as touché.
 - Ne crée PAS de script jetable de reproduction : relis le code à la place.
 - Ne modifie un test existant QUE si ta correction le casse mécaniquement (signature ou API changée). Dans ce cas : adaptation minimale, jamais de réécriture.
 - Vérification autorisée, une seule fois, à la fin. Tu travailles dans un worktree : le paquet `mika` de l'environnement pointe sur une AUTRE copie du code, d'où le `PYTHONPATH=src` obligatoire.
-  - backendv2, depuis `backendv2/` :
+  - backend, depuis `backend/` :
     - `"@V2_VENV@/bin/ruff" check <fichiers modifiés>`
     - `PYTHONPATH=src "@V2_VENV@/bin/lint-imports"` (contrats de couches, rapide)
     - AU PLUS DEUX fichiers de test ciblés qui couvrent la zone touchée : `PYTHONPATH=src "@V2_VENV@/bin/python" -m pytest tests/unit/test_<zone>.py -x -q`
   - client web, depuis `frontend/Web/` : `npx tsc --noEmit` (garde-fou dur, ne le saute pas si tu as modifié `frontend/Web/src/`), puis au plus un fichier ciblé : `npx vitest run <chemin/du/test>`.
   - client Android, depuis `frontend/Android/`, si tu as modifié du Kotlin : `@GRADLE@ :app:compileDebugKotlin` (une construction prend ~2 Gio de mémoire : une seule, à la fin), puis au plus une classe de test JVM : `@GRADLE@ :app:testDebugUnitTest --tests 'fr.qwartz.mika.<paquet>.<Classe>'`. Jamais `connectedAndroidTest` ni `assemble*` (il faudrait un téléphone, ou c'est inutilement lourd).
-  - client Unity : AUCUNE compilation n'est possible depuis ici (il faudrait l'éditeur Unity). Ne modifie donc que du C# existant, avec des API déjà employées dans le projet ; ne crée, ne supprime ni ne renomme aucun fichier (chacun a un `.meta` que seul Unity écrit) ; et termine ton résumé par « Unity : non compilé, à ouvrir dans l'éditeur avant de fusionner ».
 - Si un test ciblé échoue à cause de ta modification, corrige ta modification. S'il échouait déjà avant, ne le touche pas et signale-le dans ton résumé.
 
 Exception unique : si l'issue traitée demande EXPLICITEMENT d'ajouter ou de corriger un test, fais uniquement ce qui est demandé.

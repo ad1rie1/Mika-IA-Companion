@@ -14,7 +14,7 @@ export type MessageHandler = (data: any) => void;
 
 /**
  * Close code the server uses when it refuses an unauthenticated socket, or
- * closes one whose session was revoked (`backendv2/…/adapters/web/hub.py`).
+ * closes one whose session was revoked (`backend/…/adapters/web/hub.py`).
  * Permanent by nature — the session has to change before a retry can differ.
  */
 export const WS_CLOSE_UNAUTHORIZED = 4401;
@@ -66,7 +66,7 @@ const MAX_FRAME_CHARS = 34 * 1024 * 1024;
  *
  * MAX_OUTBOX borne le *nombre* de frames, jamais leur taille : un frame de
  * chat porte jusqu'à MAX_ATTACHMENTS × MAX_FILE_SIZE en base64 (~35 Mio, cf.
- * ChatOverlay), donc vingt frames retenus font des centaines de Mo de chaînes
+ * l'écran du chat), donc vingt frames retenus font des centaines de Mo de chaînes
  * vivantes dans l'onglet — le navigateur tue la page avant la reconnexion et
  * emporte les messages que la file existait précisément pour sauver.
  *
@@ -77,7 +77,7 @@ const MAX_FRAME_CHARS = 34 * 1024 * 1024;
 const MAX_OUTBOX_CHARS = 48 * 1024 * 1024;
 
 /**
- * Au plus tant de messages partis sans accusé (`backendv2/docs/protocole-chat.md`
+ * Au plus tant de messages partis sans accusé (`backend/docs/protocole-chat.md`
  * §3 ; `MikaProtocol.MAX_IN_FLIGHT` côté Android) : le serveur refuse en
  * `overloaded` au-delà de 8 messages en attente sur une connexion, comptés à
  * la réception (`MAX_QUEUED_CHATS`, adapters/web/chat_session.py). Une file
@@ -166,7 +166,7 @@ export class WebSocketClient {
   private stopped = false;
   /**
    * Highest server `Message.pk` the application has taken delivery of.
-   * Supplied by the owner (ChatOverlay) because *it* knows what was
+   * Supplied by the owner (the chat screen) because *it* knows what was
    * actually rendered; the transport must not guess, or a frame dropped by
    * a throwing handler would still advance the cursor and be lost forever.
    */
@@ -821,7 +821,7 @@ export class WebSocketClient {
    * Les pièces jointes sont projetées sur les trois champs du protocole.
    *
    * L'appelant passe ses propres objets, et TypeScript ne refuse les champs
-   * en trop que sur un littéral : ceux de ChatOverlay portent en plus un
+   * en trop que sur un littéral : ceux de l'écran du chat portent en plus un
    * `preview`, data-URI complet donc *seconde copie base64* de l'image.
    * Sérialisé tel quel, il doublait le poids d'un envoi d'images pour un
    * champ que le consumer ne lit jamais (`MediaAttachment.from_ws_dict` ne
@@ -850,7 +850,7 @@ export class WebSocketClient {
   }
 
   /**
-   * Une carte d'accord décidée (backendv2, ADR 0064) : envoyée si la
+   * Une carte d'accord décidée (backend, ADR 0064) : envoyée si la
    * connexion est ouverte, **jamais mise en file**. Une décision vaut pour ce
    * que l'écran montre maintenant ; rejouée à une reconnexion, peut-être des
    * minutes plus tard, elle parlerait d'une carte que la liste neuve a pu
@@ -894,7 +894,7 @@ export class WebSocketClient {
    *
    * `emit` ne lève pas, par construction. C'est ce qui le rend appelable
    * depuis les chemins qui maintiennent la connexion en vie : un handler qui
-   * touche au DOM ou au localStorage (ChatOverlay purge sa file d'attente sur
+   * touche au DOM ou au localStorage (l'écran du chat purge sa file d'attente sur
    * « disconnected ») transformait sinon une coupure réseau banale en état
    * hors-ligne définitif, aucun timer n'étant plus armé derrière lui.
    *

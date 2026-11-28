@@ -30,7 +30,7 @@ data class MessageHit(val message: StoredMessage, val title: String, val strand:
 data class StrandHit(val strand: StrandInfo, val title: String, val sub: String)
 
 /**
- * « Rechercher » (le Ctrl K du frontendv2, `shell/palette.ts`, devenu un écran à puces) : ce qui se cherche où, et
+ * « Rechercher » (le Ctrl K du client web, `shell/palette.ts`, devenu un écran à puces) : ce qui se cherche où, et
  * comment se classe ce qui est trouvé. Sans accents ni casse ; un message se cherche dans tout son texte et montre le
  * passage trouvé ; dix par groupe au plus (des messages qui se ressemblent ne cachent pas le reste). Les messages : du
  * plus récent au plus ancien ; les écrans : le titre qui commence par ce qu'on cherche, puis un mot du titre, puis le

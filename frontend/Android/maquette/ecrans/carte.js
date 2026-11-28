@@ -1,6 +1,6 @@
 /* Carte : chercher un lieu ou une adresse, calculer un itinéraire, préparer un voyage à deux (ADR 0194 à 0196). La
    carte prend l'écran, la recherche flotte dessus, la liste monte du bas, comme les cartes d'Android. Le fond est
-   celui de la maquette du frontendv2 (la France simplifiée, © OpenStreetMap) ; la vraie app montre la carte
+   celui de la maquette du client web (la France simplifiée, © OpenStreetMap) ; la vraie app montre la carte
    vectorielle que le serveur sert (ADR 0193). Rose : ce que Mika a cherché, proposé ou ajouté. */
 (function () {
   const { h, ico, D } = A;

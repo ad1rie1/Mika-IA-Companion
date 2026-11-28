@@ -1,22 +1,22 @@
 ---
 paths:
-  - "backendv2/src/mika/inspector/**"
-  - "backendv2/src/mika/app/handmade/**"
-  - "backendv2/src/mika/app/domains/*/console/**"
-  - "backendv2/src/mika/app/console.py"
-  - "backendv2/src/mika/app/console_menu.py"
-  - "backendv2/src/mika/app/settings_sections/**"
-  - "backendv2/src/mika/faculties/*/inspect*.py"
-  - "backendv2/src/mika/plugins/**/inspect*.py"
-  - "backendv2/src/mika/plugins/**/inspect/**"
-  - "backendv2/tests/browser/console.cjs"
-  - "backendv2/docs/console-carte.md"
+  - "backend/src/mika/inspector/**"
+  - "backend/src/mika/app/handmade/**"
+  - "backend/src/mika/app/domains/*/console/**"
+  - "backend/src/mika/app/console.py"
+  - "backend/src/mika/app/console_menu.py"
+  - "backend/src/mika/app/settings_sections/**"
+  - "backend/src/mika/faculties/*/inspect*.py"
+  - "backend/src/mika/plugins/**/inspect*.py"
+  - "backend/src/mika/plugins/**/inspect/**"
+  - "backend/tests/browser/console.cjs"
+  - "backend/docs/console-carte.md"
 ---
 
 # La console : thème et disposition
 
 Ces règles valent pour toute page de la console (`/admin/`), nouvelle ou retouchée. Le pourquoi est dans l'ADR 0176
-(`backendv2/docs/decisions.md`). Ce que fait chaque page est dans `backendv2/docs/console-carte.md`, qu'on met à jour
+(`backend/docs/decisions.md`). Ce que fait chaque page est dans `backend/docs/console-carte.md`, qu'on met à jour
 dans le même lot.
 
 ## Le thème

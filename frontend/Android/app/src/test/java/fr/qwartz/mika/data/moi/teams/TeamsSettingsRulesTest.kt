@@ -6,7 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Les règles de Paramètres › Comptes Teams (`frontendv2/src/screens/teams/settings.ts`) : ce qu'on sait de son extension. */
+/** Les règles de Paramètres › Comptes Teams (`frontend/Web/src/screens/teams/settings.ts`) : ce qu'on sait de son extension. */
 class TeamsSettingsRulesTest {
     private val now = 1_790_800_000_000L
 

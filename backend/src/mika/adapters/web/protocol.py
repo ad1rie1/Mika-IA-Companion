@@ -1,0 +1,646 @@
+"""Le protocole du frontend, en fonctions pures : trames sortantes, validation
+des trames entrantes, limites. Le contrat est celui que lit le code du
+frontend (``frontend/Web/src/types/messages.ts``, ``network/WebSocketClient.ts``).
+
+Invariants tenus ici : ``emotion`` est l'un des 29 noms ; ``emotion_blend``
+est toujours un tableau ; ``voice_profile`` n'est jamais nul ; les
+identifiants de messages sont les ``seq`` du journal, partagés par questions
+et réponses ; toute trame ``inner_state`` porte ``sleep_phase``.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import math
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
+
+from mika.contracts import affect as affect_c
+from mika.contracts import body as body_c
+from mika.contracts import identity as identity_c
+from mika.contracts import needs as needs_c
+from mika.contracts import presence as presence_c
+from mika.contracts import self_ as self_c
+from mika.contracts.entry import Efforts, HistoryRow, MessageNote, SharedMeta, StrandItem
+from mika.contracts.transcript import STRAND_MAX
+from mika.kernel.clock import HOUR, US
+from mika.kernel.frame import Frame
+from mika.ports.delivery import DONE, NOTE, TOO_LATE, Activity, Delivery
+from mika.ports.llm import EFFORTS
+from mika.vocab import privacy, voice
+from mika.vocab.affect import Emotion, emotion_of
+from mika.vocab.episodes import MODES
+from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
+
+MAX_MESSAGE_CHARS = 2000
+MAX_ATTACHMENTS = 5
+MAX_FILE_BYTES = 5 * 1024 * 1024
+MAX_REJECTED_REPORTED = 10
+MAX_CLIENT_MSG_ID = 64
+HISTORY_INITIAL = 50
+HISTORY_MAX = 200
+CHAT_RATE = (20, 10.0)
+CONTROL_RATE = (12, 10.0)
+#: aller et venir (trame ``presence``) : au plus 6 écritures au journal par minute et par connexion — au-delà,
+#: le dernier état voulu s'applique quand la fenêtre le permet (ADR 0062)
+PRESENCE_RATE = (6, 60.0)
+#: un écran quitté ne compte comme parti qu'après ce délai : passer à l'appareil photo et revenir n'écrit rien
+AWAY_GRACE_S = 20.0
+#: l'en-tête de mise à niveau d'un client natif qui ouvre sa connexion en arrière-plan (``away`` : personne ne
+#: regarde, elle ne fait que recevoir) ; ``here``, ou rien : un écran regardé
+PRESENCE_HEADER = "x-mika-presence"
+#: en train d'écrire (trame ``composing``) : le début et la fin d'une saisie, jamais une frappe — au plus 12 écritures
+#: au journal par minute et par connexion (le début et la fin de six messages) ; au-delà, le dernier état voulu
+#: s'écrit quand la fenêtre le permet
+COMPOSING_RATE = (12, 60.0)
+#: une saisie continue ne retient pas la réponse au-delà de ce plafond : l'adaptateur en écrit lui-même la fin
+COMPOSING_MAX_S = presence_c.COMPOSING_MAX_US / US
+MAX_FRAME_BYTES = MAX_ATTACHMENTS * MAX_FILE_BYTES * 4 // 3 + 1024 * 1024
+#: ses outils montrés en direct (trame ``tool``, ADR 0116) : arguments et résultat bornés à tant de caractères
+TOOL_TEXT_MAX = 2000
+TOOL_TEXT_CUT = "…[coupé]"
+#: la raison de voix d'une réponse en mode pro : une réponse de travail se lit, elle ne se dit pas
+PRO_VOICE_REASON = "pro"
+FILENAME_MAX = 80
+#: où est la personne, d'après son téléphone (trame ``where``, ADR 0119) : au plus 6 écritures au journal par minute
+#: et par connexion — au-delà, la position attend la suivante
+WHERE_RATE = (6, 60.0)
+#: une position qui n'a pas bougé de plus de tant de mètres, au même lieu, ne se réécrit qu'au bout de
+#: ``WHERE_REFRESH_S`` (le téléphone la redit à chaque ouverture)
+WHERE_STILL_M = 50.0
+WHERE_REFRESH_S = 600.0
+#: une mesure plus vieille que ça ne dit plus où est la personne : ignorée
+WHERE_MAX_AGE_MS = 24 * 3600 * 1000
+WHERE_LABEL_MAX = 200
+WHERE_ACCURACY_MAX = 100_000
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def sanitize_filename(name: Any) -> str:
+    text = _CONTROL.sub(" ", str(name or "")).strip()
+    return (" ".join(text.split()) or "fichier")[:FILENAME_MAX]
+
+
+@dataclass(frozen=True, slots=True)
+class Attachment:
+    name: str
+    mime: str
+    data: bytes
+
+    @property
+    def kind(self) -> str:
+        major = self.mime.split("/", 1)[0]
+        return {"image": "image", "audio": "audio"}.get(major, "file")
+
+
+def validate_attachments(raw: Any) -> tuple[list[Attachment], list[dict[str, str]]]:
+    """Ce qui passe, et ce qui est écarté (avec la raison) — les deux, pour que
+    l'expéditeur sache ce que Mika a réellement reçu."""
+    kept: list[Attachment] = []
+    rejected: list[dict[str, str]] = []
+    if not isinstance(raw, list):
+        return kept, rejected
+    for item in raw:
+        name = sanitize_filename(item.get("name") if isinstance(item, dict) else "")
+        if len(kept) >= MAX_ATTACHMENTS:
+            rejected.append({"name": name, "reason": "too_many"})
+            continue
+        if not isinstance(item, dict) or not isinstance(item.get("data"), str):
+            rejected.append({"name": name, "reason": "invalid"})
+            continue
+        data = item["data"]
+        if data.startswith("data:") and "," in data:
+            data = data.split(",", 1)[1]
+        if len(data) * 3 // 4 > MAX_FILE_BYTES + 3:
+            rejected.append({"name": name, "reason": "too_large"})
+            continue
+        try:
+            blob = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            rejected.append({"name": name, "reason": "invalid"})
+            continue
+        if len(blob) > MAX_FILE_BYTES:
+            rejected.append({"name": name, "reason": "too_large"})
+            continue
+        mime = str(item.get("type") or "application/octet-stream")[:100]
+        kept.append(Attachment(name, mime, blob))
+    return kept, rejected[:MAX_REJECTED_REPORTED]
+
+
+# ── Trames sortantes ──────────────────────────────────────────────────────
+
+
+def ack(client_msg_id: str, status: str, rejected: Sequence[dict[str, str]] = ()) -> dict[str, Any]:
+    frame: dict[str, Any] = {"type": "ack", "client_msg_id": client_msg_id, "status": status}
+    if rejected:
+        frame["rejected_attachments"] = list(rejected)[:MAX_REJECTED_REPORTED]
+    return frame
+
+
+def _attachment_items(raw: str) -> list[dict[str, Any]]:
+    """Les pièces jointes rangées avec un message de la personne (la colonne du fil, un JSON) ; illisibles : aucune."""
+    try:
+        items = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    return [a for a in items if isinstance(a, dict)] if isinstance(items, list) else []
+
+
+def piece_ids(raw: str) -> list[str]:
+    """Les clés des pièces gardées d'un message de la personne (ADR 0106) ; une pièce sans clé n'a pas été gardée."""
+    return [a["file"] for a in _attachment_items(raw) if isinstance(a.get("file"), str)]
+
+
+def _shown_attachments(raw: str, pieces: Mapping[str, SharedMeta] | None = None) -> list[dict[str, Any]]:
+    """Les pièces jointes d'un message telles que l'écran les montre : un nom et une sorte, jamais ce qu'elle en a
+    perçu (le contenu d'un document, une description : c'est pour son prompt, pas pour la bulle). Une pièce gardée que
+    ``pieces`` connaît porte de quoi la récupérer, comme un de ses fichiers à elle (ADR 0215) : c'est la propre copie
+    de la personne. Sans lecture faite, ou oubliée, elle n'a que son nom."""
+    known = pieces or {}
+    out: list[dict[str, Any]] = []
+    for a in _attachment_items(raw):
+        item: dict[str, Any] = {"name": sanitize_filename(a.get("name")), "kind": str(a.get("kind") or "file")[:10]}
+        file = a.get("file")
+        meta = known.get(file) if isinstance(file, str) else None
+        if meta is not None:
+            item |= {"id": meta.id, "mime": str(meta.mime or "")[:100], "size": int(meta.size),
+                     "url": f"{FILES_PATH}{meta.id}", "available": bool(meta.available)}
+        out.append(item)
+    return out
+
+
+#: où se télécharge un fichier qu'elle a envoyé, ou une pièce que ce compte a envoyée (``GET``, avec le compte de la
+#: personne : ADR 0062, 0215)
+FILES_PATH = "/files/"
+
+
+def shared_item(meta: SharedMeta) -> dict[str, Any]:
+    """Un fichier qu'elle a envoyé, tel qu'un client le montre et le télécharge."""
+    return {"id": meta.id, "name": sanitize_filename(meta.name), "kind": meta.kind if meta.kind in ("file", "image")
+            else "file", "mime": str(meta.mime or "")[:100], "size": int(meta.size), "url": f"{FILES_PATH}{meta.id}",
+            "available": bool(meta.available)}
+
+
+def note_item(note: MessageNote) -> dict[str, Any]:
+    """Une petite bulle jointe à un de ses messages (ADR 0119, 0196), telle qu'un client la montre : sa sorte, ce
+    qu'elle a vu (vide une fois oublié), de quand ça datait (ms), et ce qu'elle ouvre (``ref`` : un regard, une carte,
+    un voyage — absent s'il n'y a rien à ouvrir). Le texte de la bulle se compose chez le client."""
+    item: dict[str, Any] = {"kind": note.kind, "text": _CONTROL.sub(" ", note.text)[:WHERE_LABEL_MAX],
+                            "at": int(note.at)}
+    if note.ref:
+        item["ref"] = _CONTROL.sub("", note.ref)[:40]
+    return item
+
+
+@dataclass(frozen=True, slots=True)
+class Where:
+    """Une position lue d'une trame ``where`` : validée, bornée."""
+
+    lat: float
+    lon: float
+    accuracy_m: int
+    label: str
+    age_ms: int
+
+
+def _finite(v: Any) -> bool:
+    return isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def where_fix(frame: Mapping[str, Any]) -> Where | None:
+    """La position d'une trame ``where`` (``{"lat", "lon", "accuracy", "label", "age_ms"}``), ou ``None`` si elle
+    n'en est pas une : coordonnées absentes, hors bornes ou non finies, mesure trop vieille. Une précision illisible
+    vaut « inconnue » (0) ; un lieu est replié sur une ligne et borné."""
+    lat, lon = frame.get("lat"), frame.get("lon")
+    if not _finite(lat) or not _finite(lon) or not -90.0 <= lat <= 90.0 or not -180.0 <= lon <= 180.0:
+        return None
+    age = frame.get("age_ms", 0)
+    age = int(age) if _finite(age) and age > 0 else 0
+    if age > WHERE_MAX_AGE_MS:
+        return None
+    accuracy = frame.get("accuracy", 0)
+    accuracy = int(round(accuracy)) if _finite(accuracy) and 0 <= accuracy <= WHERE_ACCURACY_MAX else 0
+    raw = frame.get("label")
+    label = " ".join(_CONTROL.sub(" ", raw).split())[:WHERE_LABEL_MAX] if isinstance(raw, str) else ""
+    return Where(float(lat), float(lon), accuracy, label, age)
+
+
+def where_moved(before: Where, after: Where) -> float:
+    """La distance entre deux positions, en mètres (haversine)."""
+    r = 6_371_000.0
+    p1, p2 = math.radians(before.lat), math.radians(after.lat)
+    dp, dl = p2 - p1, math.radians(after.lon - before.lon)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(h)))
+
+
+def sent_ids(raw: str) -> list[str]:
+    """Les identifiants rangés avec l'un de ses messages (``[{"id": …}]``)."""
+    try:
+        items = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    if not isinstance(items, list):
+        return []
+    return [str(a["id"]) for a in items if isinstance(a, dict) and isinstance(a.get("id"), str)]
+
+
+def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None, *,
+                 verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None,
+                 pieces: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
+    """Une ligne du fil. Ses pièces jointes : pour un message de la personne, un nom et une sorte, et de quoi
+    récupérer celles qu'on a gardées (``pieces``, ADR 0215) ; pour un des siens, les fichiers qu'elle a envoyés avec
+    (``shared`` : ce que le port en dit — un fichier oublié n'y est plus, et ne se montre plus). ``verdicts`` : une
+    connexion d'opératrice — l'avis qu'elle a donné sur ses réponses (ADR 0113) ; jamais à une autre connexion.
+    ``notes`` : les petites bulles de ce qu'elle a fait en écrivant ses messages (ADR 0119), par référence."""
+    emotion = emotion_of(row.emotion)
+    if row.role == "assistant":
+        known = shared or {}
+        attachments: list[dict[str, Any]] = [shared_item(known[i]) for i in sent_ids(row.attachments) if i in known]
+    else:
+        attachments = _shown_attachments(row.attachments, pieces)
+    item = {
+        "id": row.id,
+        "role": row.role,
+        "text": row.text,
+        "ts": row.at // 1000,
+        "source": row.source,
+        "emotion": emotion.value if emotion else "",
+        "emotion_intensity": float(row.emotion_intensity or 0.0),
+        "attachments": attachments,
+    }
+    if row.role == "assistant" and notes:
+        found = [note_item(notes[i]) for i in sent_ids(row.attachments) if i in notes]
+        if found:
+            item["notes"] = found
+    if verdicts and row.role == "assistant" and row.verdict:
+        item["verdict"] = row.verdict
+        item["verdict_note"] = row.verdict_note
+    if row.mode:
+        # écrit en mode pro (ADR 0116) : par elle, avec les outils dont elle s'est servie (leurs noms seulement)
+        item["mode"] = row.mode
+        if row.role == "assistant":
+            item["tools"] = tools_item(row.tools)
+    if row.strand:
+        item["strand"] = row.strand  # son fil de travail (ADR 0164)
+    return item
+
+
+def tools_item(raw: str) -> list[dict[str, Any]]:
+    """Les outils d'un de ses messages (la colonne ``tools`` du fil : ``[[nom, réussi], …]``) tels qu'un écran les
+    montre ; illisible : aucun."""
+    try:
+        pairs = json.loads(raw or "[]")
+    except ValueError:
+        return []
+    if not isinstance(pairs, list):
+        return []
+    return [{"name": str(p[0]), "ok": bool(p[1])} for p in pairs
+            if isinstance(p, list | tuple) and len(p) == 2 and isinstance(p[0], str)]
+
+
+def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
+            life: str = "", reset: bool = False, shared: Mapping[str, SharedMeta] | None = None,
+            verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None,
+            pieces: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
+    """Un morceau du fil. ``life`` : l'empreinte de sa vie (le même journal depuis sa genèse) — un navigateur qui
+    garde le fil d'une autre vie (un autre dossier de données) le vide avant de fusionner.
+    ``reset`` : le curseur du client dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié,
+    des identifiants d'ailleurs) ; ce fil initial remplace ce qu'il montre au lieu de s'y ajouter. ``shared`` :
+    ce qu'on peut montrer des fichiers qu'elle a envoyés avec ses messages, par identifiant ; ``pieces`` : de ceux
+    que la personne a envoyés avec les siens, par clé (ADR 0215)."""
+    return {
+        "type": "history",
+        "mode": mode,
+        "messages": [history_item(r, shared, verdicts=verdicts, notes=notes, pieces=pieces) for r in rows],
+        "last_id": rows[-1].id if rows else after_id,
+        "truncated": bool(truncated),
+        "life": life,
+        "reset": bool(reset),
+    }
+
+
+def _blend(parts: Sequence[tuple[str, float]]) -> list[dict[str, Any]]:
+    out = []
+    for name, weight in parts:
+        e = emotion_of(name)
+        if e is not None:
+            out.append({"emotion": e.value, "weight": round(float(weight), 2)})
+    return out
+
+
+#: la voix d'un autre onglet de la même personne : un seul écran parle, sinon l'écho
+OTHER_TAB = "other_tab"
+
+
+def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bool = True,
+           attachments: Sequence[SharedMeta] = (), notes: Sequence[MessageNote] = ()) -> dict[str, Any]:
+    """Une parole ou une pensée. Une pensée à voix haute (persona ``inner``) n'est
+    pas dans le fil : ``message_id`` nul (le client la range après son curseur et
+    ne l'avance pas). ``voiced`` faux : un autre écran de la même personne parle.
+    ``attachments`` : les fichiers qu'elle envoie avec (toujours un tableau, vide
+    sans fichier ; jamais avec une pensée). ``mode`` : le mode dans lequel elle a
+    répondu (ADR 0116) ; en mode pro, sa réponse ne se dit pas à voix haute.
+    ``notes`` : les petites bulles de ce qu'elle a fait en l'écrivant (ADR 0119 :
+    elle a regardé où était la personne) ; la clé n'est là que s'il y en a."""
+    decision = voice.decide(voice.SCREEN, hour=d.local_hour, sleep_phase=d.sleep_phase, present=present,
+                            muted=muted, persona=d.persona)
+    emotion = emotion_of(d.emotion.emotion) or Emotion.NEUTRAL
+    inner = d.persona == voice.INNER
+    pro = bool(d.mode) and not inner
+    frame = {
+        "type": "speech",
+        "text": d.text,
+        "emotion": emotion.value,
+        "emotion_intensity": round(float(d.emotion.intensity), 2),
+        "emotion_state": dict(d.emotion.state),
+        "emotion_blend": _blend(d.emotion.blend),
+        "source": d.source,
+        "person_id": d.target,
+        "speak": decision.speak and voiced and not pro,
+        "voice_reason": PRO_VOICE_REASON if pro else decision.reason if voiced or not decision.speak else OTHER_TAB,
+        "voice_persona": d.persona,
+        "voice_profile": voice.profile_for(d.persona).to_dict(),
+        "message_id": None if inner else d.message_id,
+        "user_message_id": None if inner else d.reply_to,
+        "client_msg_id": None if inner else d.client_msg_id,
+        "attachments": [] if inner else [shared_item(m) for m in attachments],
+        "mode": d.mode if pro else "",
+        **({"strand": d.strand} if d.strand and not inner else {}),
+    }
+    if notes and not inner:
+        frame["notes"] = [note_item(n) for n in notes]
+    return frame
+
+
+def chat_mode(raw: Any) -> str:
+    """Le mode qu'un ``chat`` demande (ADR 0116) : un des ``MODES``, sinon ``""`` (la conversation ordinaire)."""
+    return raw if isinstance(raw, str) and raw in MODES else ""
+
+
+#: un identifiant de fil de travail (ADR 0164) : choisi par le client, lettres, chiffres, ``_`` et ``-``
+_STRAND_ID = re.compile(rf"[A-Za-z0-9_-]{{1,{STRAND_MAX}}}")
+#: le début du premier message d'un fil sans titre, tel que la liste le montre
+STRAND_OPENER_MAX = 120
+
+
+def strand_id(raw: Any) -> str | None:
+    """Le fil de travail qu'une trame désigne (ADR 0164) : un identifiant valide, sinon ``None``."""
+    return raw if isinstance(raw, str) and _STRAND_ID.fullmatch(raw) else None
+
+
+def strands(items: Sequence[StrandItem]) -> dict[str, Any]:
+    """La liste des fils de travail de la personne (ADR 0164), du plus récemment actif au plus ancien."""
+    return {"type": "strands", "items": [
+        {"id": i.id, "title": i.title, "description": i.description, "archived": i.archived, "count": i.count,
+         "first_at": i.first_at // 1000, "last_at": i.last_at // 1000,
+         "opener": i.opener if len(i.opener) <= STRAND_OPENER_MAX else i.opener[:STRAND_OPENER_MAX - 1] + "…"}
+        for i in items]}
+
+
+def effort_level(raw: Any) -> str | None:
+    """L'effort de réflexion qu'une trame demande (ADR 0287) : un des niveaux, vide pour « auto » ; ``None`` : rien
+    de valide."""
+    return raw if isinstance(raw, str) and raw in EFFORTS else None
+
+
+def efforts(e: Efforts) -> dict[str, Any]:
+    """L'effort de réflexion de ses réponses (ADR 0287) : ce que la personne a forcé pour toute sa conversation et
+    pour ses fils de travail (« » ou absent : auto), et ce que « auto » vaut en ce moment (« » : le défaut du
+    modèle)."""
+    return {"type": "efforts", "conversation": e.conversation, "strands": dict(e.strands),
+            "auto": {"chat": e.auto, "pro": e.auto_pro}}
+
+
+def changed(changes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Ce qui a changé dans ce que montrent les routes de ``/api/moi`` (ADR 0308) : un sujet par élément, et ce qu'il
+    nomme — jamais le contenu (``docs/protocole-moi.md``, § 2 bis)."""
+    return {"type": "changed", "changes": [dict(c) for c in changes]}
+
+
+def _cut(text: str, limit: int = TOOL_TEXT_MAX) -> str:
+    return text if len(text) <= limit else text[: limit - len(TOOL_TEXT_CUT)] + TOOL_TEXT_CUT
+
+
+def tool_activity(a: Activity) -> dict[str, Any]:
+    """Un moment de son travail, en direct (trame ``tool``, ADR 0116) : un outil qui part (``start``), le même fini
+    (``end`` : réussi ou non, ce qu'il a rendu, sa durée), ce qu'elle écrit entre deux appels (``note``), la fin de
+    l'épisode (``done``). Arguments et résultat bornés, en texte brut."""
+    frame: dict[str, Any] = {"type": "tool", "episode": a.episode, "reply_to": a.reply_to, "phase": a.phase,
+                             "at": a.at // 1000}
+    if a.strand:
+        frame["strand"] = a.strand
+    if a.phase == NOTE:
+        frame["text"] = _cut(a.text)
+    elif a.phase == DONE:
+        frame["outcome"] = a.outcome
+    else:
+        frame |= {"call_id": a.call_id, "name": a.name, "args": _cut(a.args)}
+        if a.ok is not None:
+            frame |= {"ok": a.ok, "result": _cut(a.result), "duration_ms": a.duration_us // 1000}
+    return frame
+
+
+#: la raison d'une trame sans texte quand elle dort : la réponse viendra à son réveil
+ASLEEP = "asleep"
+
+
+def silence(handle: str, face: affect_c.Face, *, user_message_id: int | None,
+            client_msg_id: str | None, reason: str = "silence") -> dict[str, Any]:
+    """Elle a choisi de ne pas répondre (ou elle dort, ``reason`` = ``ASLEEP`` : la réponse
+    attend son réveil) : une trame ``speech`` sans texte. Le client cesse d'afficher
+    « Mika écrit… », rattache sa bulle au message enregistré, et le visage garde ce qu'il
+    montrait (son visage du moment, pas un neutre)."""
+    blend = [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend]
+    return {
+        "type": "speech", "text": "", "emotion": face.emotion.value,
+        "emotion_intensity": round(float(face.intensity), 2), "emotion_state": face_state(face),
+        "emotion_blend": blend, "source": "reply", "person_id": handle, "speak": False,
+        "voice_reason": reason, "voice_persona": voice.SPEAKING,
+        "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
+        "user_message_id": user_message_id, "client_msg_id": client_msg_id, "attachments": [],
+    }
+
+
+def face_signature(face: affect_c.Face) -> tuple[str, float, tuple[str, ...]]:
+    return face.emotion.value, face.intensity, tuple(e.value for e, _ in face.blend)
+
+
+def face_state(face: affect_c.Face) -> dict[str, Any]:
+    return {
+        "person": {"emotion": face.person[0].value, "intensity": face.person[1]},
+        "global": {"emotion": face.mood[0].value, "intensity": face.mood[1]},
+        "message": {"emotion": face.emotion.value, "intensity": face.intensity,
+                    "blend": [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend]},
+    }
+
+
+def emotion_update(person_id: str, face: affect_c.Face) -> dict[str, Any]:
+    return {
+        "type": "emotion_update",
+        "person_id": person_id,
+        "emotion": face.emotion.value,
+        "emotion_intensity": face.intensity,
+        "emotion_blend": [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend],
+        "emotion_state": face_state(face),
+    }
+
+
+def inner_state(frame: Frame, handle: str | None, panel: dict[str, Any] | None = None) -> dict[str, Any]:
+    """L'état intérieur que montre le panneau ; ``person_scope`` dit si la
+    trame concerne quelqu'un (sinon ses clés personnelles ne disent rien)."""
+    local = frame.local()
+    rhythm = frame.get(body_c.RHYTHM)
+    phase = frame.get(body_c.PHASE)
+    energy = frame.get(body_c.ENERGY)
+    out: dict[str, Any] = {
+        "sleep_phase": frame.get(body_c.SLEEP).value,
+        "energy": round(energy, 3),
+        "circadian": {"phase": phase.value, "hour": local.hour, "energy": round(energy, 3),
+                      "bias_emotion": rhythm.tints[phase].value},
+        "ruminations": [],
+        "person_scope": bool(handle) and is_identifiable(handle),
+    }
+    slept = frame.get(body_c.LAST_NIGHT)
+    if slept is not None:
+        # sa nuit, le matin : des nombres arrondis, sans personne (qui l'a réveillée ne se montre pas)
+        out["night"] = {"slept_h": round(slept.duration_us / HOUR * 2) / 2,
+                        "broken": len(slept.rousings), "short": slept.short}
+    needs = frame.get(needs_c.NEEDS)
+    out["drives"] = {name: {"tension": round(value, 3), "last_satisfied": 0}
+                     for name, value in (("social", needs.social), ("expression", needs.expression),
+                                         ("curiosity", needs.curiosity))}
+    out["estime"] = round(frame.get(self_c.ESTEEM), 3)
+    if handle and is_identifiable(handle):
+        view = frame.get(identity_c.IDENTITY(handle))
+        out["identity"] = {
+            "known_as": view.name,
+            "certainty": round(view.certainty, 2),
+            "level": privacy.describe_fr(view.certainty, view.trust, view.name),
+            "trust": view.trust.value,
+            "pending_claims": [],
+        }
+        if panel:
+            out.update(panel)  # identité détaillée, et la fiche si elle est ouverte
+    return out
+
+
+def inner_state_update(frame: Frame, handle: str | None, panel: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {"type": "inner_state_update", "inner_state": inner_state(frame, handle, panel)}
+
+
+FAILED_OUTCOMES = frozenset({"failed", "timeout"})
+ABSTAINED_OUTCOME = "abstained"
+#: le statut du second ``ack`` qui dit qu'une question **reçue** n'aura pas de réponse. Ce n'est pas un refus :
+#: le message est dans son fil, la bulle reste « envoyée » ; le client pose une note dessous (« Mika n'a pas pu
+#: répondre — réessaie »). ``overloaded`` reste ce qu'il dit : une file pleine, un message **non reçu**.
+NO_REPLY_STATUS = "no_reply"
+#: pourquoi, en un mot (``ack.reason``) — pour une note courte, et la cause en clair pour une opératrice
+NO_MODEL = "no_model"  # aucun modèle ne sert « répondre »
+UNREACHABLE = "unreachable"  # le fournisseur ne répond pas (connexion)
+TIMEOUT = "timeout"  # délai dépassé
+TOO_LATE_REASON = "too_late"  # une question reprise trop tard (au démarrage, des heures après)
+ERROR = "error"  # autre chose
+UNCONFIGURED = "UnconfiguredRole"
+#: où une opératrice répare un modèle absent ou injoignable (la console, pas la ligne de commande)
+PROVIDERS_HREF = "/admin/reglages/fournisseurs"  # la console (ADR 0237) : un adaptateur ne voit pas sa constante
+_OPERATOR_DETAIL = {
+    NO_MODEL: "aucun modèle ne sert encore à répondre : déclare un fournisseur dans la console",
+    UNREACHABLE: "le fournisseur du modèle ne répond pas (connexion impossible)",
+    TIMEOUT: "le modèle a mis trop longtemps à répondre (délai dépassé)",
+    TOO_LATE_REASON: "la question a attendu trop longtemps (une reprise après un arrêt)",
+}
+_OPERATOR_HREF = {NO_MODEL: PROVIDERS_HREF, UNREACHABLE: PROVIDERS_HREF}
+#: au-delà, le détail technique d'une erreur inconnue est coupé (une opératrice le lit en entier dans la console)
+DETAIL_MAX = 200
+
+
+def no_reply_reason(outcome: str, detail: str) -> str:
+    """La cause d'une réponse qui ne viendra pas, lue dans l'issue de l'épisode et son détail technique
+    (« UnconfiguredRole: … », « ConnectionError: Failed to connect… », « TimeoutError() », « timeout »)."""
+    text = (detail or "").strip()
+    if text.startswith(TOO_LATE):
+        return TOO_LATE_REASON
+    head = re.split(r"[:(]", text, maxsplit=1)[0].strip()
+    if UNCONFIGURED in head or UNCONFIGURED in text:
+        return NO_MODEL
+    if outcome == TIMEOUT or text == TIMEOUT or "Timeout" in head:
+        return TIMEOUT
+    if "Connect" in head or "Failed to connect" in text or "Connection refused" in text:
+        return UNREACHABLE
+    return ERROR
+
+
+def operator_detail(reason: str, detail: str) -> str:
+    """La cause en clair, pour une opératrice (jamais pour les autres : c'est l'affaire de qui administre)."""
+    known = _OPERATOR_DETAIL.get(reason)
+    if known:
+        return known
+    text = " ".join((detail or "").split())
+    return f"erreur : {text[:DETAIL_MAX]}" if text else "erreur inconnue"
+
+
+def no_reply_ack(client_msg_id: str, reason: str, detail: str = "", *, operator: bool = False) -> dict[str, Any]:
+    """Le second ``ack`` : sa question est reçue, la réponse ne viendra pas. Une connexion opératrice reçoit en plus
+    la cause en clair (``detail``) et où la réparer (``href``, une page de la console) — une note de la machine,
+    jamais une phrase de Mika."""
+    frame = ack(client_msg_id, NO_REPLY_STATUS)
+    frame["reason"] = reason
+    if operator:
+        frame["detail"] = operator_detail(reason, detail)
+        if reason in _OPERATOR_HREF:
+            frame["href"] = _OPERATOR_HREF[reason]
+    return frame
+
+
+def fallback_text(reason: str, *, operator: bool = False) -> str:
+    """Pour un client qui n'envoie pas d'identifiant de message (il ne lit pas le second ``ack``) : une phrase
+    simple, la même pour tous ; une opératrice apprend en plus où réparer. Jamais une commande d'administration
+    dite à quelqu'un qui ne peut rien y faire."""
+    if reason == TOO_LATE_REASON:
+        text = phrase("client.fallback.too_late")
+    else:
+        text = phrase("client.fallback.unavailable")
+    if operator and reason in _OPERATOR_HREF:
+        text += f" ({operator_detail(reason, '')} : {PROVIDERS_HREF})"
+    return text
+
+
+def fallback_speech(handle: str, reason: str, *, user_message_id: int | None, client_msg_id: str | None,
+                    operator: bool = False) -> dict[str, Any]:
+    """Une réponse ratée se dit, sans voix et sans émotion : ce n'est pas elle
+    qui parle, c'est la machine (``source`` « error »). Rien n'est journalisé
+    (``message_id`` nul : le curseur du client n'avance pas). Avec un
+    ``client_msg_id``, l'échec se dit plutôt par un second ``ack``
+    (``reply_failed_frames``) : une bulle sans identifiant restait épinglée en bas
+    du fil pour toujours."""
+    return {
+        "type": "speech", "text": fallback_text(reason, operator=operator), "emotion": Emotion.NEUTRAL.value,
+        "emotion_intensity": 0.0, "emotion_state": {}, "emotion_blend": [], "source": "error", "person_id": handle,
+        "speak": False, "voice_reason": "error_fallback_muted", "voice_persona": voice.SPEAKING,
+        "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
+        "user_message_id": user_message_id, "client_msg_id": client_msg_id, "attachments": [],
+    }
+
+
+def reply_failed_frames(handle: str, outcome: str, detail: str, face: affect_c.Face, *,
+                        user_message_id: int | None, client_msg_id: str | None,
+                        operator: bool = False) -> list[dict[str, Any]]:
+    """Ce que voit l'écran quand la réponse ne viendra pas : d'abord une trame sans
+    texte (« Mika écrit… » disparaît, le regard « je réfléchis » cesse, la bulle se
+    rattache à son message), puis un second ``ack`` ``no_reply`` avec sa cause en un
+    mot : la bulle reste envoyée (elle l'est), une note dessous dit que la réponse ne
+    viendra pas. Une connexion opératrice lit en plus la cause en clair et où la
+    réparer. Un client sans identifiant de message reçoit l'ancienne trame de repli."""
+    reason = no_reply_reason(outcome, detail)
+    if not client_msg_id:
+        return [fallback_speech(handle, reason, user_message_id=user_message_id, client_msg_id=None,
+                                operator=operator)]
+    return [silence(handle, face, user_message_id=user_message_id, client_msg_id=client_msg_id),
+            no_reply_ack(client_msg_id, reason, detail, operator=operator)]

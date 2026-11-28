@@ -12,7 +12,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /*
- * Les calculs d'une carte, sans aucune dépendance (ADR 0193, 0194), portés de `frontendv2/src/map/mapgeo.ts` : ce que
+ * Les calculs d'une carte, sans aucune dépendance (ADR 0193, 0194), portés de `frontend/Web/src/map/mapgeo.ts` : ce que
  * la carte du serveur couvre, le cercle d'une précision et le zoom qui le montre, la zone qui tient des points, une
  * distance à vol d'oiseau.
  */

@@ -2,9 +2,9 @@
 /**
  * Le style de la carte de l'app (ADR 0193, 0194, 0235), tiré du code du web — jamais écrit à la main : les calques de
  * Protomaps (`@protomaps/basemaps`, ses couleurs et ses noms en français), clairs et sombres, sans les points d'intérêt
- * qui n'apprennent rien (`QUIET_POIS`), tels que les compose `frontendv2/src/map/mapstyle.ts`. Ce script importe ce
+ * qui n'apprennent rien (`QUIET_POIS`), tels que les compose `frontend/Web/src/map/mapstyle.ts`. Ce script importe ce
  * fichier même (Node 24 lit le TypeScript : ses types s'effacent) et `@protomaps/basemaps` depuis
- * `frontendv2/node_modules`, et écrit les calques dans les assets de l'app :
+ * `frontend/Web/node_modules`, et écrit les calques dans les assets de l'app :
  *
  *     node frontend/Android/tools/carte_style.mjs           # écrit les styles et leurs références
  *     node frontend/Android/tools/carte_style.mjs --check   # échoue si l'un d'eux a vieilli
@@ -19,7 +19,7 @@
  * même pour les mêmes entrées (la source, `sprite` et `glyphs`, le style raster, la règle qui retire texte et icônes,
  * toute clé racine).
  *
- * Après `npm install` dans `frontendv2/` (une autre version de `@protomaps/basemaps`) ou une retouche de `mapstyle.ts`,
+ * Après `npm install` dans `frontend/Web/` (une autre version de `@protomaps/basemaps`) ou une retouche de `mapstyle.ts`,
  * relancer le script : `--check` le dit. Puis les tests JVM : ce que le web a changé, l'app le suit-elle ?
  */
 import { readFile, writeFile, mkdir, readdir, unlink } from "node:fs/promises";
@@ -28,8 +28,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..", "..");
-const WEB_STYLE = join(ROOT, "frontendv2", "src", "map", "mapstyle.ts");
-const BASEMAPS = join(ROOT, "frontendv2", "node_modules", "@protomaps", "basemaps", "package.json");
+const WEB_STYLE = join(ROOT, "frontend", "Web", "src", "map", "mapstyle.ts");
+const BASEMAPS = join(ROOT, "frontend", "Web", "node_modules", "@protomaps", "basemaps", "package.json");
 const OUT = join(HERE, "..", "app", "src", "main", "assets", "carte");
 const TEST_OUT = join(HERE, "..", "app", "src", "test", "resources", "carte");
 const REFERENCES_FILE = "styles-web.json";
@@ -121,7 +121,7 @@ async function expected() {
   for (const { dark, flavor, file } of FLAVORS) {
     const style = mapStyle(FULL, dark, "");
     const header = {
-      genere_par: "frontend/Android/tools/carte_style.mjs, depuis frontendv2/src/map/mapstyle.ts",
+      genere_par: "frontend/Android/tools/carte_style.mjs, depuis frontend/Web/src/map/mapstyle.ts",
       basemaps: version,
       source: SOURCE,
       flavor,
@@ -130,7 +130,7 @@ async function expected() {
   }
   const cases = REFERENCES.map((c) => ({ ...c, style: mapStyle(c.info, c.dark, c.base) }));
   const header = {
-    genere_par: "frontend/Android/tools/carte_style.mjs, depuis frontendv2/src/map/mapstyle.ts",
+    genere_par: "frontend/Android/tools/carte_style.mjs, depuis frontend/Web/src/map/mapstyle.ts",
     basemaps: version,
   };
   out.set(REFERENCES_FILE, renderReferences(header, cases));

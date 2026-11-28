@@ -1,7 +1,7 @@
 package fr.qwartz.mika.data.moi.phone
 
 /*
- * Paramètres › Téléphones, pur (porté de `frontendv2/src/screens/telephone/settings.ts`) : ce qu'un téléphone reçoit
+ * Paramètres › Téléphones, pur (porté de `frontend/Web/src/screens/telephone/settings.ts`) : ce qu'un téléphone reçoit
  * application fermée, l'ordre de la liste et ce qui s'y révoque (R3-03). Tout se teste sur la JVM.
  */
 

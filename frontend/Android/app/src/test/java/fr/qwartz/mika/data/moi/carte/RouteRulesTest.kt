@@ -9,7 +9,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * Les règles d'Itinéraire, portées de `frontendv2/src/screens/carte/format.ts` et `view.ts` (leurs tests : `carte.test.ts`,
+ * Les règles d'Itinéraire, portées de `frontend/Web/src/screens/carte/format.ts` et `view.ts` (leurs tests : `carte.test.ts`,
  * mêmes cas) : ses points, ce qui fait un itinéraire, tes choix face à ceux d'un trajet de Mika, ce qu'on en dit, son GPX.
  */
 class RouteRulesTest {

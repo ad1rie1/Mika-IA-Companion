@@ -87,7 +87,7 @@ import kotlinx.coroutines.launch
  * Paramètres › Partages (ADR 0188) : ce que tu partages — tes boîtes, tes comptes Teams, tes services — avec qui et à
  * quel niveau (lire ; lire et préparer ; s'en servir), ce qu'on te partage, et « Partager ». Seul le propriétaire
  * partage, et seulement avec une personne qui a un compte (`app/me/sharing.py`). Porté de
- * `frontendv2/src/screens/parametres/shares.ts`.
+ * `frontend/Web/src/screens/parametres/shares.ts`.
  */
 
 /** La fenêtre « Partager » : ce qu'on partage, à qui, à quel niveau ; [editing] : un partage qu'on change. */

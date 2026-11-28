@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Où elle en est d'une réponse (ADR 0306, porté de `frontendv2/src/mika/work.ts`) : l'étape en mots, le chrono, sa
+ * Où elle en est d'une réponse (ADR 0306, porté de `frontend/Web/src/mika/work.ts`) : l'étape en mots, le chrono, sa
  * forme lue telle que le serveur la dit, et ce que décide une relecture de `…/work` (faite quand le direct le dit,
  * ADR 0308) — attendre, relire, cesser.
  */

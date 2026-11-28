@@ -11,7 +11,7 @@ import kotlin.math.min
  *
  * Le modèle livre ses ressorts sans gravité (rigidité 1, gravité 0) : au repos les couettes gardent leur forme,
  * mais dès qu'elle bouge plus rien ne les retient, elles flottent comme dans l'eau. Les réglages par famille sont
- * donc ceux qu'Unity leur a rendus (`frontend/Unity/Mika/Assets/Mika/Editor/Animation/SpringTuning.cs`), pour que
+ * donc ceux qu'Unity leur a rendus (`SpringTuning.cs` du client Unity, tag `avant-menage`), pour que
  * les deux clients aient les mêmes cheveux. Pur : testé sur la JVM.
  */
 class SpringBones(private val doc: VrmDocument, private val rig: AvatarRig, tuning: Map<String, Tuning> = UNITY_TUNING) {

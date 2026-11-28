@@ -14,10 +14,8 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": ["vite/client"]
   },
-  "include": ["src"],
-  // The smoke test runs under vitest in a NODE context (fs/path to read
-  // the real FBX downloads) — excluded from the browser-app typecheck.
-  "exclude": ["src/**/*.smoke.test.ts"]
+  "include": ["src"]
 }

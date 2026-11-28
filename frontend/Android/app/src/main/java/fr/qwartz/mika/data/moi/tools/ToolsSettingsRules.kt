@@ -11,7 +11,7 @@ import java.net.URI
 import java.net.URISyntaxException
 
 /*
- * Les règles pures de Paramètres › Services MCP, portées du client web (`frontendv2/src/screens/outils/words.ts` et
+ * Les règles pures de Paramètres › Services MCP, portées du client web (`frontend/Web/src/screens/outils/words.ts` et
  * `settings.ts`) : l'état d'un service et de ses outils (ADR 0129), les choix qui partent, ce qu'un service réglé envoie
  * et les en-têtes à redonner (ADR 0236), son nom et son adresse, ses lignes d'accès, ce qu'on te partage. Les mots du
  * serveur sont ceux de `app/domains/tools/api.py`. Tout se teste sur la JVM.

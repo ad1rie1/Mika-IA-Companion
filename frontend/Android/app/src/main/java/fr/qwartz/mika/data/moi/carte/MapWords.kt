@@ -11,7 +11,7 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /*
- * Les mots d'une carte, en français, portés de `frontendv2/src/map/words.ts` sans changer leurs règles : distances,
+ * Les mots d'une carte, en français, portés de `frontend/Web/src/map/words.ts` sans changer leurs règles : distances,
  * durées, modes, ce qu'un trajet peut éviter et ce qu'il évite, les jours d'un voyage (en long, et en court pour un
  * menu), ce qu'est un lieu. Purs : Explorer, et demain Itinéraire et Voyages (lot 6b), les partagent.
  */

@@ -11,7 +11,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * Les règles du Téléphone, portées du client web (`frontendv2/src/screens/telephone/view.ts`, ses tests
+ * Les règles du Téléphone, portées du client web (`frontend/Web/src/screens/telephone/view.ts`, ses tests
  * `view.test.ts`) : le sort d'une proposition et ce qui s'en décide d'ici, l'appli, le fil et ses jours, l'état de tes
  * téléphones (ADR 0233) et « ce téléphone », la position, son plan et le regard de Mika.
  */

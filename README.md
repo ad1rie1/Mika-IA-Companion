@@ -18,18 +18,17 @@ et vient vous parler d'elle-même : sur le web, sur votre téléphone, jusque da
 [![Tickets résolus](https://img.shields.io/github/issues-closed/ad1rie1/Mika-IA-Companion?label=tickets%20r%C3%A9solus&color=22c55e)](https://github.com/ad1rie1/Mika-IA-Companion/issues?q=is%3Aclosed)
 [![PR fermées](https://img.shields.io/github/issues-pr-closed/ad1rie1/Mika-IA-Companion?label=PR%20ferm%C3%A9es&color=22c55e)](https://github.com/ad1rie1/Mika-IA-Companion/pulls?q=is%3Aclosed)
 
-[![Tests](https://img.shields.io/badge/tests-~5_570-22c55e?logo=pytest&logoColor=white)](backendv2/tests)
-[![Décisions](https://img.shields.io/badge/d%C3%A9cisions_%C3%A9crites-250_ADR-0ea5e9)](backendv2/docs/decisions.md)
-[![Facultés](https://img.shields.io/badge/facult%C3%A9s-19-ec4899)](backendv2/ARCHITECTURE.md#les-facultés)
-[![Plugins](https://img.shields.io/badge/plugins-13-ec4899)](backendv2/ARCHITECTURE.md#les-plugins)
+[![Tests](https://img.shields.io/badge/tests-~5_570-22c55e?logo=pytest&logoColor=white)](backend/tests)
+[![Décisions](https://img.shields.io/badge/d%C3%A9cisions_%C3%A9crites-250_ADR-0ea5e9)](backend/docs/decisions.md)
+[![Facultés](https://img.shields.io/badge/facult%C3%A9s-17-ec4899)](backend/ARCHITECTURE.md#les-facultés)
+[![Plugins](https://img.shields.io/badge/plugins-13-ec4899)](backend/ARCHITECTURE.md#les-plugins)
 
-[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](backendv2)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](backend)
 [![Claude](https://img.shields.io/badge/Claude-API_%C2%B7_Claude_Code-D97757?logo=claude&logoColor=white)](https://www.anthropic.com/claude)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Vite-3178C6?logo=typescript&logoColor=white)](frontendv2)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Vite-3178C6?logo=typescript&logoColor=white)](frontend/Web)
 [![Three.js](https://img.shields.io/badge/Three.js-VRM-000000?logo=threedotjs&logoColor=white)](frontend/Web)
-[![Unity](https://img.shields.io/badge/Unity-monde_3D-222222?logo=unity&logoColor=white)](frontend/Unity)
 [![Kotlin](https://img.shields.io/badge/Kotlin-Compose-7F52FF?logo=kotlin&logoColor=white)](frontend/Android)
-[![MariaDB](https://img.shields.io/badge/SQLite_%C2%B7_MariaDB-003545?logo=mariadb&logoColor=white)](backendv2/deploy/README.md)
+[![MariaDB](https://img.shields.io/badge/SQLite_%C2%B7_MariaDB-003545?logo=mariadb&logoColor=white)](backend/deploy/README.md)
 
 <br>
 
@@ -73,7 +72,7 @@ posée.
 - 💗 **Ressentir** : plusieurs émotions à la fois, lues par le modèle plutôt que devinées par mots-clés, envers chacun,
   et une humeur de fond vers laquelle elle revient.
 - 🎛 **Avoir du caractère** : une matrice de personnalité à curseurs et à profils, qui change sa façon de réagir.
-- 🌙 **Vivre ses journées** : sommeil, rêves, besoins, attention, et une chambre où elle se tient, en 3D.
+- 🌙 **Vivre ses journées** : sommeil, rêves, besoins, attention.
 - 📬 **Courrier, Teams, téléphone** : elle lit, trie et prépare des brouillons ; l'envoi suit les règles que vous avez
   posées.
 - 🗺 **Carte et voyages** : OpenStreetMap, itinéraires, lieux et avis.
@@ -116,7 +115,6 @@ flowchart LR
     subgraph clients["Ses clients"]
         direction TB
         web["Web de tous les jours"]
-        w3d["Web 3D · Unity"]
         android["Android"]
         teams["Extension Teams"]
     end
@@ -125,7 +123,7 @@ flowchart LR
         direction TB
         runtime["Runtime<br/>arbitre · épisodes · ordonnanceur"]
         journal[("Journal<br/>d'événements")]
-        facultes["19 facultés · 13 plugins<br/>mémoire, affect, besoins, liens,<br/>courrier, carte, Forge…"]
+        facultes["17 facultés · 13 plugins<br/>mémoire, affect, besoins, liens,<br/>courrier, carte, Forge…"]
         runtime -- "Mind.append" --> journal
         journal -- "réducteurs purs" --> facultes
         facultes -- "faits déclarés" --> runtime
@@ -144,22 +142,22 @@ Quelques principes qui tiennent l'ensemble :
 - **Un arbitre décide quand elle parle** : des preuves cumulées en log-odds, et un déclenchement de Poisson qui ne
   dépend pas de la cadence.
 - **Ses phrases ne sont pas dans le code.** Sa persona et sa voix vivent dans
-  [`persona/`](backendv2/persona).
+  [`persona/`](backend/persona).
 - **Pas de repli silencieux.** Un appel au modèle qui échoue est journalisé et remonté, jamais basculé vers un autre
   fournisseur.
 - **Mesuré plutôt que deviné** : environ 5 570 tests, des gardes d'architecture, un simulateur, et des bancs où de
   vraies conversations sont jouées puis notées par Opus.
 - **Chaque décision est écrite** : 250 décisions argumentées dans
-  [`docs/decisions.md`](backendv2/docs/decisions.md).
+  [`docs/decisions.md`](backend/docs/decisions.md).
 
-Pour tout le détail : [`backendv2/ARCHITECTURE.md`](backendv2/ARCHITECTURE.md).
+Pour tout le détail : [`backend/ARCHITECTURE.md`](backend/ARCHITECTURE.md).
 
 ## 🚀 L'essayer
 
 Il faut Python 3.12 ou plus.
 
 ```bash
-cd backendv2
+cd backend
 python3 -m venv .venv
 .venv/bin/pip install -e ".[llm,memory]"
 .venv/bin/python -m mika serve
@@ -169,23 +167,21 @@ Ouvrez <http://127.0.0.1:8001> : la première page crée votre compte, puis **R�
 une voix (Claude, Claude Code, Ollama ou un modèle compatible OpenAI).
 
 Son corps en 3D est le modèle libre du dépôt. Pour lui en donner un autre, posez votre VRM dans
-`frontend/Web/public/models/default.vrm` : il passe devant, et il ne sera jamais versionné.
+`frontend/Assets/models/default.vrm` : il passe devant, et il ne sera jamais versionné.
 
-La suite, pas à pas : [`backendv2/README.md`](backendv2/README.md). La mise en service (systemd, MariaDB,
-sauvegardes) : [`backendv2/deploy/README.md`](backendv2/deploy/README.md).
+La suite, pas à pas : [`backend/README.md`](backend/README.md). La mise en service (systemd, MariaDB,
+sauvegardes) : [`backend/deploy/README.md`](backend/deploy/README.md).
 
 ## 📦 Le dépôt
 
 | Dossier | Ce que c'est |
 |---|---|
-| [`backendv2/`](backendv2) | Le moteur (paquet Python `mika`), sa persona, ses docs et ses bancs de mesure |
-| [`frontendv2/`](frontendv2) | Le client web de tous les jours : chat, mode pro, courrier, Teams, téléphone, carte |
-| [`frontend/Web/`](frontend/Web) | Le client 3D : Mika en VRM dans sa chambre, avec Three.js |
+| [`backend/`](backend) | Le moteur (paquet Python `mika`), sa persona, ses docs et ses bancs de mesure |
+| [`frontend/Web/`](frontend/Web) | Le client web de tous les jours : chat, mode pro, courrier, Teams, téléphone, carte |
 | [`frontend/Android/`](frontend/Android) | L'app Android, en Kotlin et Compose, avec Mika en 3D native |
-| [`frontend/Unity/`](frontend/Unity) | Le client Unity de son monde |
-| [`frontend/Extension/`](frontend/Extension) | L'extension Chrome qui la relie à Teams |
+| [`frontend/ExtensionChromeTeams/`](frontend/ExtensionChromeTeams) | L'extension Chrome qui la relie à Teams |
+| [`frontend/Assets/`](frontend/Assets) | L'art : son modèle, ses mouvements, les scripts Blender de ses portraits |
 | [`services/mika-images/`](services/mika-images) | Le serveur d'images local |
-| [`INJECTION/`](INJECTION) | Le jumeau numérique : des archives revécues en accéléré par le vrai moteur |
 
 ## 🚦 État du projet
 
@@ -195,11 +191,8 @@ Un projet personnel, en développement actif.
 |---|---|
 | Le moteur | ![en service](https://img.shields.io/badge/en_service-22c55e) |
 | Le web de tous les jours | ![en service](https://img.shields.io/badge/en_service-22c55e) |
-| Le client 3D sur le web | ![en service](https://img.shields.io/badge/en_service-22c55e) |
 | L'app Android | ![v2 en essai](https://img.shields.io/badge/v2_en_essai-f59e0b) |
 | L'extension Teams | ![en essai](https://img.shields.io/badge/en_essai-f59e0b) |
-| Le client Unity | ![en chantier](https://img.shields.io/badge/en_chantier-f59e0b) |
-| Le jumeau numérique | ![expérimental](https://img.shields.io/badge/exp%C3%A9rimental-8b5cf6) |
 
 ## 📜 Licence
 
@@ -208,11 +201,11 @@ redistribuer ou le vendre, sans condition, sans même avoir à citer l'auteur.
 
 Ce qui vient d'ailleurs garde sa propre licence :
 
-- le modèle 3D libre de Mika, [`mika-libre.vrm`](frontend/Web/public/models/mika-libre.vrm), fait dans VRoid Studio,
+- le modèle 3D libre de Mika, [`mika-libre.vrm`](frontend/Assets/models/mika-libre.vrm), fait dans VRoid Studio,
   est sous licence publique VRM 1.0 : redistribution et modification permises. Les animations et les captures de
   [`.github/readme/`](.github/readme) le montrent ;
 - un modèle acheté peut le remplacer chez soi : il n'entre jamais dans le dépôt ;
-- les textures de la pièce, en CC0, venues de Poly Haven ([le détail](frontend/Web/assets-src/README.md#licences)) ;
+- les textures de la pièce, en CC0, venues de Poly Haven ([le détail](frontend/Assets/README.md#licences-des-textures)) ;
 - les clips de mocap, tirés de la CMU Graphics Lab Motion Capture Database
-  ([les crédits](frontend/Unity/ArtSource/mocap/README.md#provenance-et-licence)) ;
+  ([les crédits](frontend/Assets/mocap/README.md#provenance-et-licence)) ;
 - la police Inter de la console, sous SIL Open Font License 1.1.

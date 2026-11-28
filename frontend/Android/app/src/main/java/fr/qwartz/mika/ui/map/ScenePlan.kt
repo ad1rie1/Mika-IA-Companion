@@ -49,7 +49,7 @@ private fun my(lat: Double): Double {
 }
 
 /**
- * Le plan dessiné d'une scène, sans tuile ni MapLibre (porté de `frontendv2/src/map/drawn.ts`) : ce que la Carte montre
+ * Le plan dessiné d'une scène, sans tuile ni MapLibre (porté de `frontend/Web/src/map/drawn.ts`) : ce que la Carte montre
  * sans fond servi, quand ses tuiles échouent ou que MapLibre ne se charge pas. Ses tracés, ses épingles (les
  * secondaires plus petites, sans numéro) et la position avec le cercle de sa précision, à leur place (Mercator), sur un
  * fond quadrillé — un plan, pas une carte : aucune rue n'y est inventée. [why] : pourquoi un plan (`planWhy`), dit
