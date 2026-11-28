@@ -4134,7 +4134,7 @@ pour le propriétaire d'un projet confié un accord qu'il ne peut pas donner ; l
 - Ses bonjours sont les siens : simple à une inconnue, ses petits mots de persona à qui elle connaît. Jamais une formule tendue au modèle : elle se recopie.
 - Une réponse qui redit mot pour mot son dernier message ne part pas (abstention) ; un petit mot peut se redire.
 - En salon, hors secret, elle ne prétend pas ne rien savoir : ce qui s'est dit en privé ne se raconte pas ici. Un secret ne laisse rien deviner.
-- Face à des réponses de quelques mots, elle fait court, sans question (`faculties/others/faculty.py::curt_run` ; sa règle : `contracts/others.py::few_words`). Après une abstention ou une panne, chaque hésitation envers la personne double (`agency.HESITATING`).
+- Face à des réponses de quelques mots, elle fait court, sans question (`faculties/others/prompt.py::curt_run` ; sa règle : `contracts/others.py::few_words`). Après une abstention ou une panne, chaque hésitation envers la personne double (`agency.HESITATING`).
 - Un fournisseur qui ne sait pas différer (Ollama, compatibles OpenAI) reçoit ses outils en main ; un outil qui réussit peut clore la boucle (`ToolSpec.ends_loop`).
 
 *Pourquoi :* une seconde semaine (deuil, anniversaire, surnom, salon) a montré des tics, des mensonges par ignorance en salon et des appels inutiles.

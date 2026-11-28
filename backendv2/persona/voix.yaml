@@ -1875,7 +1875,7 @@ social:
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 others:
 
-  # « CE QUE TU PERÇOIS DE SON ÉTAT » (others/faculty.py, ``_their_state``), en privé, quand elle connaît assez la
+  # « CE QUE TU PERÇOIS DE SON ÉTAT » (others/prompt.py, ``_their_state``), en privé, quand elle connaît assez la
   # personne : ce qui tranche ces derniers temps avec son ton habituel (ce qu'elle a senti de ses messages d'avant ;
   # le message auquel elle répond, c'est le modèle qui le lit, ADR 0093). Jamais un nombre. {who} : le nom de la
   # personne entre « », ou others.state.someone.
@@ -1906,7 +1906,7 @@ others:
   cues:
     short: un message très court
 
-  # Ce qui la pousse à écrire d'elle-même à une amie ou une proche (others/faculty.py) : le brief qu'elle lit quand
+  # Ce qui la pousse à écrire d'elle-même à une amie ou une proche (others/initiative.py) : le brief qu'elle lit quand
   # elle prend la parole pour cette raison-là (« brief:others »). Ce qui arrive dans la vie de quelqu'un, dit comme
   # un fait : ce qu'elle en fait (encourager, souhaiter, demander, rien), son caractère le dit (ADR 0154). {who} : le
   # nom de la personne entre « », ou others.initiative.someone ; en tête de phrase, avec une majuscule. Ces briefs
